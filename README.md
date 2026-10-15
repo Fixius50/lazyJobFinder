@@ -10,8 +10,15 @@
 
 - **Inferencia 100% Local (0 €/mes en IA)**: No utiliza APIs de IA de pago (cero OpenAI, Anthropic o servicios cloud de inferencia). Todo el análisis del CV, el scoring y la redacción se procesan en local dentro de Docker.
 - **Canales de Notificación y Gestión Independientes**:
-  - **Panel Web de Administración (Next.js + TypeScript)**: Interfaz sobria, funcional y responsive para monitorizar contenedores Docker, ver logs en tiempo real vía SSE, subir CVs de forma controlada, lanzar búsquedas manuales protegidas por cerrojo y consultar/descargar candidaturas y documentos ATS generados. Opera con **cero llamadas a servicios externos**.
+  - **Panel Web de Administración SPA (Next.js 14 + TypeScript)**: Interfaz moderna, fluida y con CSS 100% relativo (`rem`, `%`, `flex`, `grid`, `dvh`). Sin paneles laterales intrusivos ni recargas lentas de página; navegación instantánea por pestañas (Candidaturas, Búsqueda y CV, Servicios y Logs en vivo vía SSE, y Configuración). Opera con **cero llamadas a servicios externos**.
   - **Bot de Telegram (Opcional y Desacoplado)**: Notificaciones matutinas en el móvil con los PDFs adjuntos. *(Nota de privacidad: la entrega final por Telegram transmite los archivos a través de la infraestructura externa de Telegram)*. Puede desactivarse independientemente manteniendo el panel web 100% local.
+- **Lanzador Unificado del Sistema (`start.bat`)**:
+  - Script único nativo para Windows con menú interactivo (`choice` instantáneo) y flags directos por CLI (`--all`, `--docker`, `--web`, `--status`, `--pull`, `--stop`).
+  - **Resolución dinámica de Docker Desktop**: Detecta rutas absolutas y relativas del ejecutable en el SO, inicia el servicio automáticamente si está apagado y bloquea la ejecución hasta que el motor de contenedores responde.
+  - **Sincronización activa con el backend**: Espera activamente a que la API FastAPI en `http://127.0.0.1:8000/api/health` esté respondiendo antes de arrancar Next.js, eliminando errores de proxy `ECONNREFUSED`.
+- **Extracción y Lectura Documental Multiformato (`cv_reader.py`)**:
+  - Soporte nativo para currículums en **PDF** (usando `pypdf` con fallback heurístico por streams), **Markdown (.md)** y **Texto (.txt)** hasta 5 MB.
+  - Previsualizador en pantalla en la interfaz web para inspeccionar exactamente qué texto extrae el motor antes de evaluar afinidad.
 - **Conectores Multi-Fuente con Aislamiento de Fallos**:
   - **Tecnoempleo**: Canales RSS oficiales y abiertos especializados en IT en España (100% legal, 0 credenciales).
   - **InfoJobs**: Conexión con la API REST oficial de desarrolladores (`developer.infojobs.net`).
@@ -22,7 +29,7 @@
 - **Garantía Anti-Alucinación por Código (`ProfileVerifier`)**: Mantiene un perfil canónico inmutable (`config/profile.yaml`) y el CV original intacto (`config/cv_base.md`). Opera con hechos atómicos aprobados: la IA solo puede seleccionar y ordenar hechos, sin inventar empresas, experiencia laboral comercial, titulaciones ni competencias. Si se detecta cualquier afirmación indebida, recurre de inmediato a la plantilla canónica certificada.
 - **Seguridad en Profundidad (Prompt Shield & Rate Limit)**: Higienización heurística de descripciones externas no confiables (`<untrusted_job_description>`) para mitigar inyecciones de prompts; autorización estricta en Telegram (`allowed_user_id > 0`) y cooldown obligatorio de 5 minutos en `/buscar` para proteger los recursos del hardware.
 - **Documentos Profesionales ATS-Friendly**: Compila PDFs limpios y sobrios con **ReportLab** siguiendo una plantilla tipográfica rígida controlada por código (el LLM jamás altera el diseño ni la maquetación). Conserva siempre los archivos Markdown editables y un registro `cambios_cv.json` de diferencias.
-- **Persistencia y Migraciones No Destructivas**: Base de datos SQLite con modo **WAL (Write-Ahead Logging)**, migrador incremental idempotente (`DatabaseMigrator`), registro en `pipeline_runs`, recuperación de tareas interrumpidas por reinicios (`recover_interrupted_runs`) y recuperación matutina en el arranque (`catch-up`).
+- **Persistencia y Esquema Unificado**: Base de datos SQLite con modo **WAL (Write-Ahead Logging)**, esquema canónico consolidado (`src/migrations/sql/schema.sql`), registro en `pipeline_runs`, recuperación de tareas interrumpidas por reinicios (`recover_interrupted_runs`) y recuperación matutina en el arranque (`catch-up`).
 
 ---
 
@@ -33,9 +40,11 @@ lazyJobFinder/
 ├── config/
 │   ├── profile.yaml          # Perfil canónico inmutable (formación DAM, proyectos reales, stack)
 │   ├── settings.yaml         # Configuración de búsqueda, ubicaciones, filtros y horarios
+│   ├── shared_constants.json # Contrato unificado de estados, fuentes y umbrales (Front y Back)
 │   └── cv_base.md            # Currículum base original inalterable
 ├── data/                     # Volumen persistente local
 │   ├── documents/            # Carpetas organizadas con los PDFs, Markdown y diffs generados
+│   ├── uploaded_cvs/         # Currículums subidos por el usuario (PDF/MD/TXT)
 │   └── lazyjobfinder.db      # Base de datos SQLite (jobs, evaluaciones, documentos, runs, logs)
 ├── docs/                     # Documentación técnica completa
 │   ├── AI_SYSTEM_OVERVIEW.md # Base de conocimiento exhaustiva para IAs y desarrolladores
@@ -45,16 +54,26 @@ lazyJobFinder/
 │   ├── SOURCES_SPAIN.md      # Verificación de fuentes de empleo en España
 │   └── SETUP_GUIDE.md        # Guía detallada de despliegue paso a paso
 ├── src/
+│   ├── api/                  # API REST local (FastAPI en 127.0.0.1:8000)
+│   │   ├── routes/           # Rutas modulares: system, cv, jobs, settings, maintenance
+│   │   └── server.py         # Servidor FastAPI con streaming SSE y CORS local
 │   ├── connectors/           # Conectores independientes (Tecnoempleo, InfoJobs, JobSpy)
 │   ├── evaluator/            # Pre-filtro determinista, ProfileVerifier y cliente Ollama JSON
-│   ├── tailoring/            # Adaptadores de CV/carta y renderizador PDF ReportLab
+│   ├── migrations/           # Migrador transaccional y esquema canónico (schema.sql)
+│   ├── tailoring/            # Adaptadores de CV/carta, cv_reader (PDF/MD/TXT) y PDF ReportLab
 │   ├── telegram_bot/         # Bot interactivo de Telegram con autenticación estricta
 │   ├── scheduler/            # Planificador APScheduler con prevención de solapamientos y catch-up
+│   ├── shared_constants.py   # Vinculación Python del contrato unificado compartido
 │   ├── database.py           # Persistencia SQLite WAL, deduplicación entre portales y runs
 │   └── main.py               # Punto de entrada y orquestador de ciclo de vida
+├── web/                      # Panel de Administración Web SPA (Next.js 14 + Tailwind CSS)
+│   ├── src/app/              # Enrutador App de Next.js (Dashboard SPA centralizado)
+│   ├── src/components/views/ # Vistas modulares fluidas: candidaturas, búsqueda/CV, docker, ajustes
+│   └── src/lib/              # Cliente de API tipado y constantes sincronizadas
+├── start.bat                 # Lanzador unificado todo en uno para Windows (interactivo y CLI)
 ├── docker-compose.yml        # Orquestación de Ollama (CPU cuantizada) y lazyJobFinder
 ├── Dockerfile                # Imagen Python 3.11 slim optimizada
-└── requirements.txt          # Dependencias exactas verificadas
+└── requirements.txt          # Dependencias exactas verificadas (incluye pypdf)
 ```
 
 ---

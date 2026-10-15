@@ -219,6 +219,7 @@ Todas las bibliotecas declaradas en [`requirements.txt`](file:///c:/Users/rober/
 | **`pydantic`** | `>=2.5.0` | Validación estricta de tipos y generación de JSON Schema para Ollama | MIT | Permisiva, estándar de la industria |
 | **`python-telegram-bot`** | `>=21.0` | Cliente asíncrono para notificaciones y comandos interactivos | LGPL-3.0-or-later | Código abierto; utilizado como librería sin modificar su núcleo |
 | **`reportlab`** | `>=4.1.0` | Motor de maquetación vectorial para compilación de PDFs ATS | BSD-3-Clause | Permisiva, estándar en Python |
+| **`pypdf`** | `>=4.0.0` | Extracción de texto plano de currículums en formato PDF con fallback | BSD-3-Clause | Permisiva, 0 dependencias binarias externas |
 | **`apscheduler`** | `>=3.10.4` | Planificador cron en memoria con control de solapamiento | MIT | Permisiva |
 | **`python-jobspy`** | `>=1.1.80` | Extracción multi-portal (Indeed, LinkedIn, Glassdoor, Google) | MIT | Permisiva |
 | **`feedparser`** | `>=6.0.10` | Parser universal para fuentes RSS de Tecnoempleo | BSD-2-Clause | Permisiva |
@@ -232,34 +233,44 @@ Todas las bibliotecas declaradas en [`requirements.txt`](file:///c:/Users/rober/
 
 ---
 
-## 6. Arquitectura de la Interfaz de Administración Web (Next.js + FastAPI)
+## 6. Arquitectura de la Interfaz de Administración Web SPA (Next.js + FastAPI)
 
-La interfaz de administración de `lazyJobFinder` proporciona un panel de control funcional, limpio, sobrio y desacoplado, sin recurrir a servicios en la nube, n8n ni bases de datos adicionales.
+La interfaz de administración de `lazyJobFinder` está diseñada como una **Single Page Application (SPA) moderna, fluida y unificada**, eliminando paneles laterales y recargas de página lentas, operando con **CSS 100% relativo y adaptable**.
 
 ### 6.1 Componentes del Sistema
 
 1. **Backend API (`src/api/`):**
-   - Implementado con **FastAPI** y servido por **Uvicorn** dentro del mismo proceso Python o de forma independiente.
-   - Vinculado estrictamente a `127.0.0.1:8000` (`localhost`), impidiendo exposición en redes locales no autorizadas.
-   - Streaming en tiempo real vía **Server-Sent Events (SSE)** en `/api/system/logs/stream` para la consola oscura de eventos.
+   - Implementado con **FastAPI** y servido por **Uvicorn** en `127.0.0.1:8000` (`localhost`), impidiendo exposición en redes locales no autorizadas.
+   - Streaming en tiempo real vía **Server-Sent Events (SSE)** en `/api/system/logs/stream` para la consola de eventos.
+   - Endpoints de extracción y previsualización de texto de CV (`/api/cv/preview`).
    - Endpoints con listas blancas estrictas para Docker (`/api/system/action`), impidiendo la inyección de comandos arbitrarios.
    - Descarga de documentos generados con verificación de ruta canónica (`os.path.realpath`) para anular vulnerabilidades de *Directory Traversal*.
 
-2. **Frontend Next.js (`web/`):**
-   - Desarrollado con **Next.js (App Router)**, **TypeScript** y **Tailwind CSS**, estructurado según los principios de diseño sobrio y componentes de shadcn/ui.
-   - Cuatro secciones navegables desde una barra lateral compacta y responsive:
-     - **Control (`/`):** Monitorización de estado de contenedores (saludable, arrancando, detenido, error), acciones de arranque/parada ordenada y consola de logs oscura con auto-scroll y filtrado por canal.
-     - **Búsqueda y CV (`/search`):** Carga segura de CV local (con validación de extensión `.pdf`, `.md`, `.txt` y límite de 5 MB), selector de CV activo, pre-flight check de servicios y disparo manual protegido por el cerrojo asíncrono.
-     - **Candidaturas (`/applications`):** Tabla compacta conectada a SQLite con filtros por fuente, estado, score y remoto, paginación, ordenación y modal de detalle con razonamiento del modelo y enlaces de descarga de CV/carta.
-     - **Configuración y Mantenimiento (`/settings`):** Preferencias independientes de canales (`guardar_en_interfaz` y `enviar_telegram`), edición de parámetros de búsqueda y operaciones de ciclo de vida con diálogos de confirmación obligatorios.
+2. **Frontend SPA Next.js (`web/`):**
+   - **Navegación Fluida por Pestañas (0 ms):** En lugar de un panel lateral fijo que reduce el área horizontal y fuerza cambios de ruta, la aplicación utiliza una barra superior sticky con navegación por pestañas en memoria (preservando el estado de filtros, carga de archivos y conexión SSE al cambiar de sección):
+     - **Candidaturas:** Registro consolidado en SQLite con notas de afinidad, justificación del LLM y descarga directa de CVs y cartas adaptadas.
+     - **Búsqueda y CV:** Tarjeta del CV activo, subida de archivos (PDF/MD/TXT), modal de previsualización exacta de texto y disparador del pipeline.
+     - **Servicios y Logs:** Monitor en tiempo real de los contenedores Docker (Ollama y App) con acciones de inicio/parada y consola SSE en vivo.
+     - **Configuración:** Ajustes desacoplados de persistencia SQLite y bot de Telegram, parámetros de búsqueda y herramientas de mantenimiento.
+   - **Diseño CSS 100% Relativo:** Todas las medidas y tipografías utilizan unidades relativas (`rem`, `%`, `flex`, `grid` adaptativo `grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4` y alturas dinámicas `dvh`), asegurando una experiencia perfecta en pantallas de cualquier resolución.
 
-### 6.2 Separación Estricta de Canales de Notificación
+### 6.2 Extractor de CV Multiformato (`src/tailoring/cv_reader.py`)
 
-El sistema implementa dos preferencias persistentes e independientes en `config/settings.yaml` y en el esquema SQLite (migración v3):
-- **`guardar_en_interfaz: true`**: Registra y conserva las vacantes en SQLite (`ui_saved = 1`), permitiendo auditar, filtrar y descargar documentos desde el navegador con 0 conexiones externas.
-- **`enviar_telegram: false`**: Permite apagar por completo las llamadas a los servidores externos de Telegram sin alterar la recopilación ni la evaluación de ofertas en el equipo local.
+- **Soporte de Entrada:** Admite archivos `.pdf`, `.md`, `.markdown` y `.txt` hasta 5 MB.
+- **Motor de Extracción:**
+  - Para PDFs, utiliza `pypdf` página a página, con un fallback interno por expresiones regulares sobre streams de texto si la estructura está comprimida.
+  - Para Markdown y texto plano, aplica decodificación UTF-8 con fallback a Latin-1.
+- **Previsualización en Pantalla:** El endpoint `GET /api/cv/preview` devuelve el conteo de palabras, caracteres y el texto limpio extraído, permitiendo al usuario verificar visualmente cómo la IA lee su currículum antes de contrastarlo con ofertas de empleo.
 
-### 6.3 Salvaguardas de Mantenimiento y Privacidad
-- Las operaciones destructivas (`down -v` o borrado de historial) requieren escribir frases de confirmación unívocas (`BORRAR_HISTORIAL`, `DESTRUIR_VOLUMENES_PERMANENTE`).
-- El apagado ordinario nunca ejecuta `docker compose down -v`, preservando intactos los modelos de IA descargados y el volumen de persistencia.
-- Los secretos del archivo `.env` jamás se exponen en las respuestas HTTP hacia el navegador.
+### 6.3 Lanzador Unificado de Sistema (`start.bat`)
+
+- **Detección Automática de Programas en el SO:** Resuelve dinámicamente la ruta ejecutable de Docker Desktop (`C:\Program Files\Docker\Docker\Docker Desktop.exe` o variables `%ProgramFiles%`).
+- **Espera Activa y Resiliente:** Si el demonio Docker no está listo, lo inicia automáticamente y sondea `docker info` con límite de reintentos antes de llamar a Docker Compose.
+- **Sincronización con la API:** Antes de abrir el navegador o arrancar el servidor Next.js, sondea periódicamente `http://127.0.0.1:8000/api/health` hasta confirmar que FastAPI está activo y respondiendo, eliminando por completo los errores de proxy `ECONNREFUSED`.
+- **Modo Interactivo y CLI:** Ofrece un menú interactivo rápido con comando nativo `choice` (opciones 1-6, Q) y soporte de argumentos por línea de comandos (`--all`, `--docker`, `--web`, `--status`, `--pull`, `--stop`, `--help`).
+
+### 6.4 Contrato Compartido Front/Back y Esquema Unificado
+
+- **Contrato Único (`config/shared_constants.json`):** Centraliza estados de candidatura, códigos de portales, acciones Docker, límites de subida y frases de confirmación.
+- **Vinculaciones Tipadas:** Genera [`src/shared_constants.py`](file:///c:/Users/rober/Desktop/Proyectos%20propios/lazyJobFinder/src/shared_constants.py) para el backend y [`web/src/lib/constants.ts`](file:///c:/Users/rober/Desktop/Proyectos%20propios/lazyJobFinder/web/src/lib/constants.ts) para el frontend, eliminando cadenas mágicas y discrepancias de nombres.
+- **Esquema SQL Unificado (`src/migrations/sql/schema.sql`):** Consolida la estructura canónica de la base de datos SQLite en un único archivo declarativo y versionado.

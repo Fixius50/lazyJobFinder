@@ -132,3 +132,30 @@ Antes de invocar el modelo de lenguaje en CPU:
   - `/estado`: Reporta el estado de salud de Ollama, el modelo cargado, la base de datos y la última ejecución.
   - `/ultimas`: Muestra las mejores ofertas detectadas recientemente.
   - `/ayuda`: Guía de comandos disponibles.
+
+### G. Interfaz de Administración Web SPA (`web/` y `src/api/`)
+- **Backend FastAPI (`127.0.0.1:8000`)**:
+  - Rutas REST modulares vinculadas a localhost para seguridad y privacidad total.
+  - Streaming en tiempo real vía **Server-Sent Events (SSE)** en `/api/system/logs/stream`.
+  - Control de Docker con lista blanca estricta de servicios y acciones permitidas.
+  - Extracción y previsualización de CVs vía `/api/cv/preview`.
+- **Frontend SPA Next.js 14 (`web/`)**:
+  - **Sin panel lateral ni recargas**: Barra de navegación superior fija con cambio instantáneo entre pestañas (0 ms) preservando el estado en memoria.
+  - **CSS 100% Relativo**: Layout fluido con `rem`, `%`, `flex`, `grid` adaptable y `dvh`, garantizando total responsividad sin anchos fijos.
+  - Pestañas modulares: Candidaturas, Búsqueda y CV, Servicios/Logs y Configuración.
+
+### H. Extractor de CV y Lectura Multiformato (`src/tailoring/cv_reader.py`)
+- Extracción de texto plano de documentos `.pdf`, `.md`, `.markdown` y `.txt` hasta 5 MB.
+- Para PDFs: motor `pypdf` con fallback algorítmico por expresiones regulares sobre streams internos de texto.
+- Previsualizador interactivo en la interfaz para contrastar qué lee la IA antes del escaneo.
+
+### I. Lanzador Unificado y Orquestador de Arranque (`start.bat`)
+- Búsqueda dinámica de la ruta del ejecutable de Docker Desktop en el sistema operativo.
+- Bucle de espera activa con reintentos para el motor de Docker antes de levantar los contenedores.
+- Sondeo continuo de la salud del backend (`/api/health`) antes de abrir el navegador o arrancar Next.js, evitando errores de conexión (`ECONNREFUSED`).
+- Soporte para menú interactivo (`choice`) y flags CLI directos (`--all`, `--docker`, `--web`, `--status`, `--pull`, `--stop`).
+
+### J. Contrato de Datos Compartido y Esquema SQL Unificado
+- **`config/shared_constants.json`**: Fuente única de verdad para estados, portales, acciones y límites.
+- Vinculaciones generadas en [`src/shared_constants.py`](file:///c:/Users/rober/Desktop/Proyectos%20propios/lazyJobFinder/src/shared_constants.py) y [`web/src/lib/constants.ts`](file:///c:/Users/rober/Desktop/Proyectos%20propios/lazyJobFinder/web/src/lib/constants.ts).
+- Esquema relacional canónico consolidado en [`src/migrations/sql/schema.sql`](file:///c:/Users/rober/Desktop/Proyectos%20propios/lazyJobFinder/src/migrations/sql/schema.sql).

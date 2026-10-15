@@ -12,6 +12,24 @@ Esta guía explica paso a paso cómo poner en marcha **lazyJobFinder** en tu equ
 
 ---
 
+## ⚡ Método Rápido Automatizado: Lanzador `start.bat` (Recomendado en Windows)
+
+Si estás en Windows, puedes iniciar todo el sistema con un solo comando o haciendo doble clic sobre [`start.bat`](file:///c:/Users/rober/Desktop/Proyectos%20propios/lazyJobFinder/start.bat):
+
+```cmd
+.\start.bat
+```
+
+El script se encarga de:
+1. **Crear `.env`** desde `.env.example` automáticamente si es la primera vez.
+2. **Detectar y arrancar Docker Desktop** si está cerrado, esperando a que el motor esté listo.
+3. **Levantar los contenedores** de Ollama y lazyJobFinder.
+4. **Verificar y descargar el modelo** `qwen2.5:3b-instruct` en Ollama si aún no está presente.
+5. **Esperar a que la API local esté lista** en `http://127.0.0.1:8000/api/health`.
+6. **Instalar dependencias y arrancar el panel web SPA** abriendo automáticamente tu navegador en `http://localhost:3000`.
+
+---
+
 ## 2. Paso 1: Crear tu Bot de Telegram y Obtener Credenciales (2 minutos)
 
 1. Abre Telegram y busca el contacto oficial **@BotFather**.

@@ -37,13 +37,22 @@ export default function UnifiedDashboard() {
     }
   }, []);
 
-  // Monitorización periódica del pipeline
+  // Monitorización periódica del pipeline con aborto ante fallos
   useEffect(() => {
+    let failedAttempts = 0;
     const checkPipeline = async () => {
       try {
         const pre = await api.getPreflight();
         setPipelineRunning(pre.pipeline.is_running);
-      } catch {}
+        failedAttempts = 0;
+      } catch (err) {
+        failedAttempts += 1;
+        console.warn(`[Pipeline Monitor] Fallo al consultar estado (${failedAttempts}/2):`, err);
+        // Si hay 2 fallos consecutivos de red o socket, abortar inmediatamente cualquier animación de escaneo
+        if (failedAttempts >= 2) {
+          setPipelineRunning(false);
+        }
+      }
     };
     checkPipeline();
     const interval = setInterval(checkPipeline, 5000);
@@ -60,15 +69,18 @@ export default function UnifiedDashboard() {
   };
 
   const handleQuickScan = async () => {
+    setScanMessage("Iniciando escaneo...");
+    setPipelineRunning(true);
     try {
-      setScanMessage("Iniciando escaneo...");
       const res = await api.triggerSearch();
-      setPipelineRunning(true);
       setScanMessage(res.message);
       setTimeout(() => setScanMessage(null), 4000);
     } catch (e: any) {
-      alert(`Error al escanear: ${e.message}`);
+      console.error("[QuickScan] Error durante el escaneo:", e);
+      alert(`Error al iniciar escaneo: ${e.message}`);
       setScanMessage(null);
+      // Abortar animación inmediatamente para evitar que se quede pillado
+      setPipelineRunning(false);
     }
   };
 

@@ -46,6 +46,21 @@ def api_health():
     return {"status": "ok", "app": "lazyJobFinder Admin API", "version": "1.0.0"}
 
 
+# Servir el frontend compilado (Next.js export) en el mismo puerto 8000 unificado
+import os
+from fastapi.staticfiles import StaticFiles
+
+web_out_candidates = [
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "web", "out")),
+    "/app/web/out",
+]
+for candidate in web_out_candidates:
+    if os.path.isdir(candidate):
+        logger.info("Montando frontend web estático unificado desde: %s", candidate)
+        app.mount("/", StaticFiles(directory=candidate, html=True), name="frontend")
+        break
+
+
 if __name__ == "__main__":
     import uvicorn
     # Vincular estrictamente a localhost por defecto para máxima seguridad

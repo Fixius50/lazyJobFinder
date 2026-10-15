@@ -157,64 +157,129 @@ export interface SettingsResponse {
   };
 }
 
-const API_BASE = "/api";
+export function getApiBaseUrl(): string {
+  if (typeof window !== "undefined") {
+    // Si se accede desde Next.js dev server en puerto 3000,
+    // se conecta directamente a FastAPI (puerto 8000) para evitar que el proxy interno de Node sufra socket hang up / ECONNRESET.
+    if (window.location.port === "3000") {
+      return "http://127.0.0.1:8000/api";
+    }
+  }
+  return "/api";
+}
 
-async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-  const url = `${API_BASE}${endpoint}`;
+export interface RequestOptions extends RequestInit {
+  timeoutMs?: number;
+}
+
+async function request<T>(endpoint: string, options: RequestOptions = {}): Promise<T> {
+  const baseUrl = getApiBaseUrl();
+  const url = `${baseUrl}${endpoint}`;
+  const timeoutMs = options.timeoutMs ?? 20000; // 20 segundos de timeout por defecto
+
   const headers = {
     "Content-Type": "application/json",
     ...options.headers,
   };
 
-  const response = await fetch(url, { ...options, headers });
-  if (!response.ok) {
-    let errorDetail = `Error ${response.status}: ${response.statusText}`;
-    try {
-      const errorJson = await response.json();
-      if (errorJson.detail) {
-        errorDetail = typeof errorJson.detail === "string" ? errorJson.detail : JSON.stringify(errorJson.detail);
-      }
-    } catch {
-      // Usar statusText predeterminado si no hay cuerpo JSON
-    }
-    throw new Error(errorDetail);
-  }
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => {
+    controller.abort();
+  }, timeoutMs);
 
-  return response.json();
+  const fetchOptions: RequestInit = {
+    ...options,
+    headers,
+    signal: options.signal || controller.signal,
+  };
+
+  const method = options.method || "GET";
+  try {
+    const response = await fetch(url, fetchOptions);
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      let errorDetail = `HTTP ${response.status}: ${response.statusText}`;
+      try {
+        const errorJson = await response.json();
+        if (errorJson.detail) {
+          errorDetail = typeof errorJson.detail === "string" ? errorJson.detail : JSON.stringify(errorJson.detail);
+        }
+      } catch {
+        // Fallback a texto o status
+      }
+      const err = new Error(errorDetail);
+      console.error(`[API ERROR] ${method} ${url} ->`, errorDetail);
+      throw err;
+    }
+
+    return await response.json();
+  } catch (err: any) {
+    clearTimeout(timeoutId);
+    if (err.name === "AbortError") {
+      const timeoutError = new Error(`Tiempo de espera agotado (${timeoutMs / 1000}s) comunicando con ${url}`);
+      console.error(`[API TIMEOUT] ${method} ${url}:`, timeoutError);
+      throw timeoutError;
+    }
+    console.error(`[API NETWORK/SOCKET ERROR] ${method} ${url}:`, err);
+    throw err;
+  }
 }
 
 export const api = {
+  getBaseUrl: () => getApiBaseUrl(),
+
   // 1. Control de Docker y Sistema
-  getServicesStatus: () => request<ServicesStatusResponse>("/system/status"),
+  getServicesStatus: () => request<ServicesStatusResponse>("/system/status", { timeoutMs: 10000 }),
   sendServiceAction: (service: string, action: "start" | "stop" | "restart") =>
     request<{ success: boolean; message: string }>("/system/action", {
       method: "POST",
       body: JSON.stringify({ service, action }),
+      timeoutMs: 35000,
     }),
   getSystemLogs: (limit = 100, level?: string, source?: string) => {
     const params = new URLSearchParams({ limit: limit.toString() });
     if (level) params.append("level", level);
     if (source) params.append("source", source);
-    return request<SystemLogItem[]>(`/system/logs?${params.toString()}`);
+    return request<SystemLogItem[]>(`/system/logs?${params.toString()}`, { timeoutMs: 15000 });
   },
   getContainerLogs: (service: string = "all", tail = 80) =>
-    request<{ service: string; logs: string }>(`/system/logs/container?service=${service}&tail=${tail}`),
+    request<{ service: string; logs: string }>(`/system/logs/container?service=${service}&tail=${tail}`, { timeoutMs: 15000 }),
 
   // 2. CV y Búsqueda
-  getActiveCV: () => request<ActiveCVInfo>("/cv/active"),
-  listUploadedCVs: () => request<any[]>("/cv/list"),
+  getActiveCV: () => request<ActiveCVInfo>("/cv/active", { timeoutMs: 10000 }),
+  listUploadedCVs: () => request<any[]>("/cv/list", { timeoutMs: 10000 }),
   uploadCV: async (file: File) => {
+    const baseUrl = getApiBaseUrl();
+    const url = `${baseUrl}/cv/upload`;
     const formData = new FormData();
     formData.append("file", file);
-    const response = await fetch(`${API_BASE}/cv/upload`, {
-      method: "POST",
-      body: formData,
-    });
-    if (!response.ok) {
-      const err = await response.json().catch(() => ({}));
-      throw new Error(err.detail || "Error subiendo el archivo CV.");
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        body: formData,
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        const detail = err.detail || `Error al subir CV (HTTP ${response.status})`;
+        console.error(`[API ERROR] POST ${url}:`, detail);
+        throw new Error(detail);
+      }
+      return await response.json();
+    } catch (err: any) {
+      clearTimeout(timeoutId);
+      console.error(`[API ERROR] POST ${url}:`, err);
+      if (err.name === "AbortError") {
+        throw new Error("Tiempo de espera agotado al subir el CV.");
+      }
+      throw err;
     }
-    return response.json();
   },
   selectActiveCV: (filename: string) =>
     request<{ success: boolean; selected: string; active_info: ActiveCVInfo }>("/cv/select", {
@@ -278,7 +343,7 @@ export const api = {
       body: JSON.stringify(payload),
     }),
   getDocumentUrl: (jobId: number, docType: "cv_pdf" | "cv_md" | "letter_pdf" | "letter_md") =>
-    `${API_BASE}/jobs/${jobId}/document/${docType}`,
+    `${getApiBaseUrl()}/jobs/${jobId}/document/${docType}`,
 
   // 4. Configuración
   getSettings: () => request<SettingsResponse>("/settings"),

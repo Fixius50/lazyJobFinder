@@ -50,7 +50,7 @@ export function LogConsole({ initialLogs = [], height = "h-80" }: LogConsoleProp
       return;
     }
 
-    const sseUrl = `/api/system/logs/stream${activeTab !== "all" ? `?source=${activeTab}` : ""}`;
+    const sseUrl = `${api.getBaseUrl()}/system/logs/stream${activeTab !== "all" ? `?source=${activeTab}` : ""}`;
     const eventSource = new EventSource(sseUrl);
 
     eventSource.onopen = () => {
@@ -65,11 +65,12 @@ export function LogConsole({ initialLogs = [], height = "h-80" }: LogConsoleProp
           return [...prev, item];
         });
       } catch (err) {
-        console.error("Fallo parseando evento SSE:", err);
+        console.error("[SSE] Fallo parseando evento SSE:", err);
       }
     });
 
-    eventSource.onerror = () => {
+    eventSource.onerror = (err) => {
+      console.warn("[SSE] EventSource desconectado o error de socket:", err);
       setIsConnected(false);
       eventSource.close();
     };

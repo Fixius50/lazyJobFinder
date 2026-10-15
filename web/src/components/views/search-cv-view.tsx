@@ -54,12 +54,20 @@ export function SearchCVView() {
 
   useEffect(() => {
     loadData();
+    let pollErrors = 0;
     const interval = setInterval(async () => {
       try {
         const pre = await api.getPreflight();
         setPreflight(pre);
         setIsSearchRunning(pre.pipeline.is_running);
-      } catch {}
+        pollErrors = 0;
+      } catch (e) {
+        pollErrors += 1;
+        console.warn(`[SearchCV] Error al consultar preflight (${pollErrors}/2):`, e);
+        if (pollErrors >= 2) {
+          setIsSearchRunning(false);
+        }
+      }
     }, 4000);
     return () => clearInterval(interval);
   }, []);
@@ -78,6 +86,7 @@ export function SearchCVView() {
       });
       await loadData();
     } catch (err: any) {
+      console.error("[SearchCV] Error al subir CV:", err);
       setUploadMessage({ text: err.message || "Error al subir el archivo.", error: true });
     } finally {
       setIsUploading(false);
@@ -90,19 +99,23 @@ export function SearchCVView() {
       await api.selectActiveCV(filename);
       await loadData();
     } catch (err: any) {
+      console.error("[SearchCV] Error seleccionando CV:", err);
       alert(`Error seleccionando CV: ${err.message}`);
     }
   };
 
   const handleTriggerSearch = async () => {
     setSearchFeedback(null);
+    setIsSearchRunning(true);
     try {
       const res = await api.triggerSearch();
       setSearchFeedback(res.message);
-      setIsSearchRunning(true);
       await loadData();
     } catch (err: any) {
+      console.error("[SearchCV] Error al ejecutar búsqueda manual:", err);
       setSearchFeedback(`Error: ${err.message}`);
+      // Abortar animación de búsqueda de inmediato
+      setIsSearchRunning(false);
     }
   };
 

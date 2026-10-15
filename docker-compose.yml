@@ -55,6 +55,8 @@ services:
       - ./data:/app/data
       # Configuración y perfil del candidato editable sin reconstruir la imagen
       - ./config:/app/config
+      # Frontend compilado estático para servicio unificado en http://localhost:8000
+      - ./web/out:/app/web/out:ro
     depends_on:
       ollama:
         condition: service_healthy

@@ -32,57 +32,77 @@ def _get_docker_client():
         return None
 
 
-def _inspect_service_subprocess() -> Dict[str, Dict[str, Any]]:
-    """Consulta el estado de los servicios mediante llamada explícita a 'docker compose ps'."""
+def _inspect_services() -> Dict[str, Dict[str, Any]]:
+    """
+    Inspecciona el estado de los servicios.
+    Detecta automáticamente si corre dentro de Docker (comprobando Ollama vía HTTP directamente)
+    o en el host (mediante docker compose).
+    """
+    import shutil
+    import urllib.request
+    from ...config import get_settings
+
     services = {
-        "ollama": {"status": "detenido", "health": "desconocido", "container_name": "lazyjob_ollama"},
-        "lazyjobfinder": {"status": "detenido", "health": "desconocido", "container_name": "lazyjob_app"},
+        "lazyjobfinder": {
+            "status": "saludable",
+            "health": "healthy",
+            "container_name": "lazyjob_app",
+            "raw_state": "running",
+        },
+        "ollama": {
+            "status": "detenido",
+            "health": "desconocido",
+            "container_name": "lazyjob_ollama",
+            "raw_state": "unknown",
+        },
     }
+
+    # Comprobación de salud directa de Ollama vía HTTP
     try:
-        # Usar lista de argumentos estricta para evitar cualquier inyección
-        cmd = ["docker", "compose", "ps", "--format", "json"]
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=False,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            lines = result.stdout.strip().splitlines()
-            for line in lines:
-                try:
-                    data = json.loads(line)
-                    svc_name = data.get("Service", "")
-                    state = data.get("State", "").lower()
-                    health = data.get("Health", "").lower()
-
-                    if svc_name in services:
-                        # Mapear estado legible: detenido, arrancando, saludable, error
-                        normalized_status = "detenido"
-                        if "running" in state:
-                            if health == "healthy":
-                                normalized_status = "saludable"
-                            elif health == "starting":
-                                normalized_status = "arrancando"
-                            elif health == "unhealthy":
-                                normalized_status = "error"
-                            else:
-                                normalized_status = "saludable"
-                        elif "restarting" in state:
-                            normalized_status = "arrancando"
-                        elif "dead" in state or "exited" in state:
-                            normalized_status = "detenido"
-                        else:
-                            normalized_status = state or "detenido"
-
-                        services[svc_name]["status"] = normalized_status
-                        services[svc_name]["health"] = health or "n/a"
-                        services[svc_name]["raw_state"] = state
-                except json.JSONDecodeError:
-                    continue
+        settings = get_settings()
+        ollama_url = f"{settings.ollama_base_url.rstrip('/')}/api/tags"
+        req = urllib.request.Request(ollama_url, headers={"User-Agent": "lazyJobFinder/1.0"})
+        with urllib.request.urlopen(req, timeout=2.5) as resp:
+            if resp.status == 200:
+                services["ollama"]["status"] = "saludable"
+                services["ollama"]["health"] = "healthy"
+                services["ollama"]["raw_state"] = "running"
     except Exception as e:
-        logger.warning("Fallo al consultar docker compose ps: %s", e)
+        logger.debug("Ollama HTTP check no respondió: %s", e)
+        services["ollama"]["status"] = "error"
+        services["ollama"]["health"] = "unhealthy"
+
+    # Si docker CLI está disponible en el entorno actual, enriquecer con metadatos de compose
+    if shutil.which("docker"):
+        try:
+            cmd = ["docker", "compose", "ps", "--format", "json"]
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=4,
+                check=False,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                for line in result.stdout.strip().splitlines():
+                    try:
+                        data = json.loads(line)
+                        svc_name = data.get("Service", "")
+                        state = data.get("State", "").lower()
+                        health = data.get("Health", "").lower()
+                        if svc_name in services:
+                            if "running" in state:
+                                services[svc_name]["status"] = "saludable" if health != "unhealthy" else "error"
+                            elif "restarting" in state:
+                                services[svc_name]["status"] = "arrancando"
+                            elif "dead" in state or "exited" in state:
+                                services[svc_name]["status"] = "detenido"
+                            services[svc_name]["health"] = health or "n/a"
+                            services[svc_name]["raw_state"] = state
+                    except Exception:
+                        continue
+        except Exception as e:
+            logger.debug("Fallo al enriquecer con docker compose ps: %s", e)
 
     return services
 
@@ -107,7 +127,7 @@ def get_services_status() -> Dict[str, Any]:
         for svc_name, c_name in container_map.items():
             try:
                 c = client.containers.get(c_name)
-                c_state = c.status.lower()  # running, exited, restarting
+                c_state = c.status.lower()
                 health_dict = c.attrs.get("State", {}).get("Health", {})
                 h_status = health_dict.get("Status", "").lower()
 
@@ -140,8 +160,8 @@ def get_services_status() -> Dict[str, Any]:
                     "container_name": c_name,
                 }
     else:
-        # Fallback mediante llamada a docker compose ps
-        services_status = _inspect_service_subprocess()
+        # Fallback autónomo: comprueba Ollama vía HTTP y el propio proceso FastAPI
+        services_status = _inspect_services()
 
     db = get_db()
     runner = get_runner()
@@ -178,6 +198,15 @@ def execute_service_action(req: ServiceActionRequest) -> Dict[str, Any]:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Servicio '{service}' no permitido. Válidos: all, {list(ALLOWED_SERVICES)}",
         )
+
+    import shutil
+    if not shutil.which("docker"):
+        return {
+            "success": False,
+            "error": "No se puede invocar docker compose directamente desde dentro del contenedor. Utiliza start.bat o Docker Desktop en Windows para reiniciar servicios.",
+            "action": action,
+            "service": service,
+        }
 
     cmd = ["docker", "compose", action]
     if service != "all":

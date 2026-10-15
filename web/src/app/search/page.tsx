@@ -1,11 +1,12 @@
 "use client";
 
 import React, { useEffect, useState, useRef } from "react";
-import { Upload, FileText, CheckCircle2, AlertCircle, Play, ShieldAlert, Cpu, Database, RefreshCw, FileCheck } from "lucide-react";
+import { Upload, FileText, CheckCircle2, AlertCircle, Play, ShieldAlert, Cpu, Database, RefreshCw, FileCheck, Eye } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select } from "@/components/ui/select";
+import { Dialog } from "@/components/ui/dialog";
 import { LogConsole } from "@/components/ui/log-console";
 import { ActiveCVInfo, PreflightResponse, api } from "@/lib/api";
 
@@ -18,6 +19,9 @@ export default function SearchAndCVPage() {
   const [uploadMessage, setUploadMessage] = useState<{ text: string; error: boolean } | null>(null);
   const [isSearchRunning, setIsSearchRunning] = useState<boolean>(false);
   const [searchFeedback, setSearchFeedback] = useState<string | null>(null);
+  const [cvPreviewOpen, setCvPreviewOpen] = useState<boolean>(false);
+  const [cvPreviewData, setCvPreviewData] = useState<any>(null);
+  const [cvPreviewLoading, setCvPreviewLoading] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const loadData = async () => {
@@ -177,6 +181,29 @@ export default function SearchAndCVPage() {
                     ))}
                 </Select>
               </div>
+
+              {/* Botón de Previsualización de Texto Extraído */}
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={async () => {
+                  setCvPreviewLoading(true);
+                  setCvPreviewOpen(true);
+                  try {
+                    const data = await api.previewActiveCV();
+                    setCvPreviewData(data);
+                  } catch (err: any) {
+                    alert(`Error extrayendo texto: ${err.message}`);
+                    setCvPreviewOpen(false);
+                  } finally {
+                    setCvPreviewLoading(false);
+                  }
+                }}
+                className="w-full text-xs h-8 flex items-center justify-center gap-1.5"
+              >
+                <Eye className="h-3.5 w-3.5" /> Previsualizar Texto Extraído
+              </Button>
             </CardContent>
           </Card>
 
@@ -353,6 +380,44 @@ export default function SearchAndCVPage() {
           </div>
         </div>
       </div>
+
+      {/* Modal de Previsualización del Texto Extraído del CV */}
+      <Dialog
+        open={cvPreviewOpen}
+        onOpenChange={setCvPreviewOpen}
+        title={`Texto Extraído del CV: ${cvPreviewData?.filename || ""}`}
+        description={`${cvPreviewData?.extension?.toUpperCase() || ""} · ${cvPreviewData?.word_count || 0} palabras · ${cvPreviewData?.char_count || 0} caracteres`}
+        maxWidth="2xl"
+        footer={
+          <Button size="sm" variant="outline" onClick={() => setCvPreviewOpen(false)}>
+            Cerrar
+          </Button>
+        }
+      >
+        {cvPreviewLoading ? (
+          <div className="py-8 text-center text-xs text-muted-foreground">
+            Extrayendo texto del archivo...
+          </div>
+        ) : (
+          <div className="space-y-3 text-xs">
+            {cvPreviewData?.error ? (
+              <div className="p-3 bg-destructive/10 text-destructive border border-destructive/20 rounded-md">
+                Error al leer el archivo: {cvPreviewData.error}
+              </div>
+            ) : (
+              <>
+                <div className="p-2.5 bg-muted/30 border rounded-md text-[11px] text-muted-foreground">
+                  Este es el contenido textual exacto que el motor de evaluación de lazyJobFinder utiliza para
+                  contrastar la afinidad contra las ofertas de empleo sin inventar información.
+                </div>
+                <pre className="p-3 bg-zinc-950 text-zinc-200 border rounded-lg whitespace-pre-wrap font-mono text-[11px] max-h-96 overflow-y-auto select-text leading-relaxed">
+                  {cvPreviewData?.text_preview || "No se pudo extraer texto del archivo."}
+                </pre>
+              </>
+            )}
+          </div>
+        )}
+      </Dialog>
     </div>
   );
 }

@@ -221,6 +221,18 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ filename }),
     }),
+  previewActiveCV: () =>
+    request<{
+      filename: string;
+      type: string;
+      extension: string;
+      char_count: number;
+      word_count: number;
+      text_preview: string;
+      full_text_length: number;
+      is_default: boolean;
+      error?: string;
+    }>("/cv/preview"),
   getPreflight: () => request<PreflightResponse>("/search/preflight"),
   triggerSearch: () => request<{ success: boolean; message: string }>("/search/run", { method: "POST" }),
   getSearchStatus: () => request<any>("/search/status"),

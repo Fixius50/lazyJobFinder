@@ -59,7 +59,18 @@ lazyJobFinder/
 
 ---
 
-## ⚡ Inicio Rápido (Despliegue en 5 Pasos)
+## ⚡ Inicio Rápido (Despliegue Rápido o en 5 Pasos)
+
+### Opción Rápida: Lanzador Único Todo en Uno (`start.bat`)
+Haz doble clic en `start.bat` o ejecútalo desde el terminal:
+```cmd
+.\start.bat
+```
+El script comprueba requisitos (.env, Node.js, Docker), levanta los contenedores, verifica/descarga el modelo de Ollama, abre el navegador en `http://localhost:3000` e inicia el panel web.
+
+---
+
+### Despliegue Manual Paso a Paso:
 
 ### 1. Clonar el Repositorio y Configurar Variables
 Copia el archivo de plantilla `.env.example` como `.env`:

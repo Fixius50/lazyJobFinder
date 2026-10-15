@@ -11,8 +11,9 @@ apscheduler>=3.10.4
 # 3. Interfaz de Usuario y Notificaciones
 python-telegram-bot>=21.0
 
-# 4. Generación Documental ATS-Friendly (PDF y Formatos)
+# 4. Generación y Lectura Documental (PDF y Formatos)
 reportlab>=4.1.0
+pypdf>=4.0.0
 
 # 5. Configuración y Utilidades
 pyyaml>=6.0.1

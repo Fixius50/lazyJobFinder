@@ -88,6 +88,27 @@ def get_active_cv() -> Dict[str, Any]:
     return _get_active_cv_info()
 
 
+@router.get("/preview")
+def preview_active_cv() -> Dict[str, Any]:
+    """
+    Extrae y devuelve el texto plano del CV actualmente seleccionado,
+    permitiendo al usuario validar cómo se lee su archivo (PDF, Markdown o texto).
+    """
+    from ...tailoring.cv_reader import get_active_cv_text_and_meta
+    text, meta = get_active_cv_text_and_meta()
+    return {
+        "filename": meta.get("filename"),
+        "type": meta.get("type"),
+        "extension": meta.get("extension"),
+        "char_count": meta.get("char_count", len(text)),
+        "word_count": meta.get("word_count", len(text.split())),
+        "text_preview": text[:5000],  # Primeros 5000 caracteres para vista previa rápida
+        "full_text_length": len(text),
+        "is_default": meta.get("is_default", True),
+        "error": meta.get("error"),
+    }
+
+
 @router.get("/list")
 def list_uploaded_cvs() -> List[Dict[str, Any]]:
     """Lista los archivos CV disponibles en el repositorio local sin leer su contenido."""

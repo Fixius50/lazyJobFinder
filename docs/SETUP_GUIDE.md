@@ -26,7 +26,7 @@ El script se encarga de:
 3. **Levantar los contenedores** de Ollama y lazyJobFinder.
 4. **Verificar y descargar el modelo** `qwen2.5:3b-instruct` en Ollama si aún no está presente.
 5. **Esperar a que la API local esté lista** en `http://127.0.0.1:8000/api/health`.
-6. **Instalar dependencias y arrancar el panel web SPA** abriendo automáticamente tu navegador en `http://localhost:3000`.
+6. **Servir el panel web SPA unificado** abriendo automáticamente tu navegador en `http://localhost:8000` (sin proxies intermediarios ni conflictos de puertos). Para desarrollo activo con hot-reloading sigue disponible la opción 3 en `http://localhost:3000`.
 
 ---
 

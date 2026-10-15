@@ -49,9 +49,9 @@ echo =====================================================================
 echo.
 echo Selecciona que deseas ejecutar:
 echo.
-echo   [1] Arrancar TODO (Docker + Ollama + API + Web en navegador)
+echo   [1] Arrancar TODO unificado (Docker + Ollama + Web en http://localhost:8000)
 echo   [2] Arrancar solo Docker (Ollama y Backend App en segundo plano)
-echo   [3] Arrancar solo el Panel Web Next.js (http://localhost:3000)
+echo   [3] Arrancar Panel Web en Modo Desarrollo (Next.js http://localhost:3000)
 echo   [4] Diagnostico de estado y salud de los servicios
 echo   [5] Descargar / Actualizar modelo IA en Ollama (qwen2.5:3b-instruct)
 echo   [6] Detener todos los servicios ordenadamente
@@ -149,7 +149,7 @@ if %ERRORLEVEL% neq 0 (
     echo   [OK] Node.js detectado.
 )
 
-:: 4. Dependencias del frontend
+:: 4. Dependencias del frontend y compilacion estatica unificada
 if not exist "%~dp0web\node_modules" (
     echo   [i] Instalando dependencias del panel web con npm install...
     pushd "%~dp0web"
@@ -159,10 +159,20 @@ if not exist "%~dp0web\node_modules" (
 ) else (
     echo   [OK] Dependencias web instaladas.
 )
+
+if not exist "%~dp0web\out" (
+    echo   [i] Compilando panel web estatico unificado...
+    pushd "%~dp0web"
+    call npm run build
+    popd
+    echo   [OK] Panel web estatico compilado.
+) else (
+    echo   [OK] Panel web compilado y listo para puerto unificado 8000.
+)
 exit /b 0
 
 :: -----------------------------------------------------------------------------
-:: Opcion 1: Arrancar Todo
+:: Opcion 1: Arrancar Todo (Puerto Unificado 8000)
 :: -----------------------------------------------------------------------------
 :START_ALL
 call :CHECK_PREREQS
@@ -181,7 +191,7 @@ if %ERRORLEVEL% neq 0 (
     goto :MENU
 )
 
-echo --^> Esperando a que el backend FastAPI responda en http://127.0.0.1:8000...
+echo --^> Esperando a que el backend unificado responda en http://127.0.0.1:8000...
 set /a API_RETRY=0
 :WAIT_API
 timeout /t 2 /nobreak >nul
@@ -195,7 +205,7 @@ if !ERRORLEVEL! neq 0 (
         echo   [!] El backend tarda en responder. Continuando de todos modos...
     )
 ) else (
-    echo   [OK] Backend FastAPI conectado y respondiendo en http://127.0.0.1:8000
+    echo   [OK] Backend unificado conectado y respondiendo en http://127.0.0.1:8000
 )
 
 docker exec lazyjob_ollama ollama list 2>nul | findstr /i "qwen2.5:3b-instruct" >nul 2>&1
@@ -204,15 +214,20 @@ if %ERRORLEVEL% neq 0 (
     docker exec lazyjob_ollama ollama pull qwen2.5:3b-instruct
 )
 
-echo --^> Abriendo el panel de administracion en tu navegador...
-start http://localhost:3000
-
-echo --^> Iniciando servidor Next.js en primer plano...
-echo     Pulsa Ctrl+C para detener el servidor web.
 echo.
-cd /d "%~dp0web"
-call npm run dev
-goto :EXIT
+echo =====================================================================
+echo   [SISTEMA LISTO] Todos los servicios estan activos y unificados:
+echo     - Panel Web Unificado: http://localhost:8000
+echo     - API REST y Docs:     http://127.0.0.1:8000/api/docs
+echo     - Motor Ollama:        http://localhost:11434
+echo =====================================================================
+echo.
+echo --^> Abriendo el panel de administracion en tu navegador...
+start http://localhost:8000
+echo.
+if "%CLI_INVOKED%"=="1" goto :EXIT
+pause
+goto :MENU
 
 :: -----------------------------------------------------------------------------
 :: Opcion 2: Solo Docker
@@ -234,24 +249,25 @@ if %ERRORLEVEL% neq 0 (
 )
 echo.
 echo   [OK] Ollama activo en: http://localhost:11434
-echo   [OK] API FastAPI activa en: http://127.0.0.1:8000/api/docs
+echo   [OK] API y Web unificada en: http://127.0.0.1:8000
 echo.
 if "%CLI_INVOKED%"=="1" goto :EXIT
 pause
 goto :MENU
 
 :: -----------------------------------------------------------------------------
-:: Opcion 3: Solo Frontend Web
+:: Opcion 3: Solo Frontend Web (Modo Desarrollo con Hot-Reload)
 :: -----------------------------------------------------------------------------
 :START_WEB
 call :CHECK_PREREQS
-cd /d "%~dp0"
-echo.
-echo --^> Abriendo navegador en http://localhost:3000...
-start http://localhost:3000
-echo.
-echo --^> Iniciando servidor Next.js...
 cd /d "%~dp0web"
+echo.
+echo --^> Abriendo navegador en http://localhost:3000 (Modo Desarrollo)...
+start http://localhost:3000
+echo --^> Iniciando servidor Next.js en primer plano...
+echo     (Conectando directamente a la API en http://127.0.0.1:8000/api sin socket hang up)
+echo     Pulsa Ctrl+C para detener el servidor web.
+echo.
 call npm run dev
 goto :EXIT
 

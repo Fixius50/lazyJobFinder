@@ -24,6 +24,7 @@ node_modules/
 web/.next/
 web/node_modules/
 *.tsbuildinfo
+out/
 
 # Archivos subidos y estado en ejecución
 data/uploaded_cvs/*

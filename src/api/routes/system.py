@@ -40,7 +40,6 @@ def _inspect_services() -> Dict[str, Dict[str, Any]]:
     """
     import shutil
     import urllib.request
-    from ...config import get_settings
 
     services = {
         "lazyjobfinder": {
@@ -59,8 +58,8 @@ def _inspect_services() -> Dict[str, Dict[str, Any]]:
 
     # Comprobación de salud directa de Ollama vía HTTP
     try:
-        settings = get_settings()
-        ollama_url = f"{settings.ollama_base_url.rstrip('/')}/api/tags"
+        ollama_base = os.getenv("OLLAMA_BASE_URL", "http://ollama:11434").rstrip("/")
+        ollama_url = f"{ollama_base}/api/tags"
         req = urllib.request.Request(ollama_url, headers={"User-Agent": "lazyJobFinder/1.0"})
         with urllib.request.urlopen(req, timeout=2.5) as resp:
             if resp.status == 200:

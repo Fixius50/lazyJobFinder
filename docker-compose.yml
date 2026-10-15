@@ -25,11 +25,11 @@ services:
     networks:
       - lazyjob_net
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:11434/api/tags || exit 1"]
-      interval: 10s
+      test: ["CMD", "/usr/bin/ollama", "list"]
+      interval: 5s
       timeout: 5s
       retries: 5
-      start_period: 10s
+      start_period: 5s
 
   # ---------------------------------------------------------------------------
   # 2. SERVICIO LAZYJOBFINDER: Núcleo de Búsqueda, Scoring, PDFs y Telegram

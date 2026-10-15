@@ -56,8 +56,13 @@ class TelegramJobBot:
         self._is_manual_search_running: bool = False
 
     def is_configured(self) -> bool:
-        """Verifica si las credenciales de Telegram están debidamente establecidas."""
-        return bool(self.token and self.allowed_user_id > 0)
+        """Verifica si las credenciales de Telegram están debidamente establecidas y no son placeholders."""
+        if not self.token or self.allowed_user_id <= 0:
+            return False
+        # Descartar tokens de ejemplo o plantillas
+        if "ABCdefGhIJK" in self.token or "tu_token" in self.token.lower() or self.token.startswith("123456789:"):
+            return False
+        return True
 
     def _is_authorized(self, update: Update) -> bool:
         """

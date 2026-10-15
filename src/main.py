@@ -82,6 +82,7 @@ async def main() -> None:
         except (NotImplementedError, AttributeError):
             pass
 
+    app_started = False
     if app:
         logger.info(
             "Conectando Bot de Telegram para usuario autorizado ID: %s",
@@ -98,23 +99,28 @@ async def main() -> None:
                 "Escribe <code>/estado</code> para ver métricas o <code>/buscar</code> para escaneo inmediato."
             )
             logger.info("Bot de Telegram en modo Long-Polling activo.")
+            app_started = True
+        except Exception as e:
+            logger.error("Error conectando el bot de Telegram: %s. La aplicación continúa activa en modo Web local.", e)
+            app_started = False
+    else:
+        logger.warning(
+            "ℹ️ Bot de Telegram no activo (credenciales no configuradas o placeholder en .env).\n"
+            "El sistema continúa ejecutando el planificador y la API de administración local."
+        )
 
-            await stop_event.wait()
+    # Esperar señal de parada (mantiene vivos la API y el planificador)
+    await stop_event.wait()
 
-            # Parada limpia
-            logger.info("Deteniendo servicios...")
+    # Parada limpia del bot si estaba activo
+    if app_started and app and app.updater:
+        logger.info("Deteniendo bot de Telegram...")
+        try:
             await app.updater.stop()
             await app.stop()
             await app.shutdown()
-
         except Exception as e:
-            logger.error("Error ejecutando el bot de Telegram: %s", e, exc_info=True)
-    else:
-        logger.warning(
-            "ℹ️ Bot de Telegram no activo (credenciales no configuradas en .env).\n"
-            "El sistema continúa ejecutando el planificador y la API de administración."
-        )
-        await stop_event.wait()
+            logger.warning("Error deteniendo el bot de Telegram: %s", e)
 
     # Parada limpia del planificador y servidor API
     if api_server:

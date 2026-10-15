@@ -1,0 +1,289 @@
+"""Rutas de control de servicios Docker, estado y streaming de logs (SSE)."""
+
+import asyncio
+import json
+import logging
+import os
+import subprocess
+from typing import Any, AsyncGenerator, Dict, List, Optional
+from fastapi import APIRouter, HTTPException, Query, status
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+
+from ...shared_constants import SERVICES as ALLOWED_SERVICES, SERVICE_ACTIONS as ALLOWED_ACTIONS
+from ..deps import get_db, get_runner
+
+logger = logging.getLogger("lazyJobFinder.api.system")
+router = APIRouter(prefix="/system", tags=["Sistema y Docker"])
+
+
+class ServiceActionRequest(BaseModel):
+    service: str  # "all", "ollama", o "lazyjobfinder"
+    action: str   # "start", "stop", "restart"
+
+
+def _get_docker_client():
+    """Intenta inicializar el cliente Python de Docker."""
+    try:
+        import docker
+        return docker.from_env()
+    except Exception as e:
+        logger.debug("docker-py no disponible o socket inaccesible directamente: %s", e)
+        return None
+
+
+def _inspect_service_subprocess() -> Dict[str, Dict[str, Any]]:
+    """Consulta el estado de los servicios mediante llamada explícita a 'docker compose ps'."""
+    services = {
+        "ollama": {"status": "detenido", "health": "desconocido", "container_name": "lazyjob_ollama"},
+        "lazyjobfinder": {"status": "detenido", "health": "desconocido", "container_name": "lazyjob_app"},
+    }
+    try:
+        # Usar lista de argumentos estricta para evitar cualquier inyección
+        cmd = ["docker", "compose", "ps", "--format", "json"]
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            lines = result.stdout.strip().splitlines()
+            for line in lines:
+                try:
+                    data = json.loads(line)
+                    svc_name = data.get("Service", "")
+                    state = data.get("State", "").lower()
+                    health = data.get("Health", "").lower()
+
+                    if svc_name in services:
+                        # Mapear estado legible: detenido, arrancando, saludable, error
+                        normalized_status = "detenido"
+                        if "running" in state:
+                            if health == "healthy":
+                                normalized_status = "saludable"
+                            elif health == "starting":
+                                normalized_status = "arrancando"
+                            elif health == "unhealthy":
+                                normalized_status = "error"
+                            else:
+                                normalized_status = "saludable"
+                        elif "restarting" in state:
+                            normalized_status = "arrancando"
+                        elif "dead" in state or "exited" in state:
+                            normalized_status = "detenido"
+                        else:
+                            normalized_status = state or "detenido"
+
+                        services[svc_name]["status"] = normalized_status
+                        services[svc_name]["health"] = health or "n/a"
+                        services[svc_name]["raw_state"] = state
+                except json.JSONDecodeError:
+                    continue
+    except Exception as e:
+        logger.warning("Fallo al consultar docker compose ps: %s", e)
+
+    return services
+
+
+@router.get("/status")
+def get_services_status() -> Dict[str, Any]:
+    """
+    Devuelve el estado de salud y ciclo de vida de los servicios del proyecto:
+    - detenido
+    - arrancando
+    - saludable
+    - error
+    """
+    client = _get_docker_client()
+    services_status = {}
+
+    if client:
+        container_map = {
+            "ollama": "lazyjob_ollama",
+            "lazyjobfinder": "lazyjob_app",
+        }
+        for svc_name, c_name in container_map.items():
+            try:
+                c = client.containers.get(c_name)
+                c_state = c.status.lower()  # running, exited, restarting
+                health_dict = c.attrs.get("State", {}).get("Health", {})
+                h_status = health_dict.get("Status", "").lower()
+
+                if c_state == "running":
+                    if h_status == "healthy":
+                        norm = "saludable"
+                    elif h_status == "starting":
+                        norm = "arrancando"
+                    elif h_status == "unhealthy":
+                        norm = "error"
+                    else:
+                        norm = "saludable"
+                elif c_state == "restarting":
+                    norm = "arrancando"
+                elif c_state in ("exited", "dead"):
+                    norm = "detenido"
+                else:
+                    norm = "error"
+
+                services_status[svc_name] = {
+                    "status": norm,
+                    "health": h_status or "n/a",
+                    "container_name": c_name,
+                    "id": c.short_id,
+                }
+            except Exception:
+                services_status[svc_name] = {
+                    "status": "detenido",
+                    "health": "desconocido",
+                    "container_name": c_name,
+                }
+    else:
+        # Fallback mediante llamada a docker compose ps
+        services_status = _inspect_service_subprocess()
+
+    db = get_db()
+    runner = get_runner()
+    pipeline_state = {
+        "is_running": runner.is_running(),
+        "has_run_today": db.has_run_today(),
+        "last_run": db.get_last_completed_run(),
+    }
+
+    return {
+        "services": services_status,
+        "pipeline": pipeline_state,
+    }
+
+
+@router.post("/action")
+def execute_service_action(req: ServiceActionRequest) -> Dict[str, Any]:
+    """
+    Ejecuta una acción controlada de ciclo de vida sobre los servicios del proyecto.
+    Acciones permitidas: start, stop, restart.
+    Servicios permitidos: all, ollama, lazyjobfinder.
+    """
+    action = req.action.lower()
+    service = req.service.lower()
+
+    if action not in ALLOWED_ACTIONS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Acción '{action}' no permitida. Válidas: {list(ALLOWED_ACTIONS)}",
+        )
+
+    if service != "all" and service not in ALLOWED_SERVICES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Servicio '{service}' no permitido. Válidos: all, {list(ALLOWED_SERVICES)}",
+        )
+
+    cmd = ["docker", "compose", action]
+    if service != "all":
+        cmd.append(service)
+
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=30, check=False)
+        db = get_db()
+        db.log_event("INFO", "docker", f"Acción '{action}' ejecutada sobre '{service}'. Returncode: {res.returncode}")
+
+        if res.returncode != 0:
+            return {
+                "success": False,
+                "error": res.stderr.strip() or res.stdout.strip(),
+                "action": action,
+                "service": service,
+            }
+
+        return {
+            "success": True,
+            "message": f"Acción '{action}' ejecutada correctamente sobre '{service}'",
+            "action": action,
+            "service": service,
+        }
+    except Exception as e:
+        logger.error("Error ejecutando acción docker %s sobre %s: %s", action, service, e)
+        raise HTTPException(status_code=500, detail=f"Fallo al ejecutar acción: {str(e)}")
+
+
+@router.get("/logs")
+def get_system_logs(
+    limit: int = Query(100, ge=1, le=500),
+    level: Optional[str] = None,
+    source: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Devuelve los registros históricos persistidos en SQLite."""
+    db = get_db()
+    return db.get_system_logs(limit=limit, level=level, source=source)
+
+
+@router.get("/logs/container")
+def get_container_logs(
+    service: str = Query("all", regex="^(all|ollama|lazyjobfinder)$"),
+    tail: int = Query(80, ge=10, le=500),
+) -> Dict[str, str]:
+    """
+    Obtiene los registros recientes de Docker para un panel específico (ollama, app).
+    """
+    cmd = ["docker", "compose", "logs", f"--tail={tail}"]
+    if service != "all":
+        cmd.append(service)
+
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=8, check=False)
+        output = res.stdout if res.returncode == 0 else (res.stderr or "No hay logs disponibles.")
+        return {
+            "service": service,
+            "logs": output,
+        }
+    except Exception as e:
+        return {
+            "service": service,
+            "logs": f"No se pudieron consultar los logs del contenedor: {str(e)}",
+        }
+
+
+@router.get("/logs/stream")
+async def stream_logs_sse(
+    source: Optional[str] = None,
+) -> StreamingResponse:
+    """
+    Transmite logs en tiempo real vía Server-Sent Events (SSE) a la consola web.
+    Permite filtrar por canal: ollama, pipeline, app, o todos.
+    """
+    async def event_generator() -> AsyncGenerator[str, None]:
+        db = get_db()
+        last_seen_id = 0
+
+        # Obtener el último ID registrado como punto de partida
+        initial_logs = db.get_system_logs(limit=1)
+        if initial_logs:
+            last_seen_id = initial_logs[0]["id"]
+
+        yield f"event: connected\ndata: {json.dumps({'message': 'Conexión SSE establecida con la consola de logs'})}\n\n"
+
+        while True:
+            await asyncio.sleep(2.0)
+            try:
+                new_logs = db.get_system_logs(limit=30, source=source)
+                # Filtrar aquellos con ID mayor a last_seen_id
+                fresh = [l for l in new_logs if l["id"] > last_seen_id]
+                if fresh:
+                    fresh.reverse()  # Orden cronológico ascendente para el frontend
+                    for item in fresh:
+                        last_seen_id = max(last_seen_id, item["id"])
+                        yield f"event: log\ndata: {json.dumps(item)}\n\n"
+            except Exception as e:
+                logger.debug("Error en generador SSE de logs: %s", e)
+                yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )

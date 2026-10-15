@@ -1,0 +1,39 @@
+{
+  "application_statuses": {
+    "discovered": { "label": "Descubierta", "badge": "secondary" },
+    "evaluated": { "label": "Evaluada", "badge": "outline" },
+    "notified": { "label": "Notificada", "badge": "warning" },
+    "applied": { "label": "Postulada", "badge": "default" },
+    "interview": { "label": "Entrevista", "badge": "success" },
+    "rejected": { "label": "Descartada", "badge": "destructive" },
+    "archived": { "label": "Archivada", "badge": "secondary" }
+  },
+  "portal_sources": {
+    "tecnoempleo_rss": { "label": "Tecnoempleo RSS", "type": "rss" },
+    "infojobs_api": { "label": "InfoJobs API", "type": "api" },
+    "jobspy": { "label": "JobSpy (Indeed / LinkedIn / Google)", "type": "scraper" }
+  },
+  "services": ["ollama", "lazyjobfinder"],
+  "service_actions": ["start", "stop", "restart"],
+  "document_types": {
+    "cv_pdf": { "label": "CV Adaptado (PDF)", "mime": "application/pdf", "ext": ".pdf" },
+    "cv_md": { "label": "CV Adaptado (Markdown)", "mime": "text/markdown", "ext": ".md" },
+    "letter_pdf": { "label": "Carta de Presentación (PDF)", "mime": "application/pdf", "ext": ".pdf" },
+    "letter_md": { "label": "Carta de Presentación (Markdown)", "mime": "text/markdown", "ext": ".md" }
+  },
+  "confirmation_phrases": {
+    "clear_history": "BORRAR_HISTORIAL",
+    "down_containers": "ELIMINAR_CONTENEDORES",
+    "destroy_volumes": "DESTRUIR_VOLUMENES_PERMANENTE"
+  },
+  "cv_upload_limits": {
+    "max_size_bytes": 5242880,
+    "max_size_mb": 5,
+    "allowed_extensions": [".pdf", ".md", ".txt"]
+  },
+  "scoring": {
+    "default_threshold": 65,
+    "high_fit_threshold": 80,
+    "moderate_fit_threshold": 65
+  }
+}

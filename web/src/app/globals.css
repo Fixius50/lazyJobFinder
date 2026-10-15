@@ -1,0 +1,71 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 220 14% 96%;
+    --foreground: 224 71% 4%;
+    --card: 0 0% 100%;
+    --card-foreground: 224 71% 4%;
+    --primary: 220 70% 50%;
+    --primary-foreground: 210 20% 98%;
+    --secondary: 220 14% 90%;
+    --secondary-foreground: 220 40% 10%;
+    --muted: 220 14% 92%;
+    --muted-foreground: 220 10% 45%;
+    --accent: 220 14% 88%;
+    --accent-foreground: 220 40% 10%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 210 20% 98%;
+    --border: 220 13% 86%;
+    --input: 220 13% 86%;
+    --ring: 220 70% 50%;
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    --background: 224 25% 8%;
+    --foreground: 210 20% 98%;
+    --card: 224 22% 11%;
+    --card-foreground: 210 20% 98%;
+    --primary: 217 91% 60%;
+    --primary-foreground: 224 71% 4%;
+    --secondary: 224 16% 16%;
+    --secondary-foreground: 210 20% 98%;
+    --muted: 224 16% 16%;
+    --muted-foreground: 217 10% 64%;
+    --accent: 224 16% 20%;
+    --accent-foreground: 210 20% 98%;
+    --destructive: 0 62% 40%;
+    --destructive-foreground: 210 20% 98%;
+    --border: 224 16% 18%;
+    --input: 224 16% 18%;
+    --ring: 217 91% 60%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground antialiased font-sans;
+  }
+}
+
+/* Scrollbar fina y oscura para consolas y tablas */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted-foreground) / 0.3);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.5);
+}

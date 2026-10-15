@@ -1,0 +1,27 @@
+# Dependencias principales del sistema lazyJobFinder (0 €/mes)
+
+# 1. Extracción y Scraping Multi-fuente
+python-jobspy>=1.1.80
+feedparser>=6.0.10
+requests>=2.31.0
+
+# 2. Planificación y Orquestación
+apscheduler>=3.10.4
+
+# 3. Interfaz de Usuario y Notificaciones
+python-telegram-bot>=21.0
+
+# 4. Generación Documental ATS-Friendly (PDF y Formatos)
+reportlab>=4.1.0
+
+# 5. Configuración y Utilidades
+pyyaml>=6.0.1
+pydantic>=2.5.0
+python-dotenv>=1.0.1
+rapidfuzz>=3.6.0
+
+# 6. API Local y Control de Contenedores (Interfaz de Administración)
+fastapi>=0.110.0
+uvicorn>=0.28.0
+python-multipart>=0.0.9
+docker>=7.0.0

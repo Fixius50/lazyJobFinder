@@ -1,0 +1,38 @@
+# Entorno y credenciales privadas
+.env
+*.env
+
+# Base de datos persistente local
+data/*.db
+data/*.db-wal
+data/*.db-shm
+
+# Documentos generados
+data/documents/*
+!data/documents/.gitkeep
+
+# Python cache y compilados
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+
+# Entornos virtuales y Frontend
+venv/
+.venv/
+env/
+node_modules/
+.next/
+web/.next/
+web/node_modules/
+
+# Archivos subidos y estado en ejecución
+data/uploaded_cvs/*
+!data/uploaded_cvs/.gitkeep
+data/active_cv.json
+
+# IDEs
+.idea/
+.vscode/
+*.swp

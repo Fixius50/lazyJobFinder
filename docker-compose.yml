@@ -1,0 +1,72 @@
+# =============================================================================
+# Docker Compose para lazyJobFinder (Despliegue Local Autónomo a 0 €/mes)
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # 1. SERVICIO OLLAMA: Motor de Inferencia IA Local en Contenedor
+  # ---------------------------------------------------------------------------
+  # Ejecuta los modelos estrictamente dentro de Docker con volumen persistente.
+  # Optimizado para inferencia en CPU de alto rendimiento (Q4_K_M) con memoria limitada,
+  # compatible al 100% con Windows WSL2 y sin requerir controladores propietarios.
+  ollama:
+    image: ollama/ollama:latest
+    container_name: lazyjob_ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      # Persistencia de los modelos descargados (ej. qwen2.5:3b-instruct)
+      - ollama_models:/root/.ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+      - OLLAMA_KEEP_ALIVE=5m
+      - OLLAMA_NUM_PARALLEL=1
+    networks:
+      - lazyjob_net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:11434/api/tags || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ---------------------------------------------------------------------------
+  # 2. SERVICIO LAZYJOBFINDER: Núcleo de Búsqueda, Scoring, PDFs y Telegram
+  # ---------------------------------------------------------------------------
+  # Orquesta los conectores (Tecnoempleo, InfoJobs, JobSpy), deduplica en SQLite,
+  # evalúa mediante Ollama, genera los PDFs ATS-friendly y gestiona el bot de Telegram.
+  lazyjobfinder:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: lazyjob_app
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - DATABASE_PATH=/app/data/lazyjobfinder.db
+    ports:
+      # API REST local de administración vinculada estrictamente a localhost (seguridad y privacidad)
+      - "127.0.0.1:8000:8000"
+    volumes:
+      # Persistencia de la base de datos SQLite y los documentos generados (PDFs/MDs)
+      - ./data:/app/data
+      # Configuración y perfil del candidato editable sin reconstruir la imagen
+      - ./config:/app/config
+    depends_on:
+      ollama:
+        condition: service_healthy
+    networks:
+      - lazyjob_net
+
+# Red interna aislada
+networks:
+  lazyjob_net:
+    driver: bridge
+
+# Volumen permanente para que los modelos de IA sobrevivan a reinicios
+volumes:
+  ollama_models:
+    name: lazyjob_ollama_models

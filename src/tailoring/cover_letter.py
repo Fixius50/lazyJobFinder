@@ -1,0 +1,137 @@
+"""Generador de cartas de presentación honestas y personalizadas en español."""
+
+import logging
+from datetime import datetime
+from typing import Any, Dict, Optional
+
+from ..evaluator.ollama_client import OllamaClient
+from .verifier import ProfileVerifier
+
+logger = logging.getLogger("lazyJobFinder.tailoring.cover_letter")
+
+
+class CoverLetterGenerator:
+    """Genera cartas de presentación profesionales y sobrias adaptadas a cada vacante."""
+
+    def __init__(self, profile: Dict[str, Any], ollama_client: Optional[OllamaClient] = None):
+        self.profile = profile
+        self.ollama = ollama_client or OllamaClient()
+        self.verifier = ProfileVerifier(profile)
+
+    def generate(self, job: Dict[str, Any], eval_result: Dict[str, Any]) -> str:
+        """Genera el texto completo de la carta de presentación en formato Markdown validando afirmaciones."""
+        candidato = self.profile.get("candidato", {})
+        nombre = candidato.get("nombre_completo", "Roberto")
+        email = candidato.get("email", "tu_email@ejemplo.com")
+        telefono = candidato.get("telefono", "+34 600 000 000")
+        ciudad = candidato.get("ciudad", "España")
+        fecha_actual = datetime.now().strftime("%d de %B de %Y")
+
+        empresa = job.get("company", "Equipo de Selección")
+        puesto = job.get("title", "Desarrollador Junior")
+        
+        # Validar que solo se presuman habilidades reales
+        raw_matched = eval_result.get("matched_skills", [])
+        verified_matched = self.verifier.validate_matched_skills(raw_matched)
+        missing = eval_result.get("missing_skills", [])
+        atomic_facts = self.verifier.get_approved_atomic_facts()
+
+        # Intento con LLM local guiado estrictamente por hechos atómicos aprobados
+        prompt = (
+            f"Redacta una carta de presentación formal y profesional en español para una candidatura de empleo.\n\n"
+            f"### HECHOS ATÓMICOS APROBADOS DEL CANDIDATO (ÚNICA FUENTE DE VERDAD):\n"
+            f"- Nombre: {nombre}\n"
+            f"- Titulación: Formación Profesional de Grado Superior en DAM (2024).\n"
+            f"- Historial comercial: {atomic_facts['experiencia_comercial_previa']}.\n"
+            f"- Tecnologías demostrables que coinciden con la vacante: {', '.join(verified_matched) or 'Java, SQL y programación orientada a objetos'}.\n\n"
+            f"### DATOS DE LA VACANTE:\n"
+            f"- Puesto: {puesto}\n"
+            f"- Empresa a la que postula: {empresa}\n"
+            f"- Requisitos adicionales donde manifiesta total disposición para aprender: {', '.join(missing[:2]) or 'nuevas herramientas empresariales'}.\n\n"
+            f"DIRECTRICES DE VERACIDAD:\n"
+            f"1. Estructura en 3 o 4 párrafos claros y directos (máximo 250 palabras).\n"
+            f"2. Expresa motivación genuina por el proyecto de {empresa} y por consolidar la carrera profesional en {puesto}.\n"
+            f"3. Resalta la base técnica sólida adquirida en DAM y los proyectos prácticos realizados.\n"
+            f"4. PROHIBIDO inventar empresas pasadas ficticias o atribuir años de experiencia laboral comercial previa inexistentes.\n"
+            f"5. Tono humilde, profesional, resolutivo y entusiasta por seguir aprendiendo.\n"
+            f"Devuelve ÚNICAMENTE el cuerpo de la carta en español."
+        )
+
+        try:
+            body_text = self.ollama.generate(
+                prompt=prompt,
+                format_json=False,
+                temperature=0.1,
+                timeout=50,
+            )
+            cleaned_body = body_text.strip().strip('"')
+            is_valid, violations = self.verifier.validate_concrete_assertions(cleaned_body, target_company=empresa)
+            if is_valid and len(cleaned_body) > 100:
+                return self._assemble_letter(
+                    nombre=nombre,
+                    email=email,
+                    telefono=telefono,
+                    ciudad=ciudad,
+                    empresa=empresa,
+                    puesto=puesto,
+                    fecha=fecha_actual,
+                    body=cleaned_body,
+                )
+            else:
+                logger.warning("Carta generada por LLM rechazada por afirmaciones no respaldadas: %s", violations)
+        except Exception as e:
+            logger.debug("Generación de carta por LLM falló, usando plantilla determinista: %s", e)
+
+        # Plantilla determinista de respaldo 100% verídica
+        tech_ref = f"{', '.join(verified_matched[:3])}" if verified_matched else "desarrollo de software y bases de datos"
+        fallback_body = (
+            f"Estimado/a responsable de selección de {empresa},\n\n"
+            f"Me pongo en contacto con ustedes con motivo de la vacante de {puesto}. Tras revisar con detalle los requisitos de la oferta, "
+            f"considero que mi formación técnica en el Ciclo de Grado Superior en Desarrollo de Aplicaciones Multiplataforma (DAM) "
+            f"y los proyectos prácticos realizados con {tech_ref} me permiten ofrecer una base sólida, código ordenado y muchas ganas "
+            f"de aportar valor a su equipo de desarrollo.\n\n"
+            f"Durante mis estudios he profundizado en el diseño y construcción de aplicaciones con persistencia en bases de datos "
+            f"relacionales y NoSQL, desarrollo de APIs RESTful y trabajo colaborativo con Git, aplicando buenas prácticas y patrones de diseño.\n\n"
+            f"Me motiva especialmente incorporarme a {empresa} por la proyección de sus proyectos y la posibilidad de seguir creciendo "
+            f"en un entorno profesional exigente. Cuento con una alta capacidad de aprendizaje, actitud proactiva y total disposición "
+            f"para dominar con rapidez las tecnologías específicas que el puesto requiera.\n\n"
+            f"Agradezco de antemano el tiempo dedicado a valorar mi candidatura y quedo a su entera disposición para mantener una "
+            f"entrevista en la que poder profundizar en mis motivaciones.\n\n"
+            f"Atentamente,\n"
+            f"{nombre}"
+        )
+
+        return self._assemble_letter(
+            nombre=nombre,
+            email=email,
+            telefono=telefono,
+            ciudad=ciudad,
+            empresa=empresa,
+            puesto=puesto,
+            fecha=fecha_actual,
+            body=fallback_body,
+        )
+
+    def _assemble_letter(
+        self,
+        nombre: str,
+        email: str,
+        telefono: str,
+        ciudad: str,
+        empresa: str,
+        puesto: str,
+        fecha: str,
+        body: str,
+    ) -> str:
+        return f"""# Carta de Presentación
+
+**De:** {nombre}  
+**Contacto:** {email} | {telefono} | {ciudad}  
+**Para:** Departamento de Selección / {empresa}  
+**Referencia:** Candidatura para {puesto}  
+**Fecha:** {fecha}  
+
+---
+
+{body.strip()}
+"""

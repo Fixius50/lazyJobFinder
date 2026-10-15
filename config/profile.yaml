@@ -1,0 +1,118 @@
+# =============================================================================
+# Perfil Profesional Canónico (Fuente de Verdad Inmutable)
+# =============================================================================
+# REGLA FUNDAMENTAL: El sistema NUNCA inventará experiencia, títulos, tecnologías
+# ni resultados que no estén explícitamente documentados en este archivo.
+
+candidato:
+  nombre_completo: "Roberto"
+  titulo_profesional: "Desarrollador de Software Junior / Full Stack (DAM)"
+  email: "tu_email@ejemplo.com"
+  telefono: "+34 600 000 000"
+  ciudad: "España"
+  linkedin: "https://www.linkedin.com/in/tu-perfil"
+  github: "https://github.com/tu-usuario"
+  disponibilidad: "Inmediata"
+  modalidades_preferidas:
+    - "Remoto"
+    - "Híbrido"
+    - "Presencial"
+
+resumen_base: >
+  Titulado en Desarrollo de Aplicaciones Multiplataforma (DAM) con sólida base
+  en desarrollo de software orientado a objetos, persistencia de datos relacional y NoSQL,
+  y creación de APIs REST. Proactivo, apasionado por las buenas prácticas y con ganas de
+  incorporarme a un equipo donde aportar valor en el ecosistema Java/Spring, PHP o desarrollo
+  Full Stack web, con capacidad rápida de aprendizaje y adaptación.
+
+formacion:
+  - titulo: "Ciclo Formativo de Grado Superior en Desarrollo de Aplicaciones Multiplataforma (DAM)"
+    institucion: "Instituto de Educación Secundaria / Centro Oficial FP"
+    ubicacion: "España"
+    fecha_fin: "2024"
+    modulos_destacados:
+      - "Programación Orientada a Objetos en Java"
+      - "Bases de Datos Relacionales (SQL, PL/SQL) y NoSQL"
+      - "Acceso a Datos (JDBC, Hibernate, JPA)"
+      - "Desarrollo de Interfaces Gráficas y Web"
+      - "Programación de Servicios y Procesos (Concurrencia, Sockets)"
+      - "Sistemas de Gestión Empresarial (ERP/CRM)"
+
+competencias_tecnicas:
+  lenguajes:
+    - nombre: "Java"
+      nivel: "Intermedio / Sólida base POO"
+      conceptos: ["Colecciones", "Streams", "Excepciones", "Hilos", "Sockets"]
+    - nombre: "SQL / PL/SQL"
+      nivel: "Intermedio"
+      conceptos: ["Consultas complejas", "Joins", "Triggers", "Procedimientos almacenados", "Normalización"]
+    - nombre: "JavaScript"
+      nivel: "Básico - Intermedio"
+      conceptos: ["ES6+", "Manipulación DOM", "Fetch API", "Promesas / Async-Await"]
+    - nombre: "PHP"
+      nivel: "Básico - Intermedio"
+      conceptos: ["Patrón MVC", "Conexión PDO", "Desarrollo de scripts de backend"]
+    - nombre: "HTML5 & CSS3"
+      nivel: "Intermedio"
+      conceptos: ["Flexbox", "Grid", "Diseño Responsive", "Semántica web"]
+
+  bases_de_datos:
+    - "MySQL / MariaDB"
+    - "PostgreSQL"
+    - "Oracle Database (PL/SQL)"
+    - "MongoDB (NoSQL Básico)"
+
+  frameworks_y_librerias:
+    - "Spring Boot (Nociones / Proyectos académicos)"
+    - "Hibernate / JPA"
+    - "Maven"
+    - "Bootstrap"
+
+  herramientas_y_entornos:
+    - "Linux (Comandos bash, gestión de permisos, servicios)"
+    - "Git / GitHub (Control de versiones, ramas, pull requests)"
+    - "APIs REST (JSON, XML, Postman)"
+    - "Docker (Conceptos básicos y uso de contenedores)"
+    - "IDEs: IntelliJ IDEA, VS Code, Eclipse"
+
+idiomas:
+  - idioma: "Español"
+    nivel: "Nativo"
+  - idioma: "Inglés"
+    nivel: "B1 - B2 Técnico (Capacidad de lectura de documentación técnica y comunicación escrita)"
+
+proyectos_destacados:
+  - nombre: "Sistema de Gestión de Clientes y Pedidos (Full Stack)"
+    tecnologias: ["Java", "Spring Boot", "MySQL", "Hibernate", "HTML/CSS", "JavaScript"]
+    descripcion: >
+      Aplicación web de gestión interna con arquitectura MVC. Implementación de API RESTful
+      para operaciones CRUD sobre clientes y pedidos, autenticación con sesiones y
+      persistencia relacional optimizada mediante Hibernate.
+    logros:
+      - "Diseño completo del esquema de base de datos relacional y consultas SQL complejas."
+      - "Integración de API REST documentada consumida por un frontend interactivo."
+
+  - nombre: "Plataforma de Inventario con Acceso a Datos Multifuente"
+    tecnologias: ["Java", "JDBC", "PostgreSQL", "MongoDB", "JSON/XML"]
+    descripcion: >
+      Herramienta de escritorio desarrollada en Java para sincronización de catálogos
+      y gestión de stock, combinando almacenamiento estructurado en PostgreSQL con
+      documentos NoSQL en MongoDB.
+    logros:
+      - "Implementación de parser de ficheros XML y JSON para importación/exportación de catálogos."
+      - "Manejo eficiente de transacciones y control de concurrencia."
+
+  - nombre: "Portal Web Dinámico de Reservas"
+    tecnologias: ["PHP", "MySQL", "JavaScript", "CSS3", "Bootstrap"]
+    descripcion: >
+      Aplicación web para reserva de servicios, con panel de administración para usuarios
+      y gestión de citas con validación en frontend y backend.
+    logros:
+      - "Implementación segura contra inyecciones SQL mediante sentencias preparadas PDO."
+      - "Interfaz adaptable y validaciones asíncronas con JavaScript."
+
+puntos_fuertes:
+  - "Capacidad contrastada para comprender arquitecturas de software y código existente."
+  - "Ganas de aprender nuevas tecnologías y frameworks empresariales."
+  - "Hábito de documentación de código y trabajo con control de versiones Git."
+  - "Sólida formación teórico-práctica homologada en FP Técnica (DAM)."

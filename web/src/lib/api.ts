@@ -3,159 +3,18 @@
  * Comunica de forma transparente con el backend FastAPI local vía proxy /api.
  */
 
-export interface ServiceInfo {
-  status: "saludable" | "arrancando" | "detenido" | "error" | string;
-  health: string;
-  container_name: string;
-  id?: string;
-  raw_state?: string;
-}
-
-export interface ServicesStatusResponse {
-  services: {
-    ollama: ServiceInfo;
-    lazyjobfinder: ServiceInfo;
-    [key: string]: ServiceInfo;
-  };
-  pipeline: {
-    is_running: boolean;
-    has_run_today: boolean;
-    last_run?: {
-      id: number;
-      started_at: string;
-      finished_at: string;
-      status: string;
-      total_found: number;
-      new_jobs: number;
-      relevant_jobs: number;
-    } | null;
-  };
-}
-
-export interface ActiveCVInfo {
-  type: "canonical" | "custom" | "none";
-  filename: string;
-  path: string;
-  size_bytes: number;
-  modified_at: string;
-  is_default: boolean;
-  description: string;
-}
-
-export interface PreflightResponse {
-  can_execute: boolean;
-  ollama: {
-    healthy: boolean;
-    url: string;
-    models: string[];
-    error?: string | null;
-  };
-  pipeline: {
-    is_running: boolean;
-    locked: boolean;
-  };
-  database: {
-    healthy: boolean;
-    error?: string | null;
-  };
-}
-
-export interface JobListItem {
-  id: number;
-  title: string;
-  company: string;
-  location: string;
-  is_remote: number;
-  source: string;
-  canonical_url: string;
-  salary_min?: number | null;
-  salary_max?: number | null;
-  salary_currency?: string;
-  date_posted?: string;
-  created_at: string;
-  updated_at: string;
-  status: string;
-  duplicate_of_id?: number | null;
-  similarity_score?: number | null;
-  alternate_sources?: string;
-  telegram_notified: number;
-  ui_saved: number;
-  score?: number | null;
-  fit_level?: string | null;
-  should_apply?: number | null;
-  has_cv: boolean;
-  has_letter: boolean;
-}
-
-export interface PaginatedJobsResponse {
-  items: JobListItem[];
-  total: number;
-  page: number;
-  page_size: number;
-  total_pages: number;
-}
-
-export interface JobDetail extends JobListItem {
-  description?: string;
-  matched_skills: string[];
-  missing_skills: string[];
-  strengths: string[];
-  gaps: string[];
-  reasoning?: string;
-  diff_summary?: string;
-  cv_pdf_path?: string;
-  cv_md_path?: string;
-  letter_pdf_path?: string;
-  letter_md_path?: string;
-  evaluated_at?: string;
-  documents_generated_at?: string;
-}
-
-export interface SystemLogItem {
-  id: number;
-  timestamp: string;
-  level: "INFO" | "WARNING" | "ERROR" | "CRITICAL";
-  source: string;
-  message: string;
-  details?: string;
-}
-
-export interface SettingsResponse {
-  busqueda: {
-    terminos: string[];
-    ubicaciones: string[];
-    filtros_exclusion: string[];
-    antiguedad_horas: number;
-    limite_por_fuente: number;
-  };
-  fuentes: Record<string, any>;
-  evaluacion: {
-    umbral_minimo_puntuacion: number;
-    generar_documentos: boolean;
-    idioma_documentos: string;
-  };
-  notificaciones: {
-    guardar_en_interfaz: boolean;
-    enviar_telegram: boolean;
-    telegram?: {
-      habilitado: boolean;
-      adjuntar_documentos: boolean;
-      notificar_solo_superan_umbral: boolean;
-      notificar_resumen_vacio: boolean;
-    };
-  };
-  horario: {
-    hora: number;
-    minuto: number;
-  };
-  secrets_status: {
-    telegram_configured: boolean;
-    infojobs_configured: boolean;
-  };
-  privacy_notice: {
-    telegram_transmission_note: string;
-  };
-}
+export * from "@/types";
+import type {
+  ServiceInfo,
+  ServicesStatusResponse,
+  PreflightResponse,
+  JobListItem,
+  JobDetail,
+  PaginatedJobsResponse,
+  ActiveCVInfo,
+  SystemLogItem,
+  SettingsResponse,
+} from "@/types";
 
 export function getApiBaseUrl(): string {
   if (typeof window !== "undefined") {

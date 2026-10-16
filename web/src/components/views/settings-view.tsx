@@ -9,8 +9,8 @@ import {
   Save,
   CheckCircle2,
   Send,
-  Globe,
   RefreshCw,
+  Globe,
 } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -18,6 +18,7 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Dialog } from "@/components/ui/dialog";
+import { InfoTooltip } from "@/components/ui/info-tooltip";
 import { SettingsResponse, api } from "@/lib/api";
 import { CONFIRMATION_PHRASES } from "@/lib/constants";
 
@@ -132,11 +133,9 @@ export function SettingsView() {
     <div className="space-y-4 sm:space-y-6 w-full">
       {/* Encabezado fluido */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b">
-        <div>
+        <div className="flex items-center gap-1.5">
           <h2 className="text-lg sm:text-xl font-bold tracking-tight">Configuración y Canales</h2>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Gestión independiente de almacenamiento local, bot de Telegram y mantenimiento del sistema.
-          </p>
+          <InfoTooltip content="Gestión independiente de almacenamiento local, bot de Telegram y mantenimiento del sistema." />
         </div>
 
         {saveStatus && (

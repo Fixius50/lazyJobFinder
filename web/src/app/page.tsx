@@ -3,46 +3,47 @@
 import React, { useState, useEffect } from "react";
 import {
   Briefcase,
-  Search,
-  Activity,
   Settings,
   ShieldCheck,
   Play,
   RotateCw,
   Sparkles,
+  Cpu,
+  Database,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { ApplicationsView } from "@/components/views/applications-view";
-import { SearchCVView } from "@/components/views/search-cv-view";
-import { DockerControlView } from "@/components/views/docker-control-view";
-import { SettingsView } from "@/components/views/settings-view";
-import { api } from "@/lib/api";
+import { SettingsAndServicesView } from "@/components/views/settings-and-services-view";
+import { PreflightResponse, api } from "@/lib/api";
 
-type TabKey = "applications" | "search" | "docker" | "settings";
+type TabKey = "applications" | "settings";
 
 export default function UnifiedDashboard() {
   const [activeTab, setActiveTab] = useState<TabKey>("applications");
   const [pipelineRunning, setPipelineRunning] = useState<boolean>(false);
   const [scanMessage, setScanMessage] = useState<string | null>(null);
+  const [preflight, setPreflight] = useState<PreflightResponse | null>(null);
 
   // Cargar tab desde la URL si existe (?tab=...)
   useEffect(() => {
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
-      const tabParam = params.get("tab") as TabKey;
-      if (tabParam && ["applications", "search", "docker", "settings"].includes(tabParam)) {
-        setActiveTab(tabParam);
+      const tabParam = params.get("tab");
+      if (tabParam === "search" || tabParam === "applications") {
+        setActiveTab("applications");
+      } else if (tabParam === "docker" || tabParam === "settings") {
+        setActiveTab("settings");
       }
     }
   }, []);
 
-  // Monitorización periódica del pipeline con aborto ante fallos
+  // Monitorización periódica del pipeline y preflight con aborto ante fallos
   useEffect(() => {
     let failedAttempts = 0;
     const checkPipeline = async () => {
       try {
         const pre = await api.getPreflight();
+        setPreflight(pre);
         setPipelineRunning(pre.pipeline.is_running);
         failedAttempts = 0;
       } catch (err) {
@@ -89,30 +90,19 @@ export default function UnifiedDashboard() {
       key: "applications" as TabKey,
       label: "Candidaturas",
       icon: Briefcase,
-      badge: "Ofertas",
-    },
-    {
-      key: "search" as TabKey,
-      label: "Búsqueda y CV",
-      icon: Search,
-    },
-    {
-      key: "docker" as TabKey,
-      label: "Servicios y Logs",
-      icon: Activity,
     },
     {
       key: "settings" as TabKey,
-      label: "Configuración",
+      label: "Configuración y Servicios",
       icon: Settings,
     },
   ];
 
   return (
     <div className="flex flex-col min-h-[100dvh] w-full">
-      {/* Barra de Navegación Superior Unificada (Sticky, Fluida y Relativa) */}
-      <header className="sticky top-0 z-40 w-full border-b bg-background/80 backdrop-blur-md px-3 sm:px-6 lg:px-8">
-        <div className="flex h-14 sm:h-16 items-center justify-between gap-2 max-w-7xl mx-auto">
+      {/* Barra de Navegación Superior Unificada (Sticky, Fluida y Separación Máxima 5vw) */}
+      <header className="sticky top-0 z-40 w-full border-b bg-background/80 backdrop-blur-md px-4 sm:px-[3vw] lg:px-[5vw]">
+        <div className="flex h-14 sm:h-16 items-center justify-between gap-3 w-full">
           {/* Logo y Marca */}
           <div className="flex items-center gap-2.5 shrink-0">
             <div className="h-8 w-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center font-bold text-xs sm:text-sm shadow-sm ring-1 ring-primary/20">
@@ -133,7 +123,7 @@ export default function UnifiedDashboard() {
             </div>
           </div>
 
-          {/* Selector de Pestañas Flotante Central (Sin transiciones lentas de página) */}
+          {/* Selector de Pestañas Central */}
           <nav className="flex items-center gap-1 bg-muted/60 p-1 rounded-xl border max-w-full overflow-x-auto">
             {tabsConfig.map((t) => {
               const Icon = t.icon;
@@ -143,7 +133,7 @@ export default function UnifiedDashboard() {
                   key={t.key}
                   type="button"
                   onClick={() => handleTabChange(t.key)}
-                  className={`flex items-center gap-1.5 px-2.5 sm:px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all whitespace-nowrap ${
+                  className={`flex items-center gap-1.5 px-3 sm:px-4 py-1.5 rounded-lg text-xs font-medium transition-all whitespace-nowrap ${
                     isActive
                       ? "bg-background text-foreground shadow-sm font-semibold ring-1 ring-border/50"
                       : "text-muted-foreground hover:text-foreground hover:bg-background/40"
@@ -156,8 +146,56 @@ export default function UnifiedDashboard() {
             })}
           </nav>
 
-          {/* Acciones Rápidas del Header */}
-          <div className="flex items-center gap-2 shrink-0">
+          {/* Diagnóstico Preflight Global y Acción de Escaneo */}
+          <div className="flex items-center gap-2.5 shrink-0">
+            {/* Indicadores de Diagnóstico: Motor Ollama y SQLite WAL */}
+            <div className="hidden lg:flex items-center gap-2">
+              {/* Motor Ollama */}
+              <div
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors ${
+                  preflight?.ollama?.healthy
+                    ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                    : "bg-rose-500/10 text-rose-400 border-rose-500/20"
+                }`}
+                title={
+                  preflight?.ollama?.healthy
+                    ? `Motor Ollama Operativo: ${preflight.ollama.models?.join(", ") || "qwen2.5:3b-instruct"}`
+                    : `Motor Ollama Desconectado (${preflight?.ollama?.error || "Comprobar servicio"})`
+                }
+              >
+                <Cpu className="h-3 w-3" />
+                <span>Ollama: {preflight?.ollama?.healthy ? "Operativo" : "Desconectado"}</span>
+                <span
+                  className={`h-1.5 w-1.5 rounded-full ${
+                    preflight?.ollama?.healthy ? "bg-emerald-400 animate-pulse" : "bg-rose-400"
+                  }`}
+                />
+              </div>
+
+              {/* SQLite WAL */}
+              <div
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors ${
+                  preflight?.database?.healthy
+                    ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                    : "bg-rose-500/10 text-rose-400 border-rose-500/20"
+                }`}
+                title={
+                  preflight?.database?.healthy
+                    ? "Base de datos SQLite en modo WAL conectada y operativa"
+                    : `Error SQLite: ${preflight?.database?.error || "Comprobar volumen"}`
+                }
+              >
+                <Database className="h-3 w-3" />
+                <span>SQLite WAL: {preflight?.database?.healthy ? "Conectada" : "Error"}</span>
+                <span
+                  className={`h-1.5 w-1.5 rounded-full ${
+                    preflight?.database?.healthy ? "bg-emerald-400" : "bg-rose-400"
+                  }`}
+                />
+              </div>
+            </div>
+
+            {/* Botón de Escaneo Rápido */}
             <Button
               size="sm"
               onClick={handleQuickScan}
@@ -188,19 +226,17 @@ export default function UnifiedDashboard() {
         </div>
       )}
 
-      {/* Contenido Principal Fluido y 100% Relativo */}
-      <main className="flex-1 w-full max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6">
+      {/* Contenido Principal Fluido con Separación Máxima de 5vw de los Bordes */}
+      <main className="flex-1 w-full px-4 sm:px-[3vw] lg:px-[5vw] py-4 sm:py-6">
         <div className="w-full transition-opacity duration-200">
           {activeTab === "applications" && <ApplicationsView />}
-          {activeTab === "search" && <SearchCVView />}
-          {activeTab === "docker" && <DockerControlView />}
-          {activeTab === "settings" && <SettingsView />}
+          {activeTab === "settings" && <SettingsAndServicesView />}
         </div>
       </main>
 
       {/* Pie de Página Minimalista y Relativo */}
-      <footer className="border-t py-3 px-4 text-center text-[11px] text-muted-foreground bg-card/30">
-        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
+      <footer className="border-t py-3 px-4 sm:px-[3vw] lg:px-[5vw] text-center text-[11px] text-muted-foreground bg-card/30">
+        <div className="w-full flex flex-col sm:flex-row items-center justify-between gap-2">
           <span>lazyJobFinder · Arquitectura 100% soberana, local y privada</span>
           <span className="flex items-center gap-1 text-emerald-400">
             <ShieldCheck className="h-3.5 w-3.5" /> Procesamiento en RAM y SQLite local

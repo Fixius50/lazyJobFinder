@@ -47,7 +47,7 @@ export function ApplicationsView() {
         min_score: minScore > 0 ? minScore : undefined,
         modality: selectedModality || undefined,
         page: currentPage,
-        page_size: 15,
+        page_size: 16,
         sort_by: "created_at",
         sort_order: "desc",
       });
@@ -141,7 +141,7 @@ export function ApplicationsView() {
       {/* Estructura en Dos Columnas: Panel Lateral Izquierdo (CV + Filtros) | Listado a la Derecha */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6 items-start">
         {showCvPanel && (
-          <aside className="lg:col-span-4 xl:col-span-4 space-y-4">
+          <aside className="lg:col-span-4 xl:col-span-3 space-y-4">
             <CvManager onCvChanged={fetchJobs} />
             <JobFilters
               searchTerm={searchTerm}
@@ -174,17 +174,17 @@ export function ApplicationsView() {
           </aside>
         )}
 
-        <section className={`${showCvPanel ? "lg:col-span-8 xl:col-span-8" : "lg:col-span-12"} space-y-4`}>
-          {/* Listado de Ofertas */}
+        <section className={`${showCvPanel ? "lg:col-span-8 xl:col-span-9" : "lg:col-span-12"} space-y-4`}>
+          {/* Listado de Ofertas en cuadrícula de 4 tarjetas por fila */}
           <div className="space-y-3">
             {loading ? (
-              <div className="flex flex-col items-center justify-center py-12 text-muted-foreground space-y-2">
+              <div className="flex flex-col items-center justify-center py-16 text-muted-foreground space-y-2">
                 <RefreshCw className="h-6 w-6 animate-spin text-primary" />
                 <p className="text-xs">Consultando candidaturas en base de datos local...</p>
               </div>
             ) : !jobsData || jobsData.items.length === 0 ? (
               <Card className="border-dashed">
-                <CardContent className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground space-y-2">
+                <CardContent className="flex flex-col items-center justify-center py-16 text-center text-muted-foreground space-y-2">
                   <Briefcase className="h-8 w-8 text-muted-foreground/60" />
                   <p className="text-sm font-medium text-foreground">No se encontraron candidaturas</p>
                   <p className="text-xs max-w-sm">
@@ -193,7 +193,11 @@ export function ApplicationsView() {
                 </CardContent>
               </Card>
             ) : (
-              <div className="space-y-2.5">
+              <div
+                className={`grid grid-cols-1 sm:grid-cols-2 ${
+                  showCvPanel ? "lg:grid-cols-2 xl:grid-cols-4" : "lg:grid-cols-3 xl:grid-cols-4"
+                } 2xl:grid-cols-4 gap-3 sm:gap-3.5`}
+              >
                 {jobsData.items.map((job: JobListItem) => (
                   <JobCard
                     key={job.id}

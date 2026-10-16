@@ -89,7 +89,7 @@ export function CvManager({ onCvChanged, className = "" }: CvManagerProps) {
       setUploadProgress(100);
       const ext = (res.type || res.filename?.split(".").pop() || "archivo").toUpperCase();
       setUploadMessage({
-        text: `CV "${res.filename}" cargado correctamente (${ext}).`,
+        text: `CV "${res.filename}" cargado (${ext}).`,
         error: false,
       });
       await loadData();
@@ -120,139 +120,137 @@ export function CvManager({ onCvChanged, className = "" }: CvManagerProps) {
     }
   };
 
+  const handlePreview = async () => {
+    setCvPreviewLoading(true);
+    setCvPreviewOpen(true);
+    try {
+      const data = await api.previewActiveCV();
+      setCvPreviewData(data);
+    } catch (err: any) {
+      alert(`Error extrayendo texto: ${err.message}`);
+      setCvPreviewOpen(false);
+    } finally {
+      setCvPreviewLoading(false);
+    }
+  };
+
   return (
     <div className={`space-y-4 ${className}`}>
-      {/* Tarjeta de CV Activo */}
-      <Card className="border bg-card/80 backdrop-blur-sm shadow-sm">
-        <CardHeader className="pb-2.5 pt-3.5 px-4">
+      {/* Tarjeta Unificada de CV Activo y Subida en una sola fila */}
+      <Card className="border bg-card/80 backdrop-blur-sm shadow-sm overflow-hidden">
+        <CardHeader className="pb-2 pt-3 px-3 sm:px-4 border-b border-border/40">
           <div className="flex items-center justify-between gap-1">
             <div className="flex items-center gap-1.5">
-              <CardTitle className="text-xs sm:text-sm flex items-center gap-2">
-                <FileCheck className="h-4 w-4 text-primary" />
-                CV Activo
-              </CardTitle>
-              <InfoTooltip content="Documento de referencia que contrasta la IA local con cada oferta encontrada para calcular el scoring ATS." />
+              <FileCheck className="h-4 w-4 text-primary" />
+              <CardTitle className="text-xs sm:text-sm font-semibold">Currículum Activo</CardTitle>
+              <InfoTooltip content="Documento que evalúa la IA local frente a cada oferta para determinar la puntuación ATS y redactar documentos adaptados." />
             </div>
-            <Badge variant={activeCV?.is_default ? "outline" : "secondary"} className="text-[10px]">
+            <Badge variant={activeCV?.is_default ? "outline" : "secondary"} className="text-[10px] py-0">
               {activeCV?.type === "canonical" ? "Canónico" : "Personalizado"}
             </Badge>
           </div>
         </CardHeader>
-        <CardContent className="space-y-3.5 pt-1 px-4">
-          <div className="bg-muted/40 p-2.5 rounded-lg text-xs space-y-1.5 font-mono border">
+
+        <CardContent className="space-y-3 pt-3 px-3 sm:px-4">
+          {/* Ficha técnica compacta */}
+          <div className="bg-muted/40 p-2 rounded-lg text-xs space-y-1 font-mono border">
             <div className="flex justify-between gap-2">
               <span className="text-muted-foreground shrink-0">Archivo:</span>
-              <span className="font-semibold text-foreground truncate max-w-[170px]" title={activeCV?.filename}>
+              <span className="font-semibold text-foreground truncate max-w-[150px]" title={activeCV?.filename}>
                 {activeCV?.filename || "cv_base.md"}
               </span>
             </div>
-            <div className="flex justify-between gap-2">
+            <div className="flex justify-between gap-2 text-[11px]">
               <span className="text-muted-foreground shrink-0">Tamaño:</span>
               <span>{activeCV?.size_bytes ? `${(activeCV.size_bytes / 1024).toFixed(1)} KB` : "0 KB"}</span>
             </div>
-            <div className="flex justify-between gap-2">
-              <span className="text-muted-foreground shrink-0">Modificado:</span>
-              <span className="truncate max-w-[170px]">{activeCV?.modified_at || "n/a"}</span>
+          </div>
+
+          {/* Fila del Selector de CV con Botón Subir CV a la derecha */}
+          <div className="space-y-1">
+            <div className="flex items-center justify-between">
+              <label className="text-[11px] font-medium text-muted-foreground">Seleccionar CV Activo:</label>
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileUpload}
+                accept=".pdf,.md,.markdown,.txt"
+                className="hidden"
+                id="cv-file-upload-input"
+                disabled={isUploading}
+              />
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              <div className="flex-1 min-w-0">
+                <Select
+                  value={activeCV?.is_default ? "default" : activeCV?.filename}
+                  onChange={(e) => handleSelectCV(e.target.value)}
+                  className="text-xs w-full h-8 bg-background truncate"
+                >
+                  <option value="default">cv_base.md (Base)</option>
+                  {cvList
+                    .filter((c) => !c.is_default)
+                    .map((c) => (
+                      <option key={c.filename} value={c.filename}>
+                        {c.filename}
+                      </option>
+                    ))}
+                </Select>
+              </div>
+
+              {/* Botón para subir CV ubicado a la derecha del selector */}
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isUploading}
+                className="h-8 px-2.5 text-xs shrink-0 flex items-center gap-1 font-medium hover:border-primary/50 shadow-xs"
+                title="Subir nuevo currículum en PDF, Markdown o TXT"
+              >
+                <Upload className={`h-3.5 w-3.5 ${isUploading ? "animate-bounce text-primary" : "text-primary"}`} />
+                <span>Subir CV</span>
+              </Button>
             </div>
           </div>
 
-          {/* Selector de CV */}
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-foreground">Cambiar CV Activo:</label>
-            <Select
-              value={activeCV?.is_default ? "default" : activeCV?.filename}
-              onChange={(e) => handleSelectCV(e.target.value)}
-              className="text-xs w-full"
-            >
-              <option value="default">cv_base.md (Perfil Base Canónico)</option>
-              {cvList
-                .filter((c) => !c.is_default)
-                .map((c) => (
-                  <option key={c.filename} value={c.filename}>
-                    {c.filename}
-                  </option>
-                ))}
-            </Select>
-          </div>
-
-          {/* Botón de Previsualización de Texto Extraído */}
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={async () => {
-              setCvPreviewLoading(true);
-              setCvPreviewOpen(true);
-              try {
-                const data = await api.previewActiveCV();
-                setCvPreviewData(data);
-              } catch (err: any) {
-                alert(`Error extrayendo texto: ${err.message}`);
-                setCvPreviewOpen(false);
-              } finally {
-                setCvPreviewLoading(false);
-              }
-            }}
-            className="w-full text-xs h-8 flex items-center justify-center gap-1.5"
-          >
-            <Eye className="h-3.5 w-3.5 text-primary" />
-            Previsualizar Texto Extraído
-          </Button>
-        </CardContent>
-      </Card>
-
-      {/* Tarjeta de Subida con Barra de Progreso */}
-      <Card className="border bg-card/80 backdrop-blur-sm shadow-sm">
-        <CardHeader className="pb-2.5 pt-3.5 px-4">
-          <div className="flex items-center gap-1.5">
-            <CardTitle className="text-xs sm:text-sm flex items-center gap-2">
-              <Upload className="h-4 w-4 text-primary" />
-              Subir Currículum
-            </CardTitle>
-            <InfoTooltip content="Admite PDF, Markdown (.md) o Texto (.txt). Se extraerá el texto directamente sin alterar tu perfil canónico." />
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-3 pt-1 px-4">
-          <input
-            type="file"
-            ref={fileInputRef}
-            onChange={handleFileUpload}
-            accept=".pdf,.md,.markdown,.txt"
-            className="hidden"
-            id="cv-file-upload-input"
-            disabled={isUploading}
-          />
-          <label
-            htmlFor="cv-file-upload-input"
-            className={`border-2 border-dashed rounded-lg p-3.5 flex flex-col items-center justify-center text-center space-y-1.5 transition-all block ${
-              isUploading
-                ? "bg-primary/5 border-primary/50 cursor-wait"
-                : "cursor-pointer hover:border-primary/60 bg-muted/20"
-            }`}
-          >
-            <Upload className={`h-5 w-5 ${isUploading ? "text-primary animate-bounce" : "text-muted-foreground"}`} />
-            <span className="text-xs font-medium text-foreground">
-              {isUploading ? "Analizando currículum..." : "Subir PDF o Markdown"}
-            </span>
-          </label>
-
-          {/* Barra de Progreso Visual Modular */}
+          {/* Barra de Progreso Visual mientras se procesa la subida */}
           {isUploading && (
-            <CvProgressBar stage={uploadStage} progress={uploadProgress} />
+            <div className="pt-1">
+              <CvProgressBar stage={uploadStage} progress={uploadProgress} />
+            </div>
           )}
 
+          {/* Mensaje de confirmación o alerta tras subir */}
           {uploadMessage && (
             <div
-              className={`p-2.5 rounded text-xs flex items-center gap-2 ${
+              className={`p-2 rounded text-[11px] flex items-center gap-1.5 ${
                 uploadMessage.error
                   ? "bg-destructive/15 text-destructive border border-destructive/20"
                   : "bg-emerald-500/15 text-emerald-400 border border-emerald-500/20"
               }`}
             >
-              {uploadMessage.error ? <AlertCircle className="h-4 w-4 shrink-0" /> : <CheckCircle2 className="h-4 w-4 shrink-0" />}
-              <span>{uploadMessage.text}</span>
+              {uploadMessage.error ? (
+                <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+              ) : (
+                <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+              )}
+              <span className="truncate">{uploadMessage.text}</span>
             </div>
           )}
+
+          {/* Botón de Previsualización de Texto Extraído */}
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={handlePreview}
+            className="w-full text-xs h-7 flex items-center justify-center gap-1.5 text-muted-foreground hover:text-foreground border border-dashed border-border/60 hover:border-primary/40"
+          >
+            <Eye className="h-3.5 w-3.5 text-primary" />
+            <span>Previsualizar Texto Extraído</span>
+          </Button>
         </CardContent>
       </Card>
 

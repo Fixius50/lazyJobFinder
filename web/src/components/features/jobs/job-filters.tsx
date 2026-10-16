@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { Search, SlidersHorizontal, MapPin, RotateCcw } from "lucide-react";
+import { Search, SlidersHorizontal, MapPin, RotateCcw, Ban, Save } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,8 @@ interface JobFiltersProps {
   onSearchTermChange: (term: string) => void;
   locationTerm: string;
   onLocationTermChange: (term: string) => void;
+  exclusionTerm?: string;
+  onExclusionTermChange?: (term: string) => void;
   selectedSource: string;
   onSourceChange: (source: string) => void;
   selectedStatus: string;
@@ -24,6 +26,7 @@ interface JobFiltersProps {
   onMinScoreChange: (score: number) => void;
   onSubmitSearch: (e: React.FormEvent) => void;
   onResetFilters?: () => void;
+  onSaveCriteria?: () => void;
 }
 
 export function JobFilters({
@@ -31,6 +34,8 @@ export function JobFilters({
   onSearchTermChange,
   locationTerm,
   onLocationTermChange,
+  exclusionTerm = "",
+  onExclusionTermChange,
   selectedSource,
   onSourceChange,
   selectedStatus,
@@ -41,6 +46,7 @@ export function JobFilters({
   onMinScoreChange,
   onSubmitSearch,
   onResetFilters,
+  onSaveCriteria,
 }: JobFiltersProps) {
   // Color e indicador según la escala definida por el usuario
   const getScoreBadgeColor = (score: number) => {
@@ -61,6 +67,7 @@ export function JobFilters({
   const hasActiveFilters =
     Boolean(searchTerm) ||
     Boolean(locationTerm) ||
+    Boolean(exclusionTerm) ||
     Boolean(selectedSource) ||
     Boolean(selectedStatus) ||
     Boolean(selectedModality) ||
@@ -72,8 +79,8 @@ export function JobFilters({
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-1.5">
             <SlidersHorizontal className="h-3.5 w-3.5 text-primary" />
-            <CardTitle className="text-xs sm:text-sm font-semibold">Filtros y Búsqueda</CardTitle>
-            <InfoTooltip content="Filtra por puesto, ubicación geográfica o país, portal de empleo, estado de candidatura y afinidad calculada por el LLM." />
+            <CardTitle className="text-xs sm:text-sm font-semibold">Criterios y Filtros de Búsqueda</CardTitle>
+            <InfoTooltip content="Configura los términos de búsqueda, ubicaciones, filtros de exclusión y parámetros de afinidad utilizados tanto en la visualización como en los conectores." />
           </div>
           {hasActiveFilters && onResetFilters && (
             <Button
@@ -93,14 +100,14 @@ export function JobFilters({
 
       <CardContent className="p-3 sm:p-4 space-y-3 overflow-visible">
         <form onSubmit={onSubmitSearch} className="space-y-3">
-          {/* Búsqueda por Puesto o Tecnología */}
+          {/* Términos de búsqueda / Puesto */}
           <div className="space-y-1">
-            <label className="text-[11px] font-medium text-muted-foreground">Puesto o Tecnología:</label>
+            <label className="text-[11px] font-medium text-muted-foreground">Términos de búsqueda:</label>
             <div className="relative w-full">
               <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
               <Input
                 type="text"
-                placeholder="Ej: Python, React, Backend..."
+                placeholder="ej: Desarrollador Junior, Full Stack, React..."
                 value={searchTerm}
                 onChange={(e) => onSearchTermChange(e.target.value)}
                 className="pl-8 text-xs h-8 w-full bg-background"
@@ -108,23 +115,24 @@ export function JobFilters({
             </div>
           </div>
 
-          {/* Filtro de Ubicación / Lugares del mundo con sugerencias */}
+          {/* Ubicaciones prioritarias / Ubicación */}
           <div className="space-y-1">
             <label className="text-[11px] font-medium text-muted-foreground flex items-center gap-1">
               <MapPin className="h-3 w-3 text-primary" />
-              Ubicación / País / Región:
+              Ubicaciones prioritarias:
             </label>
             <div className="relative w-full">
               <Input
                 type="text"
                 list="world-locations"
-                placeholder="Ej: España, Madrid, Remoto, Europa..."
+                placeholder="ej: Spain, Madrid, Barcelona, Remoto..."
                 value={locationTerm}
                 onChange={(e) => onLocationTermChange(e.target.value)}
                 className="text-xs h-8 w-full bg-background"
               />
               <datalist id="world-locations">
                 <option value="España" />
+                <option value="Spain" />
                 <option value="Madrid" />
                 <option value="Barcelona" />
                 <option value="Valencia" />
@@ -144,6 +152,21 @@ export function JobFilters({
                 <option value="Latinoamérica" />
               </datalist>
             </div>
+          </div>
+
+          {/* Filtros de exclusión (descartar si contiene) */}
+          <div className="space-y-1">
+            <label className="text-[11px] font-medium text-muted-foreground flex items-center gap-1">
+              <Ban className="h-3 w-3 text-destructive" />
+              Filtros de exclusión (descartar si contiene):
+            </label>
+            <Input
+              type="text"
+              placeholder="ej: Senior, Lead, Architect, 5+ años..."
+              value={exclusionTerm}
+              onChange={(e) => onExclusionTermChange?.(e.target.value)}
+              className="text-xs h-8 w-full bg-background"
+            />
           </div>
 
           {/* Selectores de Modalidad, Portal y Estado */}
@@ -214,7 +237,7 @@ export function JobFilters({
               </span>
             </div>
 
-            {/* Contenedor del Slider con padding lateral seguro para que el cursor no se corte */}
+            {/* Contenedor del Slider con padding lateral seguro */}
             <div className="px-1 py-1 w-full overflow-visible">
               <input
                 type="range"
@@ -267,9 +290,25 @@ export function JobFilters({
             </div>
           </div>
 
-          <Button type="submit" size="sm" className="w-full h-8 text-xs font-medium shadow-sm">
-            Aplicar Filtros
-          </Button>
+          {/* Botones de Acción */}
+          <div className="flex items-center gap-2 pt-1">
+            <Button type="submit" size="sm" className="flex-1 h-8 text-xs font-medium shadow-sm">
+              Aplicar Filtros
+            </Button>
+            {onSaveCriteria && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={onSaveCriteria}
+                className="h-8 px-2.5 text-xs font-medium flex items-center gap-1 border-primary/40 hover:bg-primary/10 text-primary shrink-0"
+                title="Guardar como criterios base en la configuración del conector"
+              >
+                <Save className="h-3.5 w-3.5" />
+                <span>Guardar</span>
+              </Button>
+            )}
+          </div>
         </form>
       </CardContent>
     </Card>

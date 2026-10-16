@@ -15,6 +15,7 @@ import { CvManager } from "@/components/views/cv-manager";
 import { JobCard } from "@/components/features/jobs/job-card";
 import { JobFilters } from "@/components/features/jobs/job-filters";
 import { JobDetailDialog } from "@/components/features/jobs/job-detail-dialog";
+import { PurgeHistoryCard } from "@/components/features/maintenance/purge-history-card";
 import { JobListItem, JobDetail, PaginatedJobsResponse, api } from "@/lib/api";
 
 export function ApplicationsView() {
@@ -25,6 +26,7 @@ export function ApplicationsView() {
   // Filtros y Paginación
   const [searchTerm, setSearchTerm] = useState<string>("");
   const [locationTerm, setLocationTerm] = useState<string>("");
+  const [exclusionTerm, setExclusionTerm] = useState<string>("");
   const [selectedSource, setSelectedSource] = useState<string>("");
   const [selectedStatus, setSelectedStatus] = useState<string>("");
   const [minScore, setMinScore] = useState<number>(0);
@@ -72,11 +74,31 @@ export function ApplicationsView() {
   const handleResetFilters = () => {
     setSearchTerm("");
     setLocationTerm("");
+    setExclusionTerm("");
     setSelectedSource("");
     setSelectedStatus("");
     setSelectedModality("");
     setMinScore(0);
     setCurrentPage(1);
+  };
+
+  const handleSaveCriteria = async () => {
+    try {
+      const terminos = searchTerm.split(",").map((t) => t.trim()).filter(Boolean);
+      const ubicaciones = locationTerm.split(",").map((u) => u.trim()).filter(Boolean);
+      const exclusiones = exclusionTerm.split(",").map((e) => e.trim()).filter(Boolean);
+
+      await api.updateSearchConfig({
+        terminos: terminos.length > 0 ? terminos : ["Desarrollador Junior", "Full Stack"],
+        ubicaciones: ubicaciones.length > 0 ? ubicaciones : ["Spain", "Remoto"],
+        filtros_exclusion: exclusiones,
+        antiguedad_horas: 48,
+        limite_por_fuente: 15,
+      });
+      alert("Criterios de búsqueda y exclusiones guardados en la configuración de los conectores.");
+    } catch (e: any) {
+      alert(`Error al guardar criterios: ${e.message}`);
+    }
   };
 
   const handleOpenDetail = async (jobId: number) => {
@@ -148,6 +170,8 @@ export function ApplicationsView() {
               onSearchTermChange={setSearchTerm}
               locationTerm={locationTerm}
               onLocationTermChange={setLocationTerm}
+              exclusionTerm={exclusionTerm}
+              onExclusionTermChange={setExclusionTerm}
               selectedSource={selectedSource}
               onSourceChange={(source) => {
                 setSelectedSource(source);
@@ -170,7 +194,11 @@ export function ApplicationsView() {
               }}
               onSubmitSearch={handleSearchSubmit}
               onResetFilters={handleResetFilters}
+              onSaveCriteria={handleSaveCriteria}
             />
+
+            {/* Tarjeta de mantenimiento seguro con botón rojo de vaciar historial */}
+            <PurgeHistoryCard onHistoryCleared={fetchJobs} />
           </aside>
         )}
 

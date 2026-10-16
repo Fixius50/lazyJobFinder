@@ -743,10 +743,12 @@ class Database:
     def get_jobs_paginated(
         self,
         search: Optional[str] = None,
+        location: Optional[str] = None,
         source: Optional[str] = None,
         status: Optional[str] = None,
         min_score: Optional[int] = None,
         is_remote: Optional[bool] = None,
+        modality: Optional[str] = None,
         only_ui_saved: bool = True,
         page: int = 1,
         page_size: int = 20,
@@ -782,6 +784,10 @@ class Database:
             where_clauses.append("(LOWER(j.title) LIKE ? OR LOWER(j.company) LIKE ? OR LOWER(j.location) LIKE ?)")
             params.extend([search_param, search_param, search_param])
 
+        if location:
+            where_clauses.append("LOWER(j.location) LIKE ?")
+            params.append(f"%{location.strip().lower()}%")
+
         if source:
             where_clauses.append("j.source = ?")
             params.append(source)
@@ -794,7 +800,15 @@ class Database:
             where_clauses.append("e.score >= ?")
             params.append(min_score)
 
-        if is_remote is not None:
+        if modality:
+            mod = modality.strip().lower()
+            if mod in ("remoto", "teletrabajo"):
+                where_clauses.append("(j.is_remote = 1 OR LOWER(j.location) LIKE '%remoto%' OR LOWER(j.location) LIKE '%teletrabajo%' OR LOWER(j.title) LIKE '%remoto%' OR LOWER(j.title) LIKE '%teletrabajo%')")
+            elif mod == "hibrido":
+                where_clauses.append("(LOWER(j.location) LIKE '%hibrid%' OR LOWER(j.location) LIKE '%híbrid%' OR LOWER(j.title) LIKE '%hibrid%' OR LOWER(j.title) LIKE '%híbrid%' OR LOWER(j.description) LIKE '%híbrido%' OR LOWER(j.description) LIKE '%hibrido%')")
+            elif mod == "presencial":
+                where_clauses.append("(j.is_remote = 0 AND LOWER(j.location) NOT LIKE '%remoto%' AND LOWER(j.location) NOT LIKE '%teletrabajo%' AND LOWER(j.title) NOT LIKE '%remoto%' AND LOWER(j.title) NOT LIKE '%teletrabajo%' AND LOWER(j.location) NOT LIKE '%hibrid%' AND LOWER(j.location) NOT LIKE '%híbrid%')")
+        elif is_remote is not None:
             where_clauses.append("j.is_remote = ?")
             params.append(1 if is_remote else 0)
 

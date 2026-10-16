@@ -19,9 +19,10 @@ import type {
 export function getApiBaseUrl(): string {
   if (typeof window !== "undefined") {
     // Si se accede desde Next.js dev server en puerto 3000,
-    // se conecta directamente a FastAPI (puerto 8000) para evitar que el proxy interno de Node sufra socket hang up / ECONNRESET.
+    // se conecta directamente a FastAPI (puerto 8000) usando el mismo hostname (localhost o 127.0.0.1)
     if (window.location.port === "3000") {
-      return "http://127.0.0.1:8000/api";
+      const host = window.location.hostname || "localhost";
+      return `http://${host}:8000/api`;
     }
   }
   return "/api";
@@ -164,10 +165,12 @@ export const api = {
   // 3. Candidaturas
   listJobs: (params: {
     search?: string;
+    location?: string;
     source?: string;
     status?: string;
     min_score?: number;
     is_remote?: boolean;
+    modality?: string;
     only_ui_saved?: boolean;
     page?: number;
     page_size?: number;
@@ -176,11 +179,13 @@ export const api = {
   }) => {
     const searchParams = new URLSearchParams();
     if (params.search) searchParams.append("search", params.search);
+    if (params.location) searchParams.append("location", params.location);
     if (params.source) searchParams.append("source", params.source);
     if (params.status) searchParams.append("status", params.status);
     if (params.min_score !== undefined && params.min_score !== null)
       searchParams.append("min_score", params.min_score.toString());
     if (params.is_remote !== undefined) searchParams.append("is_remote", params.is_remote ? "true" : "false");
+    if (params.modality) searchParams.append("modality", params.modality);
     if (params.only_ui_saved !== undefined)
       searchParams.append("only_ui_saved", params.only_ui_saved ? "true" : "false");
     if (params.page) searchParams.append("page", params.page.toString());
@@ -209,6 +214,7 @@ export const api = {
   updateChannels: (payload: {
     guardar_en_interfaz: boolean;
     enviar_telegram: boolean;
+    telegram_user_id?: string;
     telegram_adjuntar_docs?: boolean;
     umbral_minimo_puntuacion?: number;
   }) =>

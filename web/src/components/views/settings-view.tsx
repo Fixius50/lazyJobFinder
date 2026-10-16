@@ -11,6 +11,7 @@ import {
   Send,
   RefreshCw,
   Globe,
+  UserCheck,
 } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -30,6 +31,7 @@ export function SettingsView() {
   // Estados de Canales
   const [guardarInterfaz, setGuardarInterfaz] = useState<boolean>(true);
   const [enviarTelegram, setEnviarTelegram] = useState<boolean>(true);
+  const [telegramUserId, setTelegramUserId] = useState<string>("");
   const [adjuntarDocsTg, setAdjuntarDocsTg] = useState<boolean>(true);
   const [umbralMinimo, setUmbralMinimo] = useState<number>(65);
 
@@ -50,6 +52,11 @@ export function SettingsView() {
       setSettings(res);
       setGuardarInterfaz(res.notificaciones.guardar_en_interfaz ?? true);
       setEnviarTelegram(res.notificaciones.enviar_telegram ?? true);
+      setTelegramUserId(
+        res.secrets_status?.telegram_user_id ||
+          res.notificaciones?.telegram?.allowed_user_id ||
+          ""
+      );
       setAdjuntarDocsTg(res.notificaciones.telegram?.adjuntar_documentos ?? true);
       setUmbralMinimo(res.evaluacion?.umbral_minimo_puntuacion ?? 65);
 
@@ -73,6 +80,7 @@ export function SettingsView() {
       await api.updateChannels({
         guardar_en_interfaz: guardarInterfaz,
         enviar_telegram: enviarTelegram,
+        telegram_user_id: telegramUserId.trim() || undefined,
         telegram_adjuntar_docs: adjuntarDocsTg,
         umbral_minimo_puntuacion: umbralMinimo,
       });
@@ -199,8 +207,15 @@ export function SettingsView() {
                     <span className="font-semibold text-xs text-foreground">
                       Enviar alertas por Telegram
                     </span>
-                    <Badge variant={settings?.secrets_status.telegram_configured ? "success" : "secondary"} className="text-[10px] py-0">
-                      {settings?.secrets_status.telegram_configured ? "Token presente" : "Falta token"}
+                    <Badge
+                      variant={settings?.secrets_status.telegram_configured ? "success" : "secondary"}
+                      className="text-[10px] py-0"
+                    >
+                      {settings?.secrets_status.telegram_configured
+                        ? "Configurado"
+                        : settings?.secrets_status.telegram_token_present
+                        ? "Token OK · Falta ID"
+                        : "Falta token"}
                     </Badge>
                   </div>
                   <p className="text-[11px] text-muted-foreground">
@@ -214,10 +229,36 @@ export function SettingsView() {
                 />
               </div>
 
-              {/* Opción secundaria: Adjuntar PDFs por Telegram */}
+              {/* Opciones de Telegram: ID de usuario y Adjuntar PDFs */}
               {enviarTelegram && (
-                <div className="pl-4 sm:pl-6 border-l-2 border-primary/40 space-y-3 text-xs">
-                  <div className="flex items-center justify-between">
+                <div className="pl-4 sm:pl-6 border-l-2 border-primary/40 space-y-3 text-xs bg-muted/10 p-3 rounded-r-lg">
+                  {/* Campo de ID de Usuario Telegram */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <label htmlFor="telegram-user-id" className="font-medium text-foreground text-xs flex items-center gap-1.5">
+                        <UserCheck className="h-3.5 w-3.5 text-primary" />
+                        ID de Usuario de Telegram (Chat ID):
+                      </label>
+                      {telegramUserId ? (
+                        <span className="text-[10px] text-emerald-400 font-mono">ID: {telegramUserId}</span>
+                      ) : (
+                        <span className="text-[10px] text-amber-400 font-mono">Sin configurar</span>
+                      )}
+                    </div>
+                    <Input
+                      id="telegram-user-id"
+                      type="text"
+                      placeholder="Ej: 123456789 (tu ID numérico personal)"
+                      value={telegramUserId}
+                      onChange={(e) => setTelegramUserId(e.target.value)}
+                      className="text-xs h-8 font-mono bg-background"
+                    />
+                    <p className="text-[10px] text-muted-foreground leading-relaxed">
+                      Para saber tu ID numérico, abre Telegram y pulsa Iniciar en el bot <strong>@userinfobot</strong> o envíale un mensaje a tu propio bot. Solo este ID recibirá las alertas.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-2 border-t border-border/40">
                     <span className="text-foreground font-medium">
                       Adjuntar documentos PDF generados en Telegram:
                     </span>

@@ -29,10 +29,12 @@ class UpdateJobChannelRequest(BaseModel):
 @router.get("")
 def list_jobs(
     search: Optional[str] = Query(None, description="Búsqueda por título, empresa o ubicación"),
+    location: Optional[str] = Query(None, description="Filtrar por ubicación o país"),
     source: Optional[str] = Query(None, description="Filtrar por portal fuente"),
     status: Optional[str] = Query(None, description="Filtrar por estado de candidatura"),
     min_score: Optional[int] = Query(None, ge=0, le=100, description="Puntuación mínima de afinidad"),
     is_remote: Optional[bool] = Query(None, description="Filtrar por trabajo remoto"),
+    modality: Optional[str] = Query(None, description="Filtrar por modalidad: presencial, teletrabajo o hibrido"),
     only_ui_saved: bool = Query(True, description="Mostrar solo ofertas marcadas para interfaz"),
     page: int = Query(1, ge=1, description="Número de página"),
     page_size: int = Query(20, ge=5, le=100, description="Elementos por página"),
@@ -43,10 +45,12 @@ def list_jobs(
     db = get_db()
     return db.get_jobs_paginated(
         search=search,
+        location=location,
         source=source,
         status=status,
         min_score=min_score,
         is_remote=is_remote,
+        modality=modality,
         only_ui_saved=only_ui_saved,
         page=page,
         page_size=page_size,

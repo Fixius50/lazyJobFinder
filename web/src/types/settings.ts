@@ -20,6 +20,7 @@ export interface SettingsResponse {
       adjuntar_documentos: boolean;
       notificar_solo_superan_umbral: boolean;
       notificar_resumen_vacio: boolean;
+      allowed_user_id?: string;
     };
   };
   horario: {
@@ -28,6 +29,8 @@ export interface SettingsResponse {
   };
   secrets_status: {
     telegram_configured: boolean;
+    telegram_token_present?: boolean;
+    telegram_user_id?: string;
     infojobs_configured: boolean;
   };
   privacy_notice: {

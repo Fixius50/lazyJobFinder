@@ -36,6 +36,10 @@ if "%~1"=="5" ( set "CLI_INVOKED=1" & goto :PULL_MODEL )
 if "%~1"=="--stop" ( set "CLI_INVOKED=1" & goto :STOP_SERVICES )
 if "%~1"=="6" ( set "CLI_INVOKED=1" & goto :STOP_SERVICES )
 
+if "%~1"=="--build" ( set "CLI_INVOKED=1" & goto :REBUILD_ALL )
+if "%~1"=="-b" ( set "CLI_INVOKED=1" & goto :REBUILD_ALL )
+if "%~1"=="7" ( set "CLI_INVOKED=1" & goto :REBUILD_ALL )
+
 :: -----------------------------------------------------------------------------
 :: Menu Interactivo
 :: -----------------------------------------------------------------------------
@@ -55,11 +59,13 @@ echo   [3] Arrancar Panel Web en Modo Desarrollo (Next.js http://localhost:3000)
 echo   [4] Diagnostico de estado y salud de los servicios
 echo   [5] Descargar / Actualizar modelo IA en Ollama (qwen2.5:3b-instruct)
 echo   [6] Detener todos los servicios ordenadamente
+echo   [7] Reconstruir y Actualizar TODO (Frontend Next.js + Backend Docker)
 echo   [Q] Salir
 echo.
-choice /c 123456q /n /m "Introduce una opcion [1-6, Q]: "
+choice /c 1234567q /n /m "Introduce una opcion [1-7, Q]: "
 
-if errorlevel 7 goto :EXIT
+if errorlevel 8 goto :EXIT
+if errorlevel 7 goto :REBUILD_ALL
 if errorlevel 6 goto :STOP_SERVICES
 if errorlevel 5 goto :PULL_MODEL
 if errorlevel 4 goto :SHOW_STATUS
@@ -75,6 +81,7 @@ goto :MENU
 echo Uso de start.bat:
 echo   start.bat               Modo interactivo con menu visual
 echo   start.bat --all         Arrancar todo: Docker, Ollama y panel Web
+echo   start.bat --build       Reconstruir y compilar todo (Frontend + Backend Docker)
 echo   start.bat --docker      Arrancar solo los contenedores Docker
 echo   start.bat --web         Arrancar solo el servidor web de Next.js
 echo   start.bat --status      Mostrar estado de salud y contenedores
@@ -160,14 +167,14 @@ if not exist "%~dp0web\node_modules" (
     echo   [OK] Dependencias web instaladas.
 )
 
-if not exist "%~dp0web\out" (
-    echo   [i] Compilando panel web estatico unificado...
-    pushd "%~dp0web"
-    call npm run build
-    popd
-    echo   [OK] Panel web estatico compilado.
+echo   [i] Compilando panel web estatico unificado (Next.js)...
+pushd "%~dp0web"
+call npm run build
+popd
+if %ERRORLEVEL% equ 0 (
+    echo   [OK] Panel web actualizado y listo para puerto unificado 8000.
 ) else (
-    echo   [OK] Panel web compilado y listo para puerto unificado 8000.
+    echo   [!] Advertencia: La compilacion del panel web reporto errores. Se usara la version previa si existe.
 )
 exit /b 0
 
@@ -319,6 +326,84 @@ echo --^> Deteniendo servicios Docker ordenadamente...
 docker compose stop
 echo.
 echo   [OK] Servicios detenidos. Datos y modelos conservados intactos.
+echo.
+if "%CLI_INVOKED%"=="1" goto :EXIT
+pause
+goto :MENU
+
+:: -----------------------------------------------------------------------------
+:: Opcion 7: Reconstruir y Actualizar TODO (Frontend + Backend)
+:: -----------------------------------------------------------------------------
+:REBUILD_ALL
+call :CHECK_PREREQS
+if %ERRORLEVEL% neq 0 goto :EXIT
+cd /d "%~dp0"
+echo.
+echo =====================================================================
+echo   Reconstruyendo y Actualizando lazyJobFinder (Frontend + Backend)
+echo =====================================================================
+echo.
+echo [1/3] Compilando panel web estatico unificado (Next.js)...
+pushd "%~dp0web"
+call npm run build
+if %ERRORLEVEL% neq 0 (
+    echo.
+    echo   [ERROR] Fallo la compilacion del panel web.
+    popd
+    if "%CLI_INVOKED%"=="1" goto :EXIT
+    pause
+    goto :MENU
+)
+popd
+echo   [OK] Panel web compilado correctamente en web\out.
+echo.
+echo [2/3] Reconstruyendo imagen de contenedor Docker (Backend)...
+docker compose build --no-cache lazyjobfinder
+if %ERRORLEVEL% neq 0 (
+    echo.
+    echo   [ERROR] Fallo la reconstruccion del contenedor Docker.
+    if "%CLI_INVOKED%"=="1" goto :EXIT
+    pause
+    goto :MENU
+)
+echo   [OK] Imagen Docker de lazyjobfinder reconstruida sin cache.
+echo.
+echo [3/3] Reiniciando contenedores con los nuevos cambios...
+docker compose up -d --force-recreate lazyjobfinder
+if %ERRORLEVEL% neq 0 (
+    echo.
+    echo   [ERROR] No se pudo reiniciar el contenedor.
+    if "%CLI_INVOKED%"=="1" goto :EXIT
+    pause
+    goto :MENU
+)
+
+echo --^> Esperando a que el backend unificado responda en http://127.0.0.1:8000...
+set /a API_RETRY=0
+:WAIT_API_REBUILD
+timeout /t 2 /nobreak >nul
+curl -s -f http://127.0.0.1:8000/api/health >nul 2>&1
+if !ERRORLEVEL! neq 0 (
+    set /a API_RETRY+=1
+    if !API_RETRY! lss 25 (
+        echo       Iniciando servicios del backend... [!API_RETRY!/25]
+        goto :WAIT_API_REBUILD
+    ) else (
+        echo   [!] El backend tarda en responder. Continuando de todos modos...
+    )
+) else (
+    echo   [OK] Backend unificado conectado y respondiendo en http://127.0.0.1:8000
+)
+
+echo.
+echo =====================================================================
+echo   [ACTUALIZACION COMPLETADA] Todos los cambios han sido aplicados:
+echo     - Panel Web Unificado: http://localhost:8000
+echo     - API REST y Docs:     http://127.0.0.1:8000/api/docs
+echo =====================================================================
+echo.
+echo --^> Abriendo el panel de administracion en tu navegador...
+start http://localhost:8000
 echo.
 if "%CLI_INVOKED%"=="1" goto :EXIT
 pause

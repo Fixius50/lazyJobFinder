@@ -98,19 +98,8 @@ export function DockerControlView() {
         onRefresh={fetchStatus}
       />
 
-      {/* Consola de Registro en Vivo minimalista con (?) */}
-      <Card className="border bg-card/60 backdrop-blur-sm shadow-sm overflow-hidden">
-        <CardHeader className="pb-2 pt-3 px-4">
-          <div className="flex items-center gap-2">
-            <Terminal className="h-3.5 w-3.5 text-primary" />
-            <CardTitle className="text-xs sm:text-sm font-semibold">Consola de Registro en Vivo</CardTitle>
-            <InfoTooltip content="Transmisión continua de eventos del pipeline, evaluador Ollama y bot de Telegram vía Server-Sent Events (SSE)." />
-          </div>
-        </CardHeader>
-        <CardContent className="p-3 pt-0">
-          <LogConsole />
-        </CardContent>
-      </Card>
+      {/* Consola de Registro en Vivo con cabecera unificada y limpia */}
+      <LogConsole />
     </div>
   );
 }

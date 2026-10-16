@@ -248,28 +248,79 @@ def get_system_logs(
 
 @router.get("/logs/container")
 def get_container_logs(
-    service: str = Query("all", regex="^(all|ollama|lazyjobfinder)$"),
+    service: str = Query("all", regex="^(all|ollama|lazyjobfinder|app|container_app|container_ollama)$"),
     tail: int = Query(80, ge=10, le=500),
 ) -> Dict[str, str]:
     """
     Obtiene los registros recientes de Docker para un panel específico (ollama, app).
+    Prioriza la consulta mediante el SDK de Docker (docker-py), seguido de docker CLI,
+    y con fallback a los eventos registrados en la base de datos SQLite.
     """
-    cmd = ["docker", "compose", "logs", f"--tail={tail}"]
-    if service != "all":
-        cmd.append(service)
+    import shutil
 
-    try:
-        res = subprocess.run(cmd, capture_output=True, text=True, timeout=8, check=False)
-        output = res.stdout if res.returncode == 0 else (res.stderr or "No hay logs disponibles.")
+    # 1. Intento vía Docker Python Client (a través del socket /var/run/docker.sock)
+    client = _get_docker_client()
+    if client:
+        try:
+            if service in ("ollama", "container_ollama"):
+                targets = ["lazyjob_ollama"]
+            elif service in ("lazyjobfinder", "app", "container_app"):
+                targets = ["lazyjob_app"]
+            else:
+                targets = ["lazyjob_app", "lazyjob_ollama"]
+
+            logs_list = []
+            for name in targets:
+                try:
+                    c = client.containers.get(name)
+                    raw = c.logs(tail=tail).decode("utf-8", errors="replace")
+                    logs_list.append(f"--- [Contenedor: {name}] ---\n{raw.strip()}")
+                except Exception as ce:
+                    logs_list.append(f"--- [Contenedor: {name}] ---\n(No disponible: {ce})")
+
+            return {
+                "service": service,
+                "logs": "\n\n".join(logs_list),
+            }
+        except Exception as e:
+            logger.debug("docker-py fallo al obtener logs: %s", e)
+
+    # 2. Intento vía docker CLI (si la herramienta está instalada en el PATH del sistema)
+    if shutil.which("docker"):
+        cmd = ["docker", "compose", "logs", f"--tail={tail}"]
+        if service in ("ollama", "container_ollama"):
+            cmd.append("ollama")
+        elif service in ("lazyjobfinder", "app", "container_app"):
+            cmd.append("lazyjobfinder")
+
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=8, check=False)
+            output = res.stdout if res.returncode == 0 else (res.stderr or "No hay logs disponibles.")
+            return {
+                "service": service,
+                "logs": output.strip(),
+            }
+        except Exception as e:
+            logger.debug("subprocess docker logs fallo: %s", e)
+
+    # 3. Fallback limpio mediante logs estructurados en SQLite
+    db = get_db()
+    source_filter = "ollama" if "ollama" in service else ("pipeline" if "pipeline" in service else None)
+    events = db.get_system_logs(limit=tail, source=source_filter)
+    if events:
+        lines = [
+            f"[{ev.get('timestamp', '')}] [{ev.get('level', 'INFO')}] [{ev.get('source', '')}] {ev.get('message', '')}"
+            for ev in reversed(events)
+        ]
         return {
             "service": service,
-            "logs": output,
+            "logs": f"[Logs en Base de Datos Local - Registro de Actividad]\n" + "\n".join(lines),
         }
-    except Exception as e:
-        return {
-            "service": service,
-            "logs": f"No se pudieron consultar los logs del contenedor: {str(e)}",
-        }
+
+    return {
+        "service": service,
+        "logs": f"Servicio '{service}' operativo. No hay eventos recientes registrados.",
+    }
 
 
 @router.get("/logs/stream")

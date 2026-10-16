@@ -51,12 +51,16 @@ services:
       # API REST local de administración vinculada estrictamente a localhost (seguridad y privacidad)
       - "127.0.0.1:8000:8000"
     volumes:
+      # Montaje del codigo fuente para reflejar cambios del backend inmediatamente
+      - ./src:/app/src:ro
       # Persistencia de la base de datos SQLite y los documentos generados (PDFs/MDs)
       - ./data:/app/data
       # Configuración y perfil del candidato editable sin reconstruir la imagen
       - ./config:/app/config
       # Frontend compilado estático para servicio unificado en http://localhost:8000
       - ./web/out:/app/web/out:ro
+      # Acceso al socket de Docker para consultar logs y estado desde el backend
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     depends_on:
       ollama:
         condition: service_healthy

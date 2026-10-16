@@ -87,9 +87,9 @@ export function CvManager({ onCvChanged, className = "" }: CvManagerProps) {
       const res = await api.uploadCV(file);
       clearInterval(progressInterval);
       setUploadProgress(100);
-      setUploadStage("¡Completado con éxito!");
+      const ext = (res.type || res.filename?.split(".").pop() || "archivo").toUpperCase();
       setUploadMessage({
-        text: `CV "${res.filename}" cargado correctamente (${res.type.toUpperCase()}).`,
+        text: `CV "${res.filename}" cargado correctamente (${ext}).`,
         error: false,
       });
       await loadData();

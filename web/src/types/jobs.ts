@@ -55,6 +55,8 @@ export interface JobFilterParams {
   status?: string;
   min_score?: number;
   is_remote?: boolean;
+  modality?: "all" | "presencial" | "teletrabajo" | "hibrido" | string;
+  only_ui_saved?: boolean;
   page?: number;
   page_size?: number;
   sort_by?: string;

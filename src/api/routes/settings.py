@@ -19,6 +19,7 @@ SETTINGS_FILE = os.path.join(BASE_DIR, "config", "settings.yaml")
 class NotificationChannelsUpdate(BaseModel):
     guardar_en_interfaz: bool = Field(..., description="Conservar y consultar en la interfaz web local")
     enviar_telegram: bool = Field(..., description="Enviar notificaciones por bot de Telegram")
+    telegram_user_id: Optional[str] = Field(None, description="ID numérico de usuario de Telegram autorizado")
     telegram_adjuntar_docs: Optional[bool] = Field(None, description="Adjuntar PDFs por Telegram")
     umbral_minimo_puntuacion: Optional[int] = Field(None, ge=0, le=100, description="Umbral mínimo de afinidad")
 
@@ -64,7 +65,11 @@ def get_settings() -> Dict[str, Any]:
 
     # Informar estado de configuración de Telegram sin filtrar el token
     telegram_bot_token_present = bool(os.getenv("TELEGRAM_BOT_TOKEN"))
-    telegram_user_id_present = bool(os.getenv("TELEGRAM_ALLOWED_USER_ID"))
+    cfg_user_id = data.get("notificaciones", {}).get("telegram", {}).get("allowed_user_id", "")
+    env_user_id = os.getenv("TELEGRAM_ALLOWED_USER_ID", "")
+    current_user_id = str(cfg_user_id or env_user_id or "").strip()
+    if current_user_id == "0":
+        current_user_id = ""
 
     return {
         "busqueda": data.get("busqueda", {}),
@@ -73,7 +78,9 @@ def get_settings() -> Dict[str, Any]:
         "notificaciones": data.get("notificaciones", {}),
         "horario": data.get("horario", {}),
         "secrets_status": {
-            "telegram_configured": telegram_bot_token_present and telegram_user_id_present,
+            "telegram_configured": telegram_bot_token_present and bool(current_user_id),
+            "telegram_token_present": telegram_bot_token_present,
+            "telegram_user_id": current_user_id,
             "infojobs_configured": bool(os.getenv("INFOJOBS_CLIENT_ID")),
         },
         "privacy_notice": {
@@ -93,6 +100,7 @@ def update_notification_channels(req: NotificationChannelsUpdate) -> Dict[str, A
     Actualiza de forma atómica y persistente las preferencias independientes de canal:
     - guardar_en_interfaz
     - enviar_telegram
+    - telegram_user_id (ID de usuario Telegram)
     - adjuntar documentos
     - umbral mínimo de puntuación
     """
@@ -102,6 +110,14 @@ def update_notification_channels(req: NotificationChannelsUpdate) -> Dict[str, A
 
     data["notificaciones"]["guardar_en_interfaz"] = req.guardar_en_interfaz
     data["notificaciones"]["enviar_telegram"] = req.enviar_telegram
+
+    if req.telegram_user_id is not None:
+        if "telegram" not in data["notificaciones"]:
+            data["notificaciones"]["telegram"] = {}
+        clean_user_id = req.telegram_user_id.strip()
+        data["notificaciones"]["telegram"]["allowed_user_id"] = clean_user_id
+        if clean_user_id:
+            os.environ["TELEGRAM_ALLOWED_USER_ID"] = clean_user_id
 
     if req.telegram_adjuntar_docs is not None:
         if "telegram" not in data["notificaciones"]:

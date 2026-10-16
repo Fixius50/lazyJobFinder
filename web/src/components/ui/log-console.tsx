@@ -5,6 +5,7 @@ import { Terminal, RefreshCw, Trash2, ArrowDown, Wifi, WifiOff } from "lucide-re
 import { Button } from "./button";
 import { Badge } from "./badge";
 import { Tabs } from "./tabs";
+import { InfoTooltip } from "./info-tooltip";
 import { SystemLogItem, api } from "@/lib/api";
 
 interface LogConsoleProps {
@@ -111,8 +112,9 @@ export function LogConsole({ initialLogs = [], height = "h-80" }: LogConsoleProp
       {/* Barra de cabecera de la consola */}
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-800 px-4 py-2 bg-zinc-900/80">
         <div className="flex items-center space-x-2">
-          <Terminal className="h-4 w-4 text-zinc-400" />
-          <span className="font-semibold text-zinc-200">Consola del Sistema</span>
+          <Terminal className="h-3.5 w-3.5 text-primary" />
+          <span className="font-semibold text-zinc-200">Consola</span>
+          <InfoTooltip content="Transmisión continua de eventos del pipeline, evaluador Ollama y contenedores Docker." />
           {isConnected ? (
             <Badge variant="outline" className="border-emerald-500/40 text-emerald-400 text-[10px] py-0 px-1.5 flex items-center gap-1">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />

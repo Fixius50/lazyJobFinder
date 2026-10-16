@@ -44,9 +44,14 @@ class TelegramJobBot:
         self.connectors_manager = connectors_manager
 
         self.token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-        raw_user_id = os.getenv("TELEGRAM_ALLOWED_USER_ID", "0").strip()
+        raw_user_id = os.getenv("TELEGRAM_ALLOWED_USER_ID", "").strip()
+        if not raw_user_id or raw_user_id == "0":
+            cfg_user_id = self.settings.get("notificaciones", {}).get("telegram", {}).get("allowed_user_id")
+            if cfg_user_id:
+                raw_user_id = str(cfg_user_id).strip()
+
         try:
-            self.allowed_user_id = int(raw_user_id)
+            self.allowed_user_id = int(raw_user_id) if raw_user_id else 0
         except ValueError:
             self.allowed_user_id = 0
 

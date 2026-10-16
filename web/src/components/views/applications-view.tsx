@@ -24,10 +24,11 @@ export function ApplicationsView() {
 
   // Filtros y Paginación
   const [searchTerm, setSearchTerm] = useState<string>("");
+  const [locationTerm, setLocationTerm] = useState<string>("");
   const [selectedSource, setSelectedSource] = useState<string>("");
   const [selectedStatus, setSelectedStatus] = useState<string>("");
-  const [minScore, setMinScore] = useState<string>("");
-  const [isRemoteOnly, setIsRemoteOnly] = useState<boolean>(false);
+  const [minScore, setMinScore] = useState<number>(0);
+  const [selectedModality, setSelectedModality] = useState<string>("");
   const [currentPage, setCurrentPage] = useState<number>(1);
 
   // Modal de Detalle
@@ -40,10 +41,11 @@ export function ApplicationsView() {
     try {
       const res = await api.listJobs({
         search: searchTerm || undefined,
+        location: locationTerm || undefined,
         source: selectedSource || undefined,
         status: selectedStatus || undefined,
-        min_score: minScore ? parseInt(minScore, 10) : undefined,
-        is_remote: isRemoteOnly ? true : undefined,
+        min_score: minScore > 0 ? minScore : undefined,
+        modality: selectedModality || undefined,
         page: currentPage,
         page_size: 15,
         sort_by: "created_at",
@@ -59,12 +61,22 @@ export function ApplicationsView() {
 
   useEffect(() => {
     fetchJobs();
-  }, [selectedSource, selectedStatus, minScore, isRemoteOnly, currentPage]);
+  }, [selectedSource, selectedStatus, minScore, selectedModality, locationTerm, currentPage]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setCurrentPage(1);
     fetchJobs();
+  };
+
+  const handleResetFilters = () => {
+    setSearchTerm("");
+    setLocationTerm("");
+    setSelectedSource("");
+    setSelectedStatus("");
+    setSelectedModality("");
+    setMinScore(0);
+    setCurrentPage(1);
   };
 
   const handleOpenDetail = async (jobId: number) => {
@@ -110,7 +122,7 @@ export function ApplicationsView() {
             className="flex items-center gap-1.5 h-8 text-xs"
           >
             <FileCheck className="h-3.5 w-3.5 text-primary" />
-            {showCvPanel ? "Ocultar CV" : "Mostrar CV"}
+            {showCvPanel ? "Ocultar Panel Lateral" : "Mostrar Panel Lateral"}
           </Button>
 
           <Button
@@ -126,42 +138,43 @@ export function ApplicationsView() {
         </div>
       </div>
 
-      {/* Estructura en Dos Columnas: CV Activo & Subida a la Izquierda | Filtros y Ofertas a la Derecha */}
+      {/* Estructura en Dos Columnas: Panel Lateral Izquierdo (CV + Filtros) | Listado a la Derecha */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6 items-start">
         {showCvPanel && (
           <aside className="lg:col-span-4 xl:col-span-4 space-y-4">
             <CvManager onCvChanged={fetchJobs} />
+            <JobFilters
+              searchTerm={searchTerm}
+              onSearchTermChange={setSearchTerm}
+              locationTerm={locationTerm}
+              onLocationTermChange={setLocationTerm}
+              selectedSource={selectedSource}
+              onSourceChange={(source) => {
+                setSelectedSource(source);
+                setCurrentPage(1);
+              }}
+              selectedStatus={selectedStatus}
+              onStatusChange={(status) => {
+                setSelectedStatus(status);
+                setCurrentPage(1);
+              }}
+              selectedModality={selectedModality}
+              onModalityChange={(modality) => {
+                setSelectedModality(modality);
+                setCurrentPage(1);
+              }}
+              minScore={minScore}
+              onMinScoreChange={(score) => {
+                setMinScore(score);
+                setCurrentPage(1);
+              }}
+              onSubmitSearch={handleSearchSubmit}
+              onResetFilters={handleResetFilters}
+            />
           </aside>
         )}
 
         <section className={`${showCvPanel ? "lg:col-span-8 xl:col-span-8" : "lg:col-span-12"} space-y-4`}>
-          {/* Barra de Filtros y Búsqueda Modular */}
-          <JobFilters
-            searchTerm={searchTerm}
-            onSearchTermChange={setSearchTerm}
-            selectedSource={selectedSource}
-            onSourceChange={(source) => {
-              setSelectedSource(source);
-              setCurrentPage(1);
-            }}
-            selectedStatus={selectedStatus}
-            onStatusChange={(status) => {
-              setSelectedStatus(status);
-              setCurrentPage(1);
-            }}
-            minScore={minScore}
-            onMinScoreChange={(score) => {
-              setMinScore(score);
-              setCurrentPage(1);
-            }}
-            isRemoteOnly={isRemoteOnly}
-            onRemoteOnlyChange={(remote) => {
-              setIsRemoteOnly(remote);
-              setCurrentPage(1);
-            }}
-            onSubmitSearch={handleSearchSubmit}
-          />
-
           {/* Listado de Ofertas */}
           <div className="space-y-3">
             {loading ? (

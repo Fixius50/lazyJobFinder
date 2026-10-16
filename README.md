@@ -1,163 +1,187 @@
-# lazyJobFinder 🚀
+# lazyJobFinder
 
-**Sistema local, gratuito (0 €/mes) y autónomo de búsqueda de empleo para desarrolladores junior (DAM).**
+Sistema local, autonomo y gratuito (0 EUR/mes) de busqueda, evaluacion de afinidad ATS y adaptacion de candidaturas de empleo para desarrolladores de software.
 
-`lazyJobFinder` es una solución diseñada para ejecutarse en segundo plano dentro de **Docker Compose**, buscando ofertas de empleo en España, evaluando su compatibilidad técnica con tu formación real mediante un **modelo de lenguaje local (Ollama en Docker)**, adaptando tu currículum y redactando cartas de presentación sin inventar datos, y enviándote cada mañana un informe completo con los **documentos PDF adjuntos directamente a tu Telegram**.
-
----
-
-## 🌟 Características Principales
-
-- **Inferencia 100% Local (0 €/mes en IA)**: No utiliza APIs de IA de pago (cero OpenAI, Anthropic o servicios cloud de inferencia). Todo el análisis del CV, el scoring y la redacción se procesan en local dentro de Docker.
-- **Canales de Notificación y Gestión Independientes**:
-  - **Panel Web de Administración SPA (Next.js 14 + TypeScript)**: Interfaz moderna, fluida y con CSS 100% relativo (`rem`, `%`, `flex`, `grid`, `dvh`). Sin paneles laterales intrusivos ni recargas lentas de página; navegación instantánea por pestañas (Candidaturas, Búsqueda y CV, Servicios y Logs en vivo vía SSE, y Configuración). Opera con **cero llamadas a servicios externos**.
-  - **Bot de Telegram (Opcional y Desacoplado)**: Notificaciones matutinas en el móvil con los PDFs adjuntos. *(Nota de privacidad: la entrega final por Telegram transmite los archivos a través de la infraestructura externa de Telegram)*. Puede desactivarse independientemente manteniendo el panel web 100% local.
-- **Lanzador Unificado del Sistema (`start.bat`)**:
-  - Script único nativo para Windows con menú interactivo (`choice` instantáneo) y flags directos por CLI (`--all`, `--docker`, `--web`, `--status`, `--pull`, `--stop`).
-  - **Resolución dinámica de Docker Desktop**: Detecta rutas absolutas y relativas del ejecutable en el SO, inicia el servicio automáticamente si está apagado y bloquea la ejecución hasta que el motor de contenedores responde.
-  - **Sincronización activa con el backend**: Espera activamente a que la API FastAPI en `http://127.0.0.1:8000/api/health` esté respondiendo antes de arrancar Next.js, eliminando errores de proxy `ECONNREFUSED`.
-- **Extracción y Lectura Documental Multiformato (`cv_reader.py`)**:
-  - Soporte nativo para currículums en **PDF** (usando `pypdf` con fallback heurístico por streams), **Markdown (.md)** y **Texto (.txt)** hasta 5 MB.
-  - Previsualizador en pantalla en la interfaz web para inspeccionar exactamente qué texto extrae el motor antes de evaluar afinidad.
-- **Conectores Multi-Fuente con Aislamiento de Fallos**:
-  - **Tecnoempleo**: Canales RSS oficiales y abiertos especializados en IT en España (100% legal, 0 credenciales).
-  - **InfoJobs**: Conexión con la API REST oficial de desarrolladores (`developer.infojobs.net`).
-  - **JobSpy**: Agregación de **Indeed España**, **LinkedIn**, **Glassdoor** y **Google Jobs**, ejecutados en sub-bloques independientes para que el rate-limit de una fuente no interrumpa las demás.
-- **Deduplicación Difusa Multi-Campo (`RapidFuzz`)**: Combina similitud ponderada de empresa, título, descripción y ubicación (≥85%) para enlazar duplicados entre portales (ej. Indeed y LinkedIn) sin eliminar registros, preservando el historial y registrando fuentes alternativas.
-- **Salidas Estructuradas Nativas (Ollama + Pydantic v2)**: Utiliza esquemas JSON Schema (`model_json_schema()`) impuestos token a token por la gramática llama.cpp de Ollama, evitando dependencias pesadas y garantizando tipos y rangos estrictos (0-100).
-- **Filtrado Inteligente (Obligatorio vs. Deseable)**: No descarta ofertas a ciegas por contener palabras como «senior» o «lead». Distingue si la palabra aparece en el puesto objetivo o como mención a compañeros de equipo, y separa requisitos obligatorios de deseables o valorables.
-- **Garantía Anti-Alucinación por Código (`ProfileVerifier`)**: Mantiene un perfil canónico inmutable (`config/profile.yaml`) y el CV original intacto (`config/cv_base.md`). Opera con hechos atómicos aprobados: la IA solo puede seleccionar y ordenar hechos, sin inventar empresas, experiencia laboral comercial, titulaciones ni competencias. Si se detecta cualquier afirmación indebida, recurre de inmediato a la plantilla canónica certificada.
-- **Seguridad en Profundidad (Prompt Shield & Rate Limit)**: Higienización heurística de descripciones externas no confiables (`<untrusted_job_description>`) para mitigar inyecciones de prompts; autorización estricta en Telegram (`allowed_user_id > 0`) y cooldown obligatorio de 5 minutos en `/buscar` para proteger los recursos del hardware.
-- **Documentos Profesionales ATS-Friendly**: Compila PDFs limpios y sobrios con **ReportLab** siguiendo una plantilla tipográfica rígida controlada por código (el LLM jamás altera el diseño ni la maquetación). Conserva siempre los archivos Markdown editables y un registro `cambios_cv.json` de diferencias.
-- **Persistencia y Esquema Unificado**: Base de datos SQLite con modo **WAL (Write-Ahead Logging)**, esquema canónico consolidado (`src/migrations/sql/schema.sql`), registro en `pipeline_runs`, recuperación de tareas interrumpidas por reinicios (`recover_interrupted_runs`) y recuperación matutina en el arranque (`catch-up`).
+lazyJobFinder se ejecuta localmente mediante contenedores Docker. Escanea multiples portales de empleo en Espana, deduplica las ofertas, evalua su afinidad tecnica mediante un modelo de lenguaje local (Ollama) sin enviar datos a APIs externas de pago, genera documentos PDF adaptados y centraliza todo en un panel web interactivo y notificaciones opcionales en Telegram.
 
 ---
 
-## 🏗 Arquitectura del Sistema
+## Caracteristicas del Sistema
 
-```
-lazyJobFinder/
-├── config/
-│   ├── profile.yaml          # Perfil canónico inmutable (formación DAM, proyectos reales, stack)
-│   ├── settings.yaml         # Configuración de búsqueda, ubicaciones, filtros y horarios
-│   ├── shared_constants.json # Contrato unificado de estados, fuentes y umbrales (Front y Back)
-│   └── cv_base.md            # Currículum base original inalterable
-├── data/                     # Volumen persistente local
-│   ├── documents/            # Carpetas organizadas con los PDFs, Markdown y diffs generados
-│   ├── uploaded_cvs/         # Currículums subidos por el usuario (PDF/MD/TXT)
-│   └── lazyjobfinder.db      # Base de datos SQLite (jobs, evaluaciones, documentos, runs, logs)
-├── docs/                     # Documentación técnica completa
-│   ├── AI_SYSTEM_OVERVIEW.md # Base de conocimiento exhaustiva para IAs y desarrolladores
-│   ├── ARCHITECTURE.md       # Diseño de componentes, flujos y garantías de veracidad
-│   ├── COMPARATIVE_STUDY.md  # Comparativa razonada de proyectos (JobNavigator, JobOps, MCP, etc.)
-│   ├── HARDWARE_AMD_RX6600.md# Análisis de GPU AMD RX 6600, Docker WSL2 e inferencia CPU
-│   ├── SOURCES_SPAIN.md      # Verificación de fuentes de empleo en España
-│   └── SETUP_GUIDE.md        # Guía detallada de despliegue paso a paso
-├── src/
-│   ├── api/                  # API REST local (FastAPI en 127.0.0.1:8000)
-│   │   ├── routes/           # Rutas modulares: system, cv, jobs, settings, maintenance
-│   │   └── server.py         # Servidor FastAPI con streaming SSE y CORS local
-│   ├── connectors/           # Conectores independientes (Tecnoempleo, InfoJobs, JobSpy)
-│   ├── evaluator/            # Pre-filtro determinista, ProfileVerifier y cliente Ollama JSON
-│   ├── migrations/           # Migrador transaccional y esquema canónico (schema.sql)
-│   ├── tailoring/            # Adaptadores de CV/carta, cv_reader (PDF/MD/TXT) y PDF ReportLab
-│   ├── telegram_bot/         # Bot interactivo de Telegram con autenticación estricta
-│   ├── scheduler/            # Planificador APScheduler con prevención de solapamientos y catch-up
-│   ├── shared_constants.py   # Vinculación Python del contrato unificado compartido
-│   ├── database.py           # Persistencia SQLite WAL, deduplicación entre portales y runs
-│   └── main.py               # Punto de entrada y orquestador de ciclo de vida
-├── web/                      # Panel de Administración Web SPA (Next.js 14 + Tailwind CSS)
-│   ├── src/app/              # Enrutador App de Next.js (Dashboard SPA centralizado)
-│   ├── src/components/views/ # Vistas modulares fluidas: candidaturas, búsqueda/CV, docker, ajustes
-│   └── src/lib/              # Cliente de API tipado y constantes sincronizadas
-├── start.bat                 # Lanzador unificado todo en uno para Windows (interactivo y CLI)
-├── docker-compose.yml        # Orquestación de Ollama (CPU cuantizada) y lazyJobFinder
-├── Dockerfile                # Imagen Python 3.11 slim optimizada
-└── requirements.txt          # Dependencias exactas verificadas (incluye pypdf)
-```
+- Inferencia 100% Local (Coste 0 EUR/mes): Evaluacion, scoring y redaccion procesados integramente en tu equipo con Ollama (`qwen2.5:3b-instruct` en CPU Q4_K_M). Cero dependencias de OpenAI, Anthropic o servicios cloud de pago.
+- Multi-Portal con Aislamiento de Fallos: Conectores independientes para Tecnoempleo (RSS oficial), InfoJobs (API de desarrolladores) y JobSpy (Indeed Espana, LinkedIn, Glassdoor y Google Jobs). Si un portal falla o aplica rate-limit, los demas continuan sin interrupcion.
+- Deduplicacion Inteligente: Algoritmo difuso basado en RapidFuzz (`url_hash` y `content_fingerprint`) que detecta y agrupa vacantes duplicadas publicadas en multiples plataformas.
+- Garantia Anti-Alucinacion: El generador contrasta estrictamente cada oferta con tu perfil real (`config/profile.yaml`). No inventa empresas ni competencias inexistentes. Si faltan tecnologias exigidas, las penaliza en el scoring y las lista de forma transparente.
+- Documentos PDF Profesionales: Compilacion rigida con ReportLab (`pdf_renderer.py`). El modelo LLM no altera el diseno ni el formato visual del PDF. El CV base (`config/cv_base.md`) permanece inmutable como lectura canonica.
+- Base de Datos SQLite en modo WAL: Persistencia transaccional local con Write-Ahead Logging para lecturas y escrituras concurrentes de alta velocidad.
+- Panel Web SPA Unificado: Interfaz grafica moderna en Next.js con Tailwind CSS relativo, separacion de pantalla fluida (maximo 5vw), filtros deslizantes de puntuacion, selector de modalidad (presencial, teletrabajo o hibrido), subida y previsualizacion de CV, monitorizacion Docker y consola de logs en vivo por Server-Sent Events (SSE).
+- Canal Telegram Desacoplado: Opcion de recibir alertas matutinas con los PDFs adjuntos en el movil, sin dependencia obligatoria del bot para operar el sistema.
 
 ---
 
-## ⚡ Inicio Rápido (Despliegue Rápido o en 5 Pasos)
+## Requisitos Previos
 
-### Opción Rápida: Lanzador Único Todo en Uno (`start.bat`)
-Haz doble clic en `start.bat` o ejecútalo desde el terminal:
-```cmd
-.\start.bat
-```
-El script comprueba requisitos (.env, Node.js, Docker), levanta los contenedores, verifica/descarga el modelo de Ollama, abre el navegador en `http://localhost:3000` e inicia el panel web.
+1. Docker Desktop instalado y en ejecucion (con motor WSL2 en Windows).
+2. Git instalado.
+3. Node.js 18+ y npm (requerido unicamente si deseas ejecutar el panel web en modo desarrollo en el puerto 3000; no es necesario si usas el modo unificado de Docker en el puerto 8000).
 
 ---
 
-### Despliegue Manual Paso a Paso:
+## Como Arrancarlo
 
-### 1. Clonar el Repositorio y Configurar Variables
-Copia el archivo de plantilla `.env.example` como `.env`:
+### Paso 1: Clonar y configurar variables de entorno
+
+Clona el repositorio y genera tu archivo `.env` a partir de la plantilla:
+
 ```bash
 cp .env.example .env
 ```
 
-Configura tus credenciales en `.env`:
-- `TELEGRAM_BOT_TOKEN`: Token obtenido de [@BotFather](https://t.me/BotFather).
-- `TELEGRAM_ALLOWED_USER_ID`: Tu ID de Telegram obtenido de [@userinfobot](https://t.me/userinfobot) (garantiza acceso exclusivo).
-- `OLLAMA_BASE_URL`: `http://ollama:11434`
-- `OLLAMA_MODEL`: `qwen2.5:3b-instruct` (recomendado: 2 GB RAM, 30+ tokens/s en CPU).
+Edita `.env` con tus preferencias basicas. Las credenciales de Telegram o InfoJobs son opcionales; si no las configuras, el sistema funcionara en modo 100% local a traves del panel web.
 
-### 2. Personalizar tu Perfil Profesional Real
-Edita `config/profile.yaml` con tus datos de contacto, proyectos del ciclo DAM y competencias reales. El sistema usará estos datos como verdad absoluta.
+```ini
+# Configuracion minima opcional
+DATABASE_PATH=data/lazyjobfinder.db
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=qwen2.5:3b-instruct
 
-### 3. Arrancar con Docker Compose
+# Opcional: Telegram (dejar vacio si solo usas el panel web)
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_ALLOWED_USER_ID=
+```
+
+---
+
+### Paso 2: Ejecucion en Windows con el lanzador `start.bat`
+
+El repositorio incluye el script `start.bat`, disenado para automatizar la deteccion de Docker Desktop, arrancar contenedores, sincronizar puertos y abrir la interfaz.
+
+#### Opcion A: Modo Interactivo (Recomendado)
+Haz doble clic en `start.bat` o ejecutalo en tu terminal:
+
+```cmd
+.\start.bat
+```
+
+Se mostrara un menu numerado donde podras elegir la opcion deseada:
+- `[1]` Arrancar TODO unificado: Levanta Ollama, la base de datos y la aplicacion web lista en `http://localhost:8000`.
+- `[2]` Arrancar solo Docker: Levanta los servicios en segundo plano sin abrir terminales adicionales.
+- `[3]` Arrancar Panel Web en Modo Desarrollo: Inicia Next.js en `http://localhost:3000` con hot-reload.
+- `[4]` Diagnostico de estado: Comprueba la conexion de Docker, Ollama y el backend FastAPI.
+- `[5]` Descargar modelo IA: Descarga el modelo `qwen2.5:3b-instruct` en Ollama.
+- `[6]` Detener servicios: Apaga todos los contenedores de manera limpia.
+- `[7]` Reconstruir y Actualizar TODO: Recompila el panel web (Next.js) a estatico y reconstruye la imagen Docker del backend sin cache para aplicar cambios recientes.
+
+#### Opcion B: Comandos Directos por Linea de Comandos (CLI)
+Puedes invocar las acciones directamente con flags:
+
+```cmd
+# Arrancar todo el sistema unificado
+.\start.bat --all
+
+# Reconstruir y actualizar frontend y backend con los ultimos cambios de codigo
+.\start.bat --build
+
+# Arrancar unicamente los contenedores Docker
+.\start.bat --docker
+
+# Iniciar el panel web de desarrollo en puerto 3000
+.\start.bat --web
+
+# Verificar estado y conectividad de los servicios
+.\start.bat --status
+
+# Descargar o actualizar el modelo en Ollama
+.\start.bat --pull
+
+# Detener todos los contenedores
+.\start.bat --stop
+```
+
+---
+
+### Paso 3: Ejecucion Manual en Linux o Mac (Docker Compose)
+
+Si trabajas en Linux o macOS, puedes arrancar el entorno mediante Docker Compose directamente:
+
 ```bash
+# 1. Levantar contenedores en segundo plano
 docker compose up -d
+
+# 2. Descargar el modelo de IA en el contenedor de Ollama
+docker compose exec ollama ollama pull qwen2.5:3b-instruct
+
+# 3. Comprobar que el servicio responde
+curl http://localhost:8000/api/health
 ```
 
-### 4. Descargar el Modelo Local de Ollama (Solo una vez)
-Descarga el modelo ligero y optimizado en el volumen persistente de Docker:
-```bash
-docker exec -it lazyjob_ollama ollama pull qwen2.5:3b-instruct
-```
-
-### 5. Controlar desde Telegram (Opcional)
-Abre tu bot en Telegram y envía `/start`.
-- Puedes consultar el estado del sistema con `/estado`.
-- Puedes lanzar un escaneo inmediato con `/buscar`.
-- Cada mañana a la hora configurada (por defecto 08:30h), recibirás las ofertas del día junto a sus PDFs listos para enviar.
-
-### 6. Acceder al Panel de Administración Web (Next.js)
-El backend FastAPI arranca automáticamente en el puerto `8000` (`http://127.0.0.1:8000/api/docs`). Para iniciar la interfaz gráfica:
-```bash
-cd web
-npm install
-npm run dev
-```
-Abre tu navegador en `http://localhost:3000`:
-- **Control**: Monitoriza la salud de Ollama y la app, arranca/detiene contenedores y revisa logs en vivo vía SSE.
-- **Búsqueda y CV**: Sube un CV personalizado en PDF/MD/TXT (hasta 5 MB) sin alterar el perfil maestro y lanza búsquedas manuales con cerrojo anti-concurrencia.
-- **Candidaturas**: Filtra y consulta ofertas de SQLite, visualiza el razonamiento del modelo y descarga tus CVs y cartas adaptadas en PDF.
-- **Configuración**: Activa o desactiva de forma desacoplada la persistencia en interfaz y el bot de Telegram, edita términos de búsqueda y ejecuta tareas de mantenimiento seguro.
+Accede a la interfaz web en tu navegador en:
+`http://localhost:8000`
 
 ---
 
-## 💻 Hardware: AMD Radeon RX 6600 & Windows WSL2
+## Puertos y Direcciones del Sistema
 
-El entorno de trabajo utiliza Windows con Docker Desktop (WSL2) y una tarjeta gráfica **AMD Radeon RX 6600 (8 GB VRAM)**:
-- **Realidad técnica**: AMD ROCm no ofrece compatibilidad oficial para GPUs de consumo RDNA 2 (Navi 23 / gfx1032) dentro de contenedores WSL2 en Windows, debido a la falta de mapeo del controlador de fusión `/dev/kfd` en el kernel virtual de Docker Desktop.
-- **Estrategia adoptada**: El contenedor Ollama se ejecuta de forma predeterminada mediante **inferencia cuantizada en CPU (Q4_K_M)** con el modelo `qwen2.5:3b-instruct`.
-- **Rendimiento estimado**: En un procesador multinúcleo x86 moderno, la inferencia en CPU alcanza entre **25 y 40 tokens/segundo**. Evaluar una oferta toma ~3-5 segundos y generar los documentos ~12 segundos. Un lote diario de 5 ofertas se completa en menos de 2 minutos sin saturar la máquina ni requerir drivers experimentales.
-
----
-
-## 🔒 Matriz de Costes y Privacidad
-
-| Operación | Destino de los Datos | ¿Qué sale del equipo? | Coste Mensual |
-| :--- | :--- | :--- | :--- |
-| **Búsqueda de Ofertas** | Tecnoempleo RSS, InfoJobs, Indeed, LinkedIn | Términos de búsqueda (ej. `junior java`) y ubicación `Spain`. **Cero datos personales**. | **0 €** |
-| **Evaluación y Scoring** | Contenedor local `ollama` | **Nada**. Todo el procesamiento ocurre en localhost dentro de Docker. | **0 €** |
-| **Adaptación de CV / Carta** | Contenedor local `ollama` y ReportLab | **Nada**. Los archivos PDF y Markdown se guardan en el disco local `./data/documents`. | **0 €** |
-| **Notificaciones y Documentos** | API externa de Telegram | Mensaje de resumen y PDFs transmitidos cifrados por HTTPS a través de servidores de Telegram a tu chat privado. | **0 €** |
+- `http://localhost:8000`: Panel Web de Administracion y API REST de FastAPI (produccion y Docker unificado).
+- `http://localhost:8000/api/docs`: Documentacion interactiva Swagger / OpenAPI del backend.
+- `http://localhost:3000`: Servidor de desarrollo Next.js (unicamente al ejecutar `start.bat --web` o `npm run dev`).
+- `http://localhost:11434`: Motor de inferencia Ollama local.
 
 ---
 
-## 📄 Licencia
+## Estructura del Proyecto
 
-Este proyecto está bajo la licencia [MIT](LICENSE).
+```
+lazyJobFinder/
+├── .agents/                  # Reglas del proyecto para agentes y desarrollo
+│   └── rules/
+│       └── project_rules.md  # Normas de arquitectura, anti-alucinacion y frontend
+├── config/
+│   ├── profile.yaml          # Perfil profesional canónico (habilidades y proyectos reales)
+│   ├── settings.yaml         # Parametros de busqueda, umbrales y programacion
+│   ├── shared_constants.json # Contrato unificado de estados y portales
+│   └── cv_base.md            # Curriculo base de referencia (solo lectura)
+├── data/                     # Volumen persistente local
+│   ├── documents/            # Carpetas con los PDFs y Markdown generados
+│   ├── uploaded_cvs/         # CVs alternativos subidos desde la interfaz
+│   └── lazyjobfinder.db      # Base de datos SQLite WAL
+├── docs/                     # Documentacion tecnica en profundidad
+├── src/
+│   ├── api/                  # Backend FastAPI (rutas de jobs, cv, system, settings)
+│   ├── connectors/           # Conectores de empleo (Tecnoempleo, InfoJobs, JobSpy)
+│   ├── evaluator/            # Scoring ATS y cliente estructurado Ollama JSON
+│   ├── scheduler/            # Planificador APScheduler con recuperacion de ejecuciones
+│   ├── tailoring/            # Renderizador PDF ReportLab y lector de CV multiformato
+│   ├── telegram_bot/         # Bot opcional de notificaciones Telegram
+│   ├── database.py           # Gestor SQLite con deduplicacion difusa
+│   └── main.py               # Orquestador principal de procesos
+├── web/                      # Frontend Next.js 14 + Tailwind CSS
+│   ├── src/app/              # Dashboard SPA principal y paginas estaticas
+│   ├── src/components/
+│   │   ├── ui/               # Primitivas visuales (botones, badges, tooltips)
+│   │   ├── features/         # Componentes organizados por dominio (jobs, services, cv)
+│   │   └── views/            # Vistas principales integradas
+│   ├── src/lib/              # Cliente de API y utilidades
+│   └── src/types/            # Tipos e interfaces TypeScript estructurados
+├── start.bat                 # Lanzador de inicio rapido multifuncion para Windows
+├── docker-compose.yml        # Orquestacion de contenedores Docker
+└── Dockerfile                # Imagen Docker optimizada para Python 3.11
+```
+
+---
+
+## Flujo de Trabajo y Uso Diario
+
+1. Abre el panel web en `http://localhost:8000` (o `http://localhost:3000` en desarrollo).
+2. Pestana Candidaturas:
+   - Visualiza ofertas encontradas, puntuacion de afinidad y estado.
+   - Ajusta el slider de afinidad minima (`0% a 100%`) para filtrar ofertas aptas.
+   - Filtra por modalidad: Presencial, Teletrabajo (100% Remoto) o Hibrido.
+   - Sube o cambia tu CV activo en el panel lateral; el sistema calculara la afinidad contra el CV seleccionado.
+   - Previsualiza y descarga los PDFs adaptados de CV y carta generados por ReportLab.
+3. Pestana Configuracion y Servicios:
+   - Configura terminos de busqueda, ubicaciones, filtros de exclusion y umbrales minimos.
+   - Monitorea el estado de Ollama y de la aplicacion en tiempo real.
+   - Revisa la consola de logs en vivo transmitida por SSE sin recargar la pagina.
+   - Ejecuta limpiezas de historial con confirmacion protegida cuando desees reiniciar las ofertas.
+4. Boton Escanear Ahora: Ubicado en la cabecera superior para disparar el pipeline de busqueda bajo demanda en cualquier momento.

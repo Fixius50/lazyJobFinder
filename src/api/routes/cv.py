@@ -203,6 +203,7 @@ async def upload_cv_file(file: UploadFile = File(...)) -> Dict[str, Any]:
         "filename": safe_filename,
         "original_name": filename,
         "size_bytes": total_bytes,
+        "type": ext.lstrip(".").upper(),
         "message": "Archivo CV subido y almacenado de forma segura en almacenamiento local.",
     }
 

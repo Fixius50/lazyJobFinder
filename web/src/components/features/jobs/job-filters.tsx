@@ -233,7 +233,7 @@ export function JobFilters({
                   onClick={() => onMinScoreChange(0)}
                   className={`transition-colors hover:text-foreground ${minScore === 0 ? "font-bold text-foreground" : ""}`}
                 >
-                  0% = cualq.
+                  0%
                 </button>
                 <button
                   type="button"

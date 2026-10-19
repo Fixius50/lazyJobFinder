@@ -95,7 +95,7 @@ async def main() -> None:
             await runner.telegram_bot.send_message(
                 "🟢 <b>lazyJobFinder ha arrancado con éxito.</b>\n"
                 "El sistema está monitorizando ofertas en segundo plano.\n"
-                "Panel Web disponible en http://localhost:3000\n"
+                "Panel Web disponible en http://localhost:8000\n"
                 "Escribe <code>/estado</code> para ver métricas o <code>/buscar</code> para escaneo inmediato."
             )
             logger.info("Bot de Telegram en modo Long-Polling activo.")

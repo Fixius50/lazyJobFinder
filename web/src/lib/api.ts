@@ -91,12 +91,17 @@ export const api = {
 
   // 1. Control de Docker y Sistema
   getServicesStatus: () => request<ServicesStatusResponse>("/system/status", { timeoutMs: 10000 }),
-  sendServiceAction: (service: string, action: "start" | "stop" | "restart") =>
-    request<{ success: boolean; message: string }>("/system/action", {
+  sendServiceAction: async (service: string, action: "start" | "stop" | "restart") => {
+    const res = await request<{ success: boolean; message?: string; error?: string }>("/system/action", {
       method: "POST",
       body: JSON.stringify({ service, action }),
       timeoutMs: 35000,
-    }),
+    });
+    if (!res.success) {
+      throw new Error(res.error || res.message || "Error al ejecutar acción sobre el servicio.");
+    }
+    return res;
+  },
   getSystemLogs: (limit = 100, level?: string, source?: string) => {
     const params = new URLSearchParams({ limit: limit.toString() });
     if (level) params.append("level", level);

@@ -127,9 +127,18 @@ def update_notification_channels(req: NotificationChannelsUpdate) -> Dict[str, A
         if "telegram" not in data["notificaciones"]:
             data["notificaciones"]["telegram"] = {}
         clean_user_id = req.telegram_user_id.strip()
-        data["notificaciones"]["telegram"]["allowed_user_id"] = clean_user_id
         if clean_user_id:
+            if not clean_user_id.isdigit():
+                raise HTTPException(
+                    status_code=400,
+                    detail="El ID de usuario de Telegram debe ser puramente numérico (ej: 123456789).",
+                )
+            data["notificaciones"]["telegram"]["allowed_user_id"] = clean_user_id
             os.environ["TELEGRAM_ALLOWED_USER_ID"] = clean_user_id
+        else:
+            # Borrado explícito
+            data["notificaciones"]["telegram"]["allowed_user_id"] = ""
+            os.environ.pop("TELEGRAM_ALLOWED_USER_ID", None)
 
     # Adjuntar documentos siempre activo por diseño
     if "telegram" not in data["notificaciones"]:

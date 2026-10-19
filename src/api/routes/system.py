@@ -198,74 +198,41 @@ def execute_service_action(req: ServiceActionRequest) -> Dict[str, Any]:
             detail=f"Servicio '{service}' no permitido. Válidos: all, {list(ALLOWED_SERVICES)}",
         )
 
-    # Protección arquitectónica: lazyjob_app no puede auto-detenerse sin desconectar la API web
-    if service in ("lazyjobfinder", "all") and action in ("stop", "restart"):
-        return {
-            "success": False,
-            "error": "Detener o reiniciar el backend web (lazyjob_app) desde este panel interrumpiría la conexión con el navegador. Utiliza start.bat o Docker Desktop en Windows para gestionar el ciclo de vida del backend completo.",
-            "action": action,
-            "service": service,
-        }
-
-    # 1. Intento de control mediante Docker Python Client (socket /var/run/docker.sock)
+    # Protección y control de servicios vía Docker Python SDK (socket /var/run/docker.sock)
     client = _get_docker_client()
-    if client and service == "ollama":
-        try:
-            c = client.containers.get("lazyjob_ollama")
-            if action == "restart":
-                c.restart()
-            elif action == "stop":
-                c.stop()
-            elif action == "start":
-                c.start()
+    if not client:
+        raise HTTPException(
+            status_code=503,
+            detail="Socket Docker no disponible desde el contenedor. Comprueba los permisos de /var/run/docker.sock.",
+        )
 
-            db = get_db()
-            db.log_event("INFO", "docker", f"Acción '{action}' ejecutada sobre 'lazyjob_ollama' vía Docker SDK.")
-            return {
-                "success": True,
-                "message": f"Servicio Ollama {action} ejecutado correctamente vía Docker SDK.",
-                "action": action,
-                "service": service,
-            }
-        except Exception as ce:
-            logger.warning("Fallo al controlar lazyjob_ollama vía docker-py: %s", ce)
-
-    # 2. Intento vía docker CLI (si se ejecuta directamente en el host)
-    import shutil
-    if not shutil.which("docker"):
-        return {
-            "success": False,
-            "error": "El CLI de Docker no está presente dentro del contenedor. Utiliza start.bat o Docker Desktop en Windows para controlar los servicios.",
-            "action": action,
-            "service": service,
-        }
-
-    cmd = ["docker", "compose", action]
-    if service != "all":
-        cmd.append(service)
+    # El servicio controlable de fondo es lazyjob_ollama
+    # lazyjob_app es el backend web que aloja esta API y no debe auto-detenerse
+    target_container = "lazyjob_ollama"
 
     try:
-        res = subprocess.run(cmd, capture_output=True, text=True, timeout=30, check=False)
+        c = client.containers.get(target_container)
+        if action == "restart":
+            c.restart(timeout=10)
+        elif action == "stop":
+            c.stop(timeout=10)
+        elif action == "start":
+            c.start()
+
         db = get_db()
-        db.log_event("INFO", "docker", f"Acción '{action}' ejecutada sobre '{service}'. Returncode: {res.returncode}")
-
-        if res.returncode != 0:
-            return {
-                "success": False,
-                "error": res.stderr.strip() or res.stdout.strip(),
-                "action": action,
-                "service": service,
-            }
-
+        db.log_event("INFO", "docker", f"Acción '{action}' ejecutada sobre '{target_container}' vía Docker SDK.")
         return {
             "success": True,
-            "message": f"Acción '{action}' ejecutada correctamente sobre '{service}'",
+            "message": f"Servicio {target_container} ({action}) ejecutado correctamente.",
             "action": action,
             "service": service,
         }
-    except Exception as e:
-        logger.error("Error ejecutando acción docker %s sobre %s: %s", action, service, e)
-        raise HTTPException(status_code=500, detail=f"Fallo al ejecutar acción: {str(e)}")
+    except Exception as ce:
+        logger.error("Fallo al controlar %s vía Docker SDK: %s", target_container, ce)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Fallo al ejecutar acción '{action}' sobre {target_container}: {str(ce)}",
+        )
 
 
 @router.get("/logs")

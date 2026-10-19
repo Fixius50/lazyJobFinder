@@ -74,7 +74,7 @@ export function NotificationChannelsDialog({
       await api.updateChannels({
         guardar_en_interfaz: true, // Obligatorio por diseño
         enviar_telegram: enviarTelegram,
-        telegram_user_id: telegramUserId.trim() || undefined,
+        telegram_user_id: telegramUserId.trim(),
         telegram_adjuntar_docs: true, // Obligatorio por diseño
         umbral_minimo_puntuacion: umbralMinimo,
         infojobs_client_id: infojobsClientId.trim() || undefined,

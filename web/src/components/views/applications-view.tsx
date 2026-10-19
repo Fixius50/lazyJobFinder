@@ -7,6 +7,7 @@ import {
   ChevronLeft,
   ChevronRight,
   FileCheck,
+  Play,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -15,7 +16,7 @@ import { CvManager } from "@/components/views/cv-manager";
 import { JobCard } from "@/components/features/jobs/job-card";
 import { JobFilters } from "@/components/features/jobs/job-filters";
 import { JobDetailDialog } from "@/components/features/jobs/job-detail-dialog";
-import { PurgeHistoryCard } from "@/components/features/maintenance/purge-history-card";
+import { PurgeHistoryButton } from "@/components/features/maintenance/purge-history-card";
 import { ServiceToolbarActions } from "@/components/features/services/service-toolbar-actions";
 import { JobListItem, JobDetail, PaginatedJobsResponse, api } from "@/lib/api";
 
@@ -50,7 +51,7 @@ export function ApplicationsView() {
         min_score: minScore > 0 ? minScore : undefined,
         modality: selectedModality || undefined,
         page: currentPage,
-        page_size: 16,
+        page_size: 20,
         sort_by: "created_at",
         sort_order: "desc",
       });
@@ -116,6 +117,25 @@ export function ApplicationsView() {
     }
   };
 
+  const [scanning, setScanning] = useState<boolean>(false);
+
+  const handleScan = async () => {
+    try {
+      setScanning(true);
+      await api.triggerSearch();
+      setTimeout(fetchJobs, 2500);
+    } catch (e: any) {
+      alert(`No se pudo iniciar el escaneo: ${e.message}`);
+    } finally {
+      setTimeout(async () => {
+        try {
+          const pre = await api.getPreflight();
+          setScanning(pre.pipeline.is_running);
+        } catch {}
+      }, 1500);
+    }
+  };
+
   const handleUpdateStatus = async (jobId: number, newStatus: string) => {
     try {
       await api.updateJobStatus(jobId, newStatus);
@@ -130,7 +150,7 @@ export function ApplicationsView() {
 
   return (
     <div className="space-y-4 sm:space-y-6 w-full">
-      {/* Encabezado fluido con Servicios, Acciones Globales, Ocultar Panel y Actualizar */}
+      {/* Encabezado fluido con Servicios, Escanear, Actualizar, Purgar y Ocultar Panel */}
       <div className="flex flex-col 2xl:flex-row 2xl:items-center justify-between gap-3 pb-3 border-b">
         <div className="flex items-center gap-1.5 shrink-0">
           <h2 className="text-lg sm:text-xl font-bold tracking-tight">Candidaturas y Ofertas</h2>
@@ -143,16 +163,22 @@ export function ApplicationsView() {
 
           <div className="h-5 w-px bg-border/60 mx-1 hidden sm:block" />
 
+          {/* Botón Escanear Ahora */}
           <Button
             size="sm"
-            variant="outline"
-            onClick={() => setShowCvPanel(!showCvPanel)}
-            className="flex items-center gap-1.5 h-8 text-xs"
+            onClick={handleScan}
+            disabled={scanning}
+            className="flex items-center gap-1.5 h-8 text-xs font-medium shadow-xs"
           >
-            <FileCheck className="h-3.5 w-3.5 text-primary" />
-            {showCvPanel ? "Ocultar Panel Lateral" : "Mostrar Panel Lateral"}
+            {scanning ? (
+              <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Play className="h-3 w-3 fill-current" />
+            )}
+            {scanning ? "Escaneando..." : "Escanear Ahora"}
           </Button>
 
+          {/* Botón Actualizar */}
           <Button
             size="sm"
             variant="outline"
@@ -162,6 +188,20 @@ export function ApplicationsView() {
           >
             <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
             Actualizar
+          </Button>
+
+          {/* Botón de Purga / Vaciar Historial sin la tarjeta */}
+          <PurgeHistoryButton onHistoryCleared={fetchJobs} />
+
+          {/* Botón Ocultar / Mostrar Panel */}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setShowCvPanel(!showCvPanel)}
+            className="flex items-center gap-1.5 h-8 text-xs"
+          >
+            <FileCheck className="h-3.5 w-3.5 text-primary" />
+            {showCvPanel ? "Ocultar Panel Lateral" : "Mostrar Panel Lateral"}
           </Button>
         </div>
       </div>
@@ -202,9 +242,6 @@ export function ApplicationsView() {
               onResetFilters={handleResetFilters}
               onSaveCriteria={handleSaveCriteria}
             />
-
-            {/* Tarjeta de mantenimiento seguro con botón rojo de vaciar historial */}
-            <PurgeHistoryCard onHistoryCleared={fetchJobs} />
           </aside>
         )}
 
@@ -229,8 +266,10 @@ export function ApplicationsView() {
             ) : (
               <div
                 className={`grid grid-cols-1 sm:grid-cols-2 ${
-                  showCvPanel ? "lg:grid-cols-2 xl:grid-cols-4" : "lg:grid-cols-3 xl:grid-cols-4"
-                } 2xl:grid-cols-4 gap-3 sm:gap-3.5`}
+                  showCvPanel
+                    ? "lg:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-4"
+                    : "lg:grid-cols-3 xl:grid-cols-5 2xl:grid-cols-5"
+                } gap-3 sm:gap-3.5`}
               >
                 {jobsData.items.map((job: JobListItem) => (
                   <JobCard

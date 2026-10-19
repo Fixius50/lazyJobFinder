@@ -5,9 +5,6 @@ import {
   Briefcase,
   Settings,
   ShieldCheck,
-  Play,
-  RotateCw,
-  Sparkles,
   Cpu,
   Database,
   Bell,
@@ -24,7 +21,6 @@ type TabKey = "applications" | "settings";
 export default function UnifiedDashboard() {
   const [activeTab, setActiveTab] = useState<TabKey>("applications");
   const [pipelineRunning, setPipelineRunning] = useState<boolean>(false);
-  const [scanMessage, setScanMessage] = useState<string | null>(null);
   const [preflight, setPreflight] = useState<PreflightResponse | null>(null);
   const [notificationsOpen, setNotificationsOpen] = useState<boolean>(false);
 
@@ -70,22 +66,6 @@ export default function UnifiedDashboard() {
       const url = new URL(window.location.href);
       url.searchParams.set("tab", tab);
       window.history.replaceState({}, "", url.toString());
-    }
-  };
-
-  const handleQuickScan = async () => {
-    setScanMessage("Iniciando escaneo...");
-    setPipelineRunning(true);
-    try {
-      const res = await api.triggerSearch();
-      setScanMessage(res.message);
-      setTimeout(() => setScanMessage(null), 4000);
-    } catch (e: any) {
-      console.error("[QuickScan] Error durante el escaneo:", e);
-      alert(`Error al iniciar escaneo: ${e.message}`);
-      setScanMessage(null);
-      // Abortar animación inmediatamente para evitar que se quede pillado
-      setPipelineRunning(false);
     }
   };
 
@@ -211,26 +191,6 @@ export default function UnifiedDashboard() {
               <span className="hidden sm:inline">Notificaciones</span>
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
             </Button>
-
-            {/* Botón de Escaneo Rápido */}
-            <Button
-              size="sm"
-              onClick={handleQuickScan}
-              disabled={pipelineRunning}
-              className="h-8 px-2.5 sm:px-3 text-xs flex items-center gap-1.5 shadow-sm"
-            >
-              {pipelineRunning ? (
-                <>
-                  <RotateCw className="h-3.5 w-3.5 animate-spin" />
-                  <span className="hidden sm:inline">Escaneando...</span>
-                </>
-              ) : (
-                <>
-                  <Play className="h-3 w-3 fill-current" />
-                  <span className="hidden sm:inline">Escanear Ahora</span>
-                </>
-              )}
-            </Button>
           </div>
         </div>
       </header>
@@ -240,14 +200,6 @@ export default function UnifiedDashboard() {
         open={notificationsOpen}
         onOpenChange={setNotificationsOpen}
       />
-
-      {/* Mensaje de retroalimentación global */}
-      {scanMessage && (
-        <div className="bg-primary/10 border-b border-primary/20 py-1.5 px-4 text-center text-xs text-primary flex items-center justify-center gap-1.5 animate-in fade-in">
-          <Sparkles className="h-3.5 w-3.5 shrink-0" />
-          <span>{scanMessage}</span>
-        </div>
-      )}
 
       {/* Contenido Principal Fluido con Separación Máxima de 5vw de los Bordes */}
       <main className="flex-1 w-full px-4 sm:px-[3vw] lg:px-[5vw] py-4 sm:py-6">

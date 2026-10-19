@@ -195,11 +195,13 @@ export function JobFilters({
                 className="text-xs h-8 w-full bg-background"
               >
                 <option value="">Todos los portales</option>
-                {Object.entries(PORTAL_SOURCES).map(([code, meta]) => (
-                  <option key={code} value={code}>
-                    {meta.label}
-                  </option>
-                ))}
+                <option value="tecnoempleo">Tecnoempleo</option>
+                <option value="infojobs">InfoJobs</option>
+                <option value="linkedin">LinkedIn</option>
+                <option value="indeed">Indeed</option>
+                <option value="glassdoor">Glassdoor</option>
+                <option value="google">Google Jobs</option>
+                <option value="jobspy">JobSpy (Multi-portal)</option>
               </Select>
             </div>
 

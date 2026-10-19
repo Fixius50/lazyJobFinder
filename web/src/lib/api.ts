@@ -212,11 +212,13 @@ export const api = {
   // 4. Configuración
   getSettings: () => request<SettingsResponse>("/settings"),
   updateChannels: (payload: {
-    guardar_en_interfaz: boolean;
+    guardar_en_interfaz?: boolean;
     enviar_telegram: boolean;
     telegram_user_id?: string;
     telegram_adjuntar_docs?: boolean;
     umbral_minimo_puntuacion?: number;
+    infojobs_client_id?: string;
+    infojobs_client_secret?: string;
   }) =>
     request<{ success: boolean; message: string }>("/settings/channels", {
       method: "PUT",

@@ -32,6 +32,8 @@ export interface SettingsResponse {
     telegram_token_present?: boolean;
     telegram_user_id?: string;
     infojobs_configured: boolean;
+    infojobs_client_id?: string;
+    infojobs_secret_present?: boolean;
   };
   privacy_notice: {
     telegram_transmission_note: string;

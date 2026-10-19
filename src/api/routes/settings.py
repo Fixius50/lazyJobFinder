@@ -17,11 +17,13 @@ SETTINGS_FILE = os.path.join(BASE_DIR, "config", "settings.yaml")
 
 
 class NotificationChannelsUpdate(BaseModel):
-    guardar_en_interfaz: bool = Field(..., description="Conservar y consultar en la interfaz web local")
+    guardar_en_interfaz: Optional[bool] = Field(True, description="Conservar y consultar en la interfaz web local (obligatorio)")
     enviar_telegram: bool = Field(..., description="Enviar notificaciones por bot de Telegram")
     telegram_user_id: Optional[str] = Field(None, description="ID numérico de usuario de Telegram autorizado")
-    telegram_adjuntar_docs: Optional[bool] = Field(None, description="Adjuntar PDFs por Telegram")
+    telegram_adjuntar_docs: Optional[bool] = Field(True, description="Adjuntar PDFs por Telegram (obligatorio si Telegram activo)")
     umbral_minimo_puntuacion: Optional[int] = Field(None, ge=0, le=100, description="Umbral mínimo de afinidad")
+    infojobs_client_id: Optional[str] = Field(None, description="Client ID de la API oficial de InfoJobs")
+    infojobs_client_secret: Optional[str] = Field(None, description="Client Secret de la API oficial de InfoJobs")
 
 
 class SearchConfigUpdate(BaseModel):
@@ -63,13 +65,21 @@ def get_settings() -> Dict[str, Any]:
     """
     data = _read_settings()
 
-    # Informar estado de configuración de Telegram sin filtrar el token
+    # Informar estado de configuración de Telegram e InfoJobs sin filtrar tokens secretos
     telegram_bot_token_present = bool(os.getenv("TELEGRAM_BOT_TOKEN"))
     cfg_user_id = data.get("notificaciones", {}).get("telegram", {}).get("allowed_user_id", "")
     env_user_id = os.getenv("TELEGRAM_ALLOWED_USER_ID", "")
     current_user_id = str(cfg_user_id or env_user_id or "").strip()
     if current_user_id == "0":
         current_user_id = ""
+
+    cfg_ij_id = data.get("fuentes", {}).get("infojobs_api", {}).get("client_id", "")
+    env_ij_id = os.getenv("INFOJOBS_CLIENT_ID", "")
+    current_ij_id = str(cfg_ij_id or env_ij_id or "").strip()
+
+    cfg_ij_secret = data.get("fuentes", {}).get("infojobs_api", {}).get("client_secret", "")
+    env_ij_secret = os.getenv("INFOJOBS_CLIENT_SECRET", "")
+    current_ij_secret = str(cfg_ij_secret or env_ij_secret or "").strip()
 
     return {
         "busqueda": data.get("busqueda", {}),
@@ -81,14 +91,14 @@ def get_settings() -> Dict[str, Any]:
             "telegram_configured": telegram_bot_token_present and bool(current_user_id),
             "telegram_token_present": telegram_bot_token_present,
             "telegram_user_id": current_user_id,
-            "infojobs_configured": bool(os.getenv("INFOJOBS_CLIENT_ID")),
+            "infojobs_configured": bool(current_ij_id and current_ij_secret),
+            "infojobs_client_id": current_ij_id,
+            "infojobs_secret_present": bool(current_ij_secret),
         },
         "privacy_notice": {
             "telegram_transmission_note": (
-                "ADVERTENCIA DE PRIVACIDAD: La activación de 'enviar_telegram' y el envío de documentos PDF "
-                "transmite los archivos del CV y carta de presentación a la infraestructura externa de los servidores "
-                "de Telegram. Si desactivas 'enviar_telegram' y mantienes 'guardar_en_interfaz', la totalidad del proceso "
-                "y los archivos permanecen 100% locales en tu equipo sin transmisión externa alguna."
+                "ADVERTENCIA DE PRIVACIDAD: La activación de 'enviar_telegram' transmite los archivos "
+                "del CV y carta de presentación a la infraestructura externa de los servidores de Telegram."
             ),
         },
     }
@@ -97,18 +107,20 @@ def get_settings() -> Dict[str, Any]:
 @router.put("/channels")
 def update_notification_channels(req: NotificationChannelsUpdate) -> Dict[str, Any]:
     """
-    Actualiza de forma atómica y persistente las preferencias independientes de canal:
-    - guardar_en_interfaz
-    - enviar_telegram
-    - telegram_user_id (ID de usuario Telegram)
-    - adjuntar documentos
+    Actualiza de forma atómica y persistente las preferencias de canal y claves API:
+    - guardar_en_interfaz: siempre activo (obligatorio)
+    - enviar_telegram: activable/desactivable
+    - telegram_user_id: ID de usuario Telegram
+    - adjuntar documentos: siempre activo si Telegram está habilitado (obligatorio)
     - umbral mínimo de puntuación
+    - infojobs_client_id e infojobs_client_secret
     """
     data = _read_settings()
     if "notificaciones" not in data:
         data["notificaciones"] = {}
 
-    data["notificaciones"]["guardar_en_interfaz"] = req.guardar_en_interfaz
+    # Guardar en interfaz es obligatorio por política del sistema
+    data["notificaciones"]["guardar_en_interfaz"] = True
     data["notificaciones"]["enviar_telegram"] = req.enviar_telegram
 
     if req.telegram_user_id is not None:
@@ -119,15 +131,32 @@ def update_notification_channels(req: NotificationChannelsUpdate) -> Dict[str, A
         if clean_user_id:
             os.environ["TELEGRAM_ALLOWED_USER_ID"] = clean_user_id
 
-    if req.telegram_adjuntar_docs is not None:
-        if "telegram" not in data["notificaciones"]:
-            data["notificaciones"]["telegram"] = {}
-        data["notificaciones"]["telegram"]["adjuntar_documentos"] = req.telegram_adjuntar_docs
+    # Adjuntar documentos siempre activo por diseño
+    if "telegram" not in data["notificaciones"]:
+        data["notificaciones"]["telegram"] = {}
+    data["notificaciones"]["telegram"]["adjuntar_documentos"] = True
 
     if req.umbral_minimo_puntuacion is not None:
         if "evaluacion" not in data:
             data["evaluacion"] = {}
         data["evaluacion"]["umbral_minimo_puntuacion"] = req.umbral_minimo_puntuacion
+
+    # Guardar credenciales de InfoJobs API si se proporcionan
+    if req.infojobs_client_id is not None or req.infojobs_client_secret is not None:
+        if "fuentes" not in data:
+            data["fuentes"] = {}
+        if "infojobs_api" not in data["fuentes"]:
+            data["fuentes"]["infojobs_api"] = {}
+
+        if req.infojobs_client_id is not None:
+            clean_ij_id = req.infojobs_client_id.strip()
+            data["fuentes"]["infojobs_api"]["client_id"] = clean_ij_id
+            os.environ["INFOJOBS_CLIENT_ID"] = clean_ij_id
+
+        if req.infojobs_client_secret is not None:
+            clean_ij_sec = req.infojobs_client_secret.strip()
+            data["fuentes"]["infojobs_api"]["client_secret"] = clean_ij_sec
+            os.environ["INFOJOBS_CLIENT_SECRET"] = clean_ij_sec
 
     _save_settings(data)
 
@@ -135,12 +164,12 @@ def update_notification_channels(req: NotificationChannelsUpdate) -> Dict[str, A
     db.log_event(
         "INFO",
         "settings",
-        f"Preferencias de canales actualizadas: interfaz={req.guardar_en_interfaz}, telegram={req.enviar_telegram}",
+        f"Preferencias de canales actualizadas: interfaz=True, telegram={req.enviar_telegram}",
     )
 
     return {
         "success": True,
-        "message": "Preferencias de notificación guardadas y aplicadas correctamente.",
+        "message": "Preferencias de notificación y claves API guardadas correctamente.",
         "notificaciones": data["notificaciones"],
         "evaluacion": data.get("evaluacion", {}),
     }

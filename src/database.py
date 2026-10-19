@@ -789,8 +789,16 @@ class Database:
             params.append(f"%{location.strip().lower()}%")
 
         if source:
-            where_clauses.append("j.source = ?")
-            params.append(source)
+            src = str(source).strip().lower()
+            if src in ("tecnoempleo", "tecnoempleo_rss"):
+                where_clauses.append("j.source IN ('tecnoempleo', 'tecnoempleo_rss')")
+            elif src in ("infojobs", "infojobs_api"):
+                where_clauses.append("j.source IN ('infojobs', 'infojobs_api')")
+            elif src == "jobspy":
+                where_clauses.append("j.source IN ('indeed', 'linkedin', 'glassdoor', 'google', 'jobspy')")
+            else:
+                where_clauses.append("LOWER(j.source) = ?")
+                params.append(src)
 
         if status:
             where_clauses.append("j.status = ?")

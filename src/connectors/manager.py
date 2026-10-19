@@ -34,7 +34,10 @@ class ConnectorManager:
         # 2. InfoJobs API (Oficial REST)
         infojobs_cfg = sources_cfg.get("infojobs_api", {})
         if infojobs_cfg.get("habilitado", True):
-            conn = InfoJobsConnector(enabled=True)
+            import os
+            ij_id = infojobs_cfg.get("client_id") or os.getenv("INFOJOBS_CLIENT_ID", "").strip()
+            ij_secret = infojobs_cfg.get("client_secret") or os.getenv("INFOJOBS_CLIENT_SECRET", "").strip()
+            conn = InfoJobsConnector(client_id=ij_id, client_secret=ij_secret, enabled=True)
             self.connectors.append(conn)
             status_desc = "ready" if (conn.client_id and conn.client_secret) else "not_configured"
             self.source_health["infojobs"] = {"status": status_desc, "offers": 0, "error": None}
@@ -52,6 +55,12 @@ class ConnectorManager:
             "ConnectorManager inicializado con %d conectores activos.",
             len(self.connectors),
         )
+
+    def reload_connectors(self) -> None:
+        """Reinicializa los conectores para reflejar cambios en credenciales en caliente."""
+        self.connectors = []
+        self.source_health = {}
+        self._init_connectors()
 
     def get_source_statuses(self) -> Dict[str, str]:
         """Devuelve un resumen legible del estado de cada fuente para Telegram y diagnóstico."""
@@ -105,11 +114,15 @@ class ConnectorManager:
                             "error": site_stat if not is_ok else None,
                         }
                 else:
-                    self.source_health[connector.name] = {
+                    health_entry = {
                         "status": "ok",
                         "offers": len(offers),
                         "error": None,
                     }
+                    self.source_health[connector.name] = health_entry
+                    if connector.name in ("tecnoempleo", "tecnoempleo_rss"):
+                        self.source_health["tecnoempleo"] = health_entry
+                        self.source_health["tecnoempleo_rss"] = health_entry
 
                 self.db.log_event(
                     level="INFO",

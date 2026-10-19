@@ -14,10 +14,16 @@ export const APPLICATION_STATUSES = {
 
 export type ApplicationStatusKey = keyof typeof APPLICATION_STATUSES;
 
-export const PORTAL_SOURCES = {
+export const PORTAL_SOURCES: Record<string, { label: string; type: string }> = {
+  tecnoempleo: { label: "Tecnoempleo", type: "rss" },
   tecnoempleo_rss: { label: "Tecnoempleo RSS", type: "rss" },
+  infojobs: { label: "InfoJobs", type: "api" },
   infojobs_api: { label: "InfoJobs API", type: "api" },
-  jobspy: { label: "JobSpy (Indeed / LinkedIn / Google)", type: "scraper" },
+  linkedin: { label: "LinkedIn", type: "scraper" },
+  indeed: { label: "Indeed", type: "scraper" },
+  glassdoor: { label: "Glassdoor", type: "scraper" },
+  google: { label: "Google Jobs", type: "scraper" },
+  jobspy: { label: "JobSpy Multi-portal", type: "scraper" },
 };
 
 export const SERVICES = ["ollama", "lazyjobfinder"] as const;

@@ -309,6 +309,7 @@ class JobPipelineRunner:
         settings_path = os.path.join(self.config_dir, "settings.yaml")
         self.settings = self._load_yaml(settings_path)
         self.connectors_mgr.settings = self.settings
+        self.connectors_mgr.reload_connectors()
         self.scoring_engine.settings = self.settings
         self.telegram_bot.settings = self.settings
         logger.info("Configuraciones recargadas dinámicamente en JobPipelineRunner.")

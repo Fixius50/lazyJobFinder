@@ -1,10 +1,11 @@
-"""Conector para Tecnoempleo utilizando sus canales RSS oficiales y abiertos."""
+"""Conector para Tecnoempleo mediante extracción HTML directa y canales RSS."""
 
 import html
 import logging
 import re
 import urllib.parse
 from typing import List
+from bs4 import BeautifulSoup
 import feedparser
 import requests
 
@@ -24,7 +25,7 @@ def clean_html(raw_html: str) -> str:
 
 
 class TecnoempleoConnector(BaseConnector):
-    """Conector que consume los canales RSS de tecnoempleo.com sin necesidad de API keys."""
+    """Conector que extrae ofertas de tecnoempleo.com sin necesidad de API keys."""
 
     def __init__(self, enabled: bool = True):
         super().__init__(name="tecnoempleo_rss", enabled=enabled)
@@ -33,7 +34,8 @@ class TecnoempleoConnector(BaseConnector):
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
             ),
-            "Accept": "application/rss+xml, application/xml, text/xml, */*",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
         }
 
     def search(
@@ -44,77 +46,133 @@ class TecnoempleoConnector(BaseConnector):
         limit_per_search: int = 15,
     ) -> List[JobOffer]:
         if not self.enabled:
-            logger.info("Conector Tecnoempleo RSS deshabilitado.")
+            logger.info("Conector Tecnoempleo deshabilitado.")
             return []
 
         offers: List[JobOffer] = []
         seen_urls = set()
 
-        # Tecnoempleo admite búsquedas por término y generación directa de RSS
         for term in search_terms:
             encoded_term = urllib.parse.quote_plus(term)
-            rss_url = f"https://www.tecnoempleo.com/busqueda-empleo.php?te={encoded_term}&en=rss"
+            search_url = f"https://www.tecnoempleo.com/busqueda-empleo.php?te={encoded_term}"
 
             try:
-                logger.debug("Consultando RSS Tecnoempleo: %s", rss_url)
-                resp = requests.get(rss_url, headers=self.headers, timeout=15)
+                logger.debug("Consultando Tecnoempleo para '%s': %s", term, search_url)
+                resp = requests.get(search_url, headers=self.headers, timeout=15)
                 if resp.status_code != 200:
                     logger.warning(
-                        "Tecnoempleo RSS retornó HTTP %d para término '%s'",
+                        "Tecnoempleo retornó HTTP %d para término '%s'",
                         resp.status_code,
                         term,
                     )
                     continue
 
-                feed = feedparser.parse(resp.content)
-                if not feed.entries:
-                    continue
+                content_type = resp.headers.get("Content-Type", "").lower()
+                term_count = 0
 
-                count = 0
-                for entry in feed.entries:
-                    link = entry.get("link", "").strip()
-                    if not link or link in seen_urls:
-                        continue
+                # 1. Intento por XML/RSS si la respuesta es feed
+                if "xml" in content_type or resp.text.strip().startswith("<?xml"):
+                    feed = feedparser.parse(resp.content)
+                    for entry in feed.entries:
+                        link = entry.get("link", "").strip()
+                        if not link or link in seen_urls:
+                            continue
+                        title = entry.get("title", "").strip()
+                        raw_desc = entry.get("summary", "") or entry.get("description", "")
+                        clean_desc = clean_html(raw_desc)
+                        company = "Tecnoempleo / Empresa IT"
+                        if " en " in title:
+                            parts = title.split(" en ")
+                            if len(parts) >= 2:
+                                company = parts[-1].split(" - ")[0].strip()
+                        is_remote = any(
+                            r in (title + " " + clean_desc).lower()
+                            for r in ["teletrabajo", "remoto", "100% remoto", "remote", "hibrido"]
+                        )
+                        pub_date = entry.get("published", "") or entry.get("updated", "")
+                        offers.append(
+                            JobOffer(
+                                title=title,
+                                company=company,
+                                job_url=link,
+                                source="tecnoempleo",
+                                location="España",
+                                is_remote=is_remote,
+                                description=clean_desc,
+                                date_posted=pub_date,
+                                raw_data={"source": "rss"},
+                            )
+                        )
+                        seen_urls.add(link)
+                        term_count += 1
+                        if term_count >= limit_per_search:
+                            break
 
-                    title = entry.get("title", "").strip()
-                    raw_desc = entry.get("summary", "") or entry.get("description", "")
-                    clean_desc = clean_html(raw_desc)
+                # 2. Extracción directa del HTML con BeautifulSoup
+                if term_count == 0:
+                    soup = BeautifulSoup(resp.text, "html.parser")
+                    cards = soup.find_all("div", class_=lambda c: c and "border" in c and "rounded" in c)
 
-                    # Extracción heurística de empresa si viene en el título o descripción
-                    company = "Tecnoempleo / Empresa IT"
-                    if " en " in title:
-                        parts = title.split(" en ")
-                        if len(parts) >= 2:
-                            company = parts[-1].split(" - ")[0].strip()
+                    for card in cards:
+                        a_title = card.find("a", href=lambda h: h and "/rf-" in h)
+                        if not a_title:
+                            continue
 
-                    # Comprobar si es remoto
-                    is_remote = any(
-                        r in (title + " " + clean_desc).lower()
-                        for r in ["teletrabajo", "remoto", "100% remoto", "remote"]
-                    )
+                        link = a_title.get("href", "").strip()
+                        if not link:
+                            continue
+                        if link.startswith("/"):
+                            link = f"https://www.tecnoempleo.com{link}"
 
-                    pub_date = entry.get("published", "") or entry.get("updated", "")
+                        if link in seen_urls:
+                            continue
 
-                    offer = JobOffer(
-                        title=title,
-                        company=company,
-                        job_url=link,
-                        source="tecnoempleo",
-                        location="España",
-                        is_remote=is_remote,
-                        description=clean_desc,
-                        date_posted=pub_date,
-                        raw_data={"rss_id": entry.get("id", ""), "tags": entry.get("tags", [])},
-                    )
+                        title = a_title.text.strip()
 
-                    offers.append(offer)
-                    seen_urls.add(link)
-                    count += 1
-                    if count >= limit_per_search:
-                        break
+                        a_comp = card.find("a", href=lambda h: h and "/re-" in h)
+                        company = a_comp.text.strip() if a_comp else "Empresa IT"
+
+                        # Localización y modalidad
+                        spans = card.find_all("span")
+                        span_texts = [s.text.strip() for s in spans if s.text.strip()]
+                        combined_text = f"{title} {' '.join(span_texts)}".lower()
+
+                        loc = "España"
+                        for s in spans:
+                            b = s.find("b")
+                            if b and b.text.strip() and "urgente" not in b.text.lower():
+                                loc = b.text.strip()
+                                break
+
+                        is_remote = any(
+                            r in combined_text
+                            for r in ["teletrabajo", "remoto", "100% remoto", "remote", "híbrido", "hibrido"]
+                        )
+
+                        desc_elem = card.find("span", class_=lambda cl: cl and "hidden-md-down" in cl)
+                        desc = desc_elem.text.strip() if desc_elem else " ".join(span_texts[:3])
+                        clean_desc = clean_html(desc)
+
+                        offer = JobOffer(
+                            title=title,
+                            company=company,
+                            job_url=link,
+                            source="tecnoempleo",
+                            location=loc,
+                            is_remote=is_remote,
+                            description=clean_desc or f"Oferta de {title} en {company} ({loc})",
+                            date_posted="Reciente",
+                            raw_data={"source": "html_scraper"},
+                        )
+
+                        offers.append(offer)
+                        seen_urls.add(link)
+                        term_count += 1
+                        if term_count >= limit_per_search:
+                            break
 
             except Exception as e:
-                logger.warning("Error consultando Tecnoempleo RSS para '%s': %s", term, e)
+                logger.warning("Error consultando Tecnoempleo para '%s': %s", term, e)
 
-        logger.info("Tecnoempleo RSS recuperó %d ofertas únicas.", len(offers))
+        logger.info("Tecnoempleo recuperó %d ofertas únicas.", len(offers))
         return offers

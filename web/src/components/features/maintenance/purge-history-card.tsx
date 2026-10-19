@@ -1,24 +1,26 @@
 "use client";
 
 import React, { useState } from "react";
-import { ShieldAlert, Trash2, AlertTriangle, CheckCircle2 } from "lucide-react";
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
+import { Trash2, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog } from "@/components/ui/dialog";
 import { api } from "@/lib/api";
 import { CONFIRMATION_PHRASES } from "@/lib/constants";
 
-interface PurgeHistoryCardProps {
+interface PurgeHistoryProps {
   onHistoryCleared?: () => void;
   className?: string;
 }
 
-export function PurgeHistoryCard({ onHistoryCleared, className = "" }: PurgeHistoryCardProps) {
+/**
+ * Botón y modal centralizado de vaciado de historial de candidaturas.
+ * Protegido mediante frase de confirmación exacta para evitar pérdidas involuntarias.
+ */
+export function PurgeHistoryButton({ onHistoryCleared, className = "" }: PurgeHistoryProps) {
   const [modalOpen, setModalOpen] = useState<boolean>(false);
   const [confirmPhrase, setConfirmPhrase] = useState<string>("");
   const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [feedback, setFeedback] = useState<string | null>(null);
 
   const handleClearHistory = async () => {
     if (confirmPhrase !== CONFIRMATION_PHRASES.clear_history) {
@@ -28,15 +30,9 @@ export function PurgeHistoryCard({ onHistoryCleared, className = "" }: PurgeHist
 
     setIsLoading(true);
     try {
-      const res = await api.maintenanceClearHistory(confirmPhrase);
+      await api.maintenanceClearHistory(confirmPhrase);
       setModalOpen(false);
       setConfirmPhrase("");
-      setFeedback(
-        `${res.message} (Ofertas eliminadas: ${res.details?.jobs_deleted ?? 0}, Documentos: ${
-          res.details?.documents_deleted ?? 0
-        })`
-      );
-      setTimeout(() => setFeedback(null), 5000);
       if (onHistoryCleared) {
         onHistoryCleared();
       }
@@ -48,52 +44,23 @@ export function PurgeHistoryCard({ onHistoryCleared, className = "" }: PurgeHist
   };
 
   return (
-    <div className={`space-y-3 ${className}`}>
-      {feedback && (
-        <div className="p-2.5 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs flex items-center gap-2">
-          <CheckCircle2 className="h-4 w-4 shrink-0" />
-          <span>{feedback}</span>
-        </div>
-      )}
+    <>
+      <Button
+        size="sm"
+        variant="destructive"
+        onClick={() => setModalOpen(true)}
+        className={`flex items-center gap-1.5 h-8 text-xs font-medium shadow-xs ${className}`}
+        title="Vacía todas las ofertas registradas en SQLite y elimina PDFs generados"
+      >
+        <Trash2 className="h-3.5 w-3.5" />
+        Vaciar Historial
+      </Button>
 
-      {/* Tarjeta de Mantenimiento con Botón Rojo */}
-      <Card className="border border-destructive/20 bg-destructive/5 shadow-sm">
-        <CardHeader className="pb-2 pt-3 px-3 sm:px-4">
-          <CardTitle className="text-xs sm:text-sm text-destructive flex items-center gap-1.5 font-semibold">
-            <ShieldAlert className="h-4 w-4 shrink-0" />
-            Mantenimiento y Purga del Sistema
-          </CardTitle>
-          <CardDescription className="text-[11px]">
-            Acciones seguras protegidas por frases de confirmación exacta
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3 pt-1 px-3 sm:px-4">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 p-2.5 rounded-lg border bg-background/60">
-            <div>
-              <h4 className="font-semibold text-xs text-foreground">Borrar Historial de Ofertas</h4>
-              <p className="text-[10px] text-muted-foreground leading-tight">
-                Vacía las ofertas y PDFs generados. Tu perfil y configuración se conservan.
-              </p>
-            </div>
-            <Button
-              size="sm"
-              variant="destructive"
-              onClick={() => setModalOpen(true)}
-              className="h-7 px-3 text-xs shrink-0 flex items-center gap-1 font-medium shadow-xs self-end sm:self-auto"
-            >
-              <Trash2 className="h-3 w-3" />
-              Vaciar
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Modal de Confirmación Segura */}
       <Dialog
         open={modalOpen}
         onOpenChange={setModalOpen}
-        title="Confirmar borrado completo de historial"
-        description="Esta acción vaciará todas las ofertas detectadas en SQLite y eliminará los documentos generados. El perfil y la configuración se mantendrán intactos."
+        title="Confirmar vaciado de historial"
+        description="Esta acción eliminará todas las ofertas detectadas en SQLite y los PDFs/cartas generados. Tu CV y configuración se mantendrán intactos."
       >
         <div className="space-y-4 pt-2 text-xs">
           <div className="flex items-start space-x-2 text-amber-400 bg-amber-500/10 p-3 rounded-lg border border-amber-500/20">
@@ -141,6 +108,9 @@ export function PurgeHistoryCard({ onHistoryCleared, className = "" }: PurgeHist
           </div>
         </div>
       </Dialog>
-    </div>
+    </>
   );
 }
+
+// Export compatible por si se requiere en otras vistas
+export const PurgeHistoryCard = PurgeHistoryButton;

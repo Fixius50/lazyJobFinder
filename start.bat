@@ -202,7 +202,7 @@ echo --^> Esperando a que el backend unificado responda en http://127.0.0.1:8000
 set /a API_RETRY=0
 :WAIT_API
 timeout /t 2 /nobreak >nul
-curl -s -f http://127.0.0.1:8000/api/health >nul 2>&1
+curl -s -f --connect-timeout 2 --max-time 3 http://127.0.0.1:8000/api/health >nul 2>&1
 if !ERRORLEVEL! neq 0 (
     set /a API_RETRY+=1
     if !API_RETRY! lss 25 (
@@ -292,11 +292,11 @@ echo --^> Estado de contenedores Docker Compose:
 docker compose ps
 echo.
 echo --^> Salud de Ollama (http://localhost:11434):
-curl -s http://localhost:11434/api/tags 2>nul || echo [!] Ollama no responde o no esta corriendo.
+curl -s --connect-timeout 2 --max-time 3 http://localhost:11434/api/tags 2>nul || echo [!] Ollama no responde o no esta corriendo.
 echo.
 echo.
 echo --^> Salud de API lazyJobFinder (http://127.0.0.1:8000/api/health):
-curl -s http://127.0.0.1:8000/api/health 2>nul || echo [!] API no responde en puerto 8000.
+curl -s --connect-timeout 2 --max-time 3 http://127.0.0.1:8000/api/health 2>nul || echo [!] API no responde en puerto 8000.
 echo.
 echo.
 if "%CLI_INVOKED%"=="1" goto :EXIT

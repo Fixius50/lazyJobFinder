@@ -13,7 +13,7 @@
 1. **Coste objetivo 0 €/mes**: No utiliza APIs de IA comerciales ni servicios de pago (cero OpenAI, Anthropic o servicios cloud de inferencia).
 2. **Ollama estrictamente dentro de Docker**: El motor LLM y sus modelos se ejecutan y persisten en volúmenes Docker (`lazyjob_ollama_models`). No se instala Ollama de forma nativa en Windows.
 3. **Procesamiento de IA 100% Local**: La extracción del perfil, el scoring y la adaptación de documentos se ejecutan exclusivamente en localhost dentro del contenedor. Ningún servicio externo de IA recibe el currículum.
-4. **Telegram como interfaz cotidiana**: Se evitan interfaces web adicionales; la entrega diaria de resúmenes y documentos se realiza a través de un bot privado de Telegram.
+4. **Canales desacoplados de visualización y notificación**: Panel Web SPA local moderno (Next.js exportado estáticamente y servido por FastAPI en http://localhost:8000) para control de servicios, inspección de ofertas y gestión de CV; complementado por un bot privado de Telegram opcional para notificaciones de resumen y entrega de PDFs.
 5. **Ninguna candidatura automática**: El sistema jamás envía solicitudes ni contacta con empresas automáticamente. El control de postulación permanece 100% en manos del usuario.
 
 > [!WARNING]
@@ -41,7 +41,7 @@ lazyJobFinder/
 │   ├── AI_SYSTEM_OVERVIEW.md # [ESTE DOCUMENTO] Base de conocimiento para IAs
 │   ├── ARCHITECTURE.md       # Diagramas Mermaid y flujos de datos
 │   ├── COMPARATIVE_STUDY.md  # Comparativa de proyectos open source
-│   ├── HARDWARE_AMD_RX6600.md# Análisis de GPU AMD, WSL2, Docker Desktop e inferencia en CPU
+│   ├── HARDWARE_SPECIFICATIONS.md# Especificaciones de hardware, matriz de compatibilidad e inferencia CPU
 │   ├── SOURCES_SPAIN.md      # Análisis individual de portales en España y aislamiento de fallos
 │   └── SETUP_GUIDE.md        # Guía de despliegue paso a paso
 ├── scripts/
@@ -49,7 +49,11 @@ lazyJobFinder/
 ├── src/                      # Código fuente de la aplicación Python (3.11-slim)
 │   ├── __init__.py
 │   ├── database.py           # Persistencia SQLite (WAL), deduplicación y tracking en pipeline_runs
-│   ├── main.py               # Punto de entrada, ciclo de vida, check de arranque y señales
+│   ├── main.py               # Punto de entrada, ciclo de vida, check de arranque y servidor FastAPI
+│   ├── api/                  # API REST local y streaming de eventos (FastAPI + SSE)
+│   │   ├── __init__.py
+│   │   ├── app.py            # Servidor ASGI, montaje de estáticos Next.js (/out) y routers
+│   │   └── routes/           # Endpoints: candidaturas, búsqueda, CV, sistema y configuración
 │   ├── connectors/           # Extracción y scraping de ofertas
 │   │   ├── __init__.py
 │   │   ├── base.py           # Dataclass JobOffer y clase base abstracta BaseConnector
@@ -73,6 +77,11 @@ lazyJobFinder/
 │   └── scheduler/            # Programación temporal y sincronización
 │       ├── __init__.py
 │       └── runner.py         # Orquestador del pipeline, control de cerrojo asíncrono y catch-up en arranque
+├── web/                      # Panel de administración SPA (Next.js 14 + Tailwind CSS)
+│   ├── src/                  # Vistas (Candidaturas, Docker & Logs, CV, Ajustes), componentes y hooks
+│   ├── out/                  # Compilación estática exportada servida directamente por FastAPI
+│   ├── next.config.mjs       # Configuración con output: 'export' (0 dependencias Node en producción)
+│   └── package.json
 ├── .env.example              # Plantilla documentada de variables de entorno
 ├── .gitignore                # Protección de base de datos, credenciales y documentos generados
 ├── docker-compose.yml        # Orquestación de servicios: lazyjob_ollama + lazyjob_app
@@ -85,10 +94,10 @@ lazyJobFinder/
 
 ## 3. Decisiones Técnicas y Razonamiento de Diseño
 
-### A. ¿Por qué NO usar un frontend web completo (JobNavigator / JobOps)?
-- **Análisis**: Proyectos como *JobNavigator* y *JobOps* despliegan pilas pesadas (PostgreSQL, Redis/Valkey, frontends en React/Next.js y proxies Caddy), consumiendo entre 3 y 5 GB de RAM.
-- **Razón del descarte**: El usuario solicita explícitamente no tener que abrir un navegador.
-- **Solución implementada**: Un proceso ligero en Python 3.11 con SQLite en modo WAL y Telegram como interfaz exclusiva.
+### A. ¿Por qué una SPA estática servida por FastAPI en vez de un stack pesado (JobNavigator / JobOps)?
+- **Análisis**: Proyectos como *JobNavigator* y *JobOps* despliegan pilas pesadas (PostgreSQL, Redis/Valkey, servidores Node.js permanentes en ejecución y proxies Caddy), consumiendo entre 3 y 5 GB de RAM.
+- **Razón del descarte**: Multiplicar contenedores y requerir un runtime permanente de Node.js en producción sobrecarga innecesariamente el sistema anfitrión en un entorno local individual.
+- **Solución implementada**: Next.js configurado con `output: 'export'` compilado a activos estáticos (`web/out/`) servidos directamente por FastAPI y Uvicorn en el contenedor principal Python (`http://localhost:8000`), manteniendo el consumo en ~200-300 MB de RAM y permitiendo el control completo sin servidores intermedios.
 
 ### B. ¿Por qué NO usar RAG ni bases de datos vectoriales (Qdrant / Chroma / PGvector)?
 - **Análisis**: Un perfil junior de DAM tiene ~1.000 tokens. Cabe holgadamente en la ventana de contexto de modelos locales (Qwen 2.5: 4k a 32k tokens).

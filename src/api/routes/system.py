@@ -198,11 +198,44 @@ def execute_service_action(req: ServiceActionRequest) -> Dict[str, Any]:
             detail=f"Servicio '{service}' no permitido. Válidos: all, {list(ALLOWED_SERVICES)}",
         )
 
+    # Protección arquitectónica: lazyjob_app no puede auto-detenerse sin desconectar la API web
+    if service in ("lazyjobfinder", "all") and action in ("stop", "restart"):
+        return {
+            "success": False,
+            "error": "Detener o reiniciar el backend web (lazyjob_app) desde este panel interrumpiría la conexión con el navegador. Utiliza start.bat o Docker Desktop en Windows para gestionar el ciclo de vida del backend completo.",
+            "action": action,
+            "service": service,
+        }
+
+    # 1. Intento de control mediante Docker Python Client (socket /var/run/docker.sock)
+    client = _get_docker_client()
+    if client and service == "ollama":
+        try:
+            c = client.containers.get("lazyjob_ollama")
+            if action == "restart":
+                c.restart()
+            elif action == "stop":
+                c.stop()
+            elif action == "start":
+                c.start()
+
+            db = get_db()
+            db.log_event("INFO", "docker", f"Acción '{action}' ejecutada sobre 'lazyjob_ollama' vía Docker SDK.")
+            return {
+                "success": True,
+                "message": f"Servicio Ollama {action} ejecutado correctamente vía Docker SDK.",
+                "action": action,
+                "service": service,
+            }
+        except Exception as ce:
+            logger.warning("Fallo al controlar lazyjob_ollama vía docker-py: %s", ce)
+
+    # 2. Intento vía docker CLI (si se ejecuta directamente en el host)
     import shutil
     if not shutil.which("docker"):
         return {
             "success": False,
-            "error": "No se puede invocar docker compose directamente desde dentro del contenedor. Utiliza start.bat o Docker Desktop en Windows para reiniciar servicios.",
+            "error": "El CLI de Docker no está presente dentro del contenedor. Utiliza start.bat o Docker Desktop en Windows para controlar los servicios.",
             "action": action,
             "service": service,
         }

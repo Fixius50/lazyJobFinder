@@ -45,7 +45,7 @@ class OllamaClient:
         format_json: bool = True,
         format_schema: Optional[Any] = None,
         temperature: float = 0.1,
-        timeout: int = 120,
+        timeout: int = 60,
     ) -> str:
         """
         Envía un prompt a Ollama y retorna la respuesta generada.
@@ -77,8 +77,8 @@ class OllamaClient:
             payload["format"] = "json"
 
         endpoint = f"{self.base_url}/api/generate"
-        max_retries = 3
-        backoff = 2.0
+        max_retries = 2
+        backoff = 1.0
 
         for attempt in range(1, max_retries + 1):
             try:

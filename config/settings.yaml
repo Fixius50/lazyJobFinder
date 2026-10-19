@@ -1,77 +1,37 @@
-# =============================================================================
-# Configuración General del Sistema lazyJobFinder
-# =============================================================================
-
 busqueda:
   terminos:
-    - "Desarrollador Junior"
-    - "Junior Java"
-    - "Programador Junior"
-    - "Full Stack Junior"
-    - "Desarrollador DAM"
-    - "Junior Backend"
-    - "Junior Web"
-
+  - Desarrollador Junior
+  - Full Stack
   ubicaciones:
-    - "Spain"
-    - "Madrid"
-    - "Barcelona"
-    - "Remoto"
-    - "Valencia"
-    - "Sevilla"
-
-  filtros_exclusion:
-    - "Senior"
-    - "Sr."
-    - "Lead"
-    - "Principal"
-    - "Architect"
-    - "Arquitecto"
-    - "5+ años"
-    - "5 años"
-    - "4 años"
-    - "3+ años"
-    - "3 años"
-    - "Jefe de proyecto"
-    - "Team Lead"
-    - "Director"
-    - "No remuneradas"
-
-  # Antigüedad máxima de ofertas a consultar (en horas)
+  - Spain
+  - Remoto
+  filtros_exclusion: []
   antiguedad_horas: 48
-
-  # Máximo de resultados deseados por conector y por búsqueda para evitar rate-limits
   limite_por_fuente: 15
-
 fuentes:
   tecnoempleo_rss:
     habilitado: true
   jobspy:
     habilitado: true
     sitios:
-      - "indeed"
-      - "linkedin"
-      - "glassdoor"
-      - "google"
+    - indeed
+    - linkedin
+    - glassdoor
+    - google
   infojobs_api:
-    habilitado: true # Se activará automáticamente si existen credenciales en .env
-
+    habilitado: true
 evaluacion:
-  umbral_minimo_puntuacion: 65 # Puntuación mínima (0-100) para generar documentos y notificar
-  generar_documentos: true     # Generar CV adaptado y carta de presentación en PDF
-  idioma_documentos: "es"
-
+  umbral_minimo_puntuacion: 65
+  generar_documentos: true
+  idioma_documentos: es
 notificaciones:
-  # Preferencias independientes y persistentes de canal
-  guardar_en_interfaz: true        # Mostrar y conservar candidaturas en la interfaz web de administración
-  enviar_telegram: true            # Enviar alertas y resumen por Telegram (implica transmitir a servidores externos de Telegram)
-
+  guardar_en_interfaz: true
+  enviar_telegram: true
   telegram:
     habilitado: true
     adjuntar_documentos: true
     notificar_solo_superan_umbral: true
     notificar_resumen_vacio: true
-
 horario:
   hora: 8
   minuto: 30

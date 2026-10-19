@@ -16,6 +16,7 @@ import { JobCard } from "@/components/features/jobs/job-card";
 import { JobFilters } from "@/components/features/jobs/job-filters";
 import { JobDetailDialog } from "@/components/features/jobs/job-detail-dialog";
 import { PurgeHistoryCard } from "@/components/features/maintenance/purge-history-card";
+import { ServiceToolbarActions } from "@/components/features/services/service-toolbar-actions";
 import { JobListItem, JobDetail, PaginatedJobsResponse, api } from "@/lib/api";
 
 export function ApplicationsView() {
@@ -129,14 +130,19 @@ export function ApplicationsView() {
 
   return (
     <div className="space-y-4 sm:space-y-6 w-full">
-      {/* Encabezado fluido */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b">
-        <div className="flex items-center gap-1.5">
+      {/* Encabezado fluido con Servicios, Acciones Globales, Ocultar Panel y Actualizar */}
+      <div className="flex flex-col 2xl:flex-row 2xl:items-center justify-between gap-3 pb-3 border-b">
+        <div className="flex items-center gap-1.5 shrink-0">
           <h2 className="text-lg sm:text-xl font-bold tracking-tight">Candidaturas y Ofertas</h2>
           <InfoTooltip content="Registro consolidado en SQLite con puntuaciones de afinidad IA y documentos ATS generados." />
         </div>
 
-        <div className="flex items-center gap-2 self-start sm:self-auto">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Servicios Docker y Acciones Globales */}
+          <ServiceToolbarActions />
+
+          <div className="h-5 w-px bg-border/60 mx-1 hidden sm:block" />
+
           <Button
             size="sm"
             variant="outline"

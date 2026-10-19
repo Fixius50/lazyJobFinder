@@ -113,8 +113,8 @@ class JobPipelineRunner:
             error_encountered = None
 
             try:
-                # 1. Descubrimiento de ofertas y deduplicación
-                new_jobs, metrics = self.connectors_mgr.run_discovery()
+                # 1. Descubrimiento de ofertas y deduplicación (en worker thread)
+                new_jobs, metrics = await asyncio.to_thread(self.connectors_mgr.run_discovery)
                 total_found = metrics["total_encontradas"]
                 new_count = metrics["nuevas_guardadas"]
 
@@ -144,8 +144,10 @@ class JobPipelineRunner:
                 )
 
                 for job in new_jobs:
+                    # Ceder brevemente el control al event loop para atender peticiones HTTP (healthcheck/UI)
+                    await asyncio.sleep(0.02)
                     try:
-                        eval_res = self.scoring_engine.evaluate(job)
+                        eval_res = await asyncio.to_thread(self.scoring_engine.evaluate, job)
                         score = eval_res.get("score", 0)
                         telegram_status = 0
 
@@ -153,11 +155,12 @@ class JobPipelineRunner:
                             doc_paths = None
                             if generate_docs:
                                 # 3. Adaptación honesta y validada de CV y Carta de Presentación
-                                cv_md, diff_audit = self.cv_tailorer.tailor(job, eval_res)
-                                letter_md = self.letter_generator.generate(job, eval_res)
+                                cv_md, diff_audit = await asyncio.to_thread(self.cv_tailorer.tailor, job, eval_res)
+                                letter_md = await asyncio.to_thread(self.letter_generator.generate, job, eval_res)
 
                                 # 4. Compilación PDF ATS-friendly con ReportLab
-                                doc_paths = self.pdf_renderer.render_cv_and_letter(
+                                doc_paths = await asyncio.to_thread(
+                                    self.pdf_renderer.render_cv_and_letter,
                                     job=job,
                                     cv_md=cv_md,
                                     diff_audit=diff_audit,

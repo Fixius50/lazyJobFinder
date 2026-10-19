@@ -64,8 +64,8 @@ export function ServiceToolbarActions() {
       }`}
       title={
         isRunning
-          ? "Servicios activos. Pulsa para detener todos los contenedores."
-          : "Servicios detenidos. Pulsa para arrancar todos los contenedores."
+          ? "Motor Ollama activo. Pulsa para detener los servicios de fondo (la web sigue accesible; usa start.bat para apagar todo)."
+          : "Servicios de fondo detenidos. Pulsa para arrancar el motor Ollama."
       }
     >
       {actionLoading === "stop" ? (
@@ -81,12 +81,12 @@ export function ServiceToolbarActions() {
       ) : isRunning ? (
         <>
           <Square className="h-3 w-3 fill-current" />
-          <span>Detener Todo</span>
+          <span>Detener Servicios</span>
         </>
       ) : (
         <>
           <Play className="h-3 w-3 fill-current" />
-          <span>Arrancar Todo</span>
+          <span>Arrancar Servicios</span>
         </>
       )}
     </Button>

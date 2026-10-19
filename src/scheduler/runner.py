@@ -112,18 +112,18 @@ class JobPipelineRunner:
             relevant_matches = []
             error_encountered = None
 
+            # Inicializar preferencias de canal inmediatamente para garantizar su disponibilidad en bloques except
+            send_tg_pref = (
+                self.settings.get("notificaciones", {}).get("enviar_telegram", True)
+                and self.settings.get("notificaciones", {}).get("telegram", {}).get("habilitado", True)
+            )
+            save_ui_pref = self.settings.get("notificaciones", {}).get("guardar_en_interfaz", True)
+
             try:
                 # 1. Descubrimiento de ofertas y deduplicación (en worker thread)
                 new_jobs, metrics = await asyncio.to_thread(self.connectors_mgr.run_discovery)
                 total_found = metrics["total_encontradas"]
                 new_count = metrics["nuevas_guardadas"]
-
-                # Preferencias de canales
-                send_tg_pref = (
-                    self.settings.get("notificaciones", {}).get("enviar_telegram", True)
-                    and self.settings.get("notificaciones", {}).get("telegram", {}).get("habilitado", True)
-                )
-                save_ui_pref = self.settings.get("notificaciones", {}).get("guardar_en_interfaz", True)
 
                 if not new_jobs:
                     logger.info("No se encontraron ofertas nuevas en este ciclo.")

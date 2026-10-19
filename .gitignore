@@ -1,5 +1,6 @@
 # Entorno y credenciales privadas
 *.env
+data/secrets.json
 
 # Base de datos persistente local
 */*.db*

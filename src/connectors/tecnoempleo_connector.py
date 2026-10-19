@@ -71,6 +71,40 @@ class TecnoempleoConnector(BaseConnector):
                 content_type = resp.headers.get("Content-Type", "").lower()
                 term_count = 0
 
+                def _check_match(location_str: str, remote_flag: bool, date_str: str) -> bool:
+                    """Aplica filtros unificados de ubicación y antigüedad a ofertas de cualquier formato."""
+                    if locations:
+                        norm_locations = [l.strip().lower() for l in locations if l.strip()]
+                        is_broad = any(b in norm_locations for b in ["spain", "españa", "espana"])
+                        if not is_broad:
+                            matched = any(
+                                nl in location_str.lower() or (nl in ["remoto", "teletrabajo", "remote"] and remote_flag)
+                                for nl in norm_locations
+                            )
+                            if not matched:
+                                return False
+
+                    if hours_old and hours_old > 0 and date_str and date_str not in ("Reciente", "Desconocida"):
+                        dt = None
+                        for fmt in (
+                            "%Y-%m-%d",
+                            "%d/%m/%Y",
+                            "%Y-%m-%dT%H:%M:%S",
+                            "%a, %d %b %Y %H:%M:%S %z",
+                            "%a, %d %b %Y %H:%M:%S",
+                        ):
+                            try:
+                                dt = datetime.strptime(date_str.split("+")[0].strip(), fmt)
+                                break
+                            except Exception:
+                                continue
+                        if dt:
+                            diff_hours = (datetime.now() - dt.replace(tzinfo=None)).total_seconds() / 3600
+                            if diff_hours > (hours_old + 24):
+                                return False
+
+                    return True
+
                 # 1. Intento por XML/RSS si la respuesta es feed
                 if "xml" in content_type or resp.text.strip().startswith("<?xml"):
                     feed = feedparser.parse(resp.content)
@@ -90,14 +124,28 @@ class TecnoempleoConnector(BaseConnector):
                             r in (title + " " + clean_desc).lower()
                             for r in ["teletrabajo", "remoto", "100% remoto", "remote", "hibrido"]
                         )
-                        pub_date = entry.get("published", "") or entry.get("updated", "")
+                        raw_pub = entry.get("published", "") or entry.get("updated", "")
+                        pub_date = "Desconocida"
+                        if raw_pub:
+                            try:
+                                if hasattr(entry, "published_parsed") and entry.published_parsed:
+                                    pub_date = datetime(*entry.published_parsed[:6]).strftime("%Y-%m-%d")
+                                else:
+                                    pub_date = str(raw_pub)[:10]
+                            except Exception:
+                                pub_date = str(raw_pub)[:10]
+
+                        loc = "España"
+                        if not _check_match(loc, is_remote, pub_date):
+                            continue
+
                         offers.append(
                             JobOffer(
                                 title=title,
                                 company=company,
                                 job_url=link,
                                 source="tecnoempleo",
-                                location="España",
+                                location=loc,
                                 is_remote=is_remote,
                                 description=clean_desc,
                                 date_posted=pub_date,
@@ -150,32 +198,18 @@ class TecnoempleoConnector(BaseConnector):
                             for r in ["teletrabajo", "remoto", "100% remoto", "remote", "híbrido", "hibrido"]
                         )
 
-                        # Filtrar por ubicación si se especifican ubicaciones concretas distintas a Spain/España
-                        if locations:
-                            norm_locations = [l.strip().lower() for l in locations if l.strip()]
-                            is_broad = any(b in norm_locations for b in ["spain", "españa", "espana"])
-                            if not is_broad:
-                                match_loc = any(
-                                    nl in loc.lower() or (nl in ["remoto", "teletrabajo", "remote"] and is_remote)
-                                    for nl in norm_locations
-                                )
-                                if not match_loc:
-                                    continue
-
                         # Extracción de fecha real del card (ej: "19/10/2026")
-                        pub_date = "Reciente"
+                        pub_date = "Desconocida"
                         date_match = re.search(r"(\d{1,2}/\d{1,2}/\d{4})", card.text)
                         if date_match:
                             try:
                                 dt = datetime.strptime(date_match.group(1), "%d/%m/%Y")
                                 pub_date = dt.strftime("%Y-%m-%d")
-                                if hours_old and hours_old > 0:
-                                    diff_hours = (datetime.now() - dt).total_seconds() / 3600
-                                    # Margen de 24h por actualización de huso horario
-                                    if diff_hours > (hours_old + 24):
-                                        continue
                             except Exception:
                                 pass
+
+                        if not _check_match(loc, is_remote, pub_date):
+                            continue
 
                         desc_elem = card.find("span", class_=lambda cl: cl and "hidden-md-down" in cl)
                         desc = desc_elem.text.strip() if desc_elem else " ".join(span_texts[:3])

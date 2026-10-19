@@ -13,6 +13,54 @@ router = APIRouter(prefix="/settings", tags=["Configuración y Canales"])
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 SETTINGS_FILE = os.path.join(BASE_DIR, "config", "settings.yaml")
+SECRETS_FILE = os.path.join(BASE_DIR, "data", "secrets.json")
+
+
+def _read_persisted_secrets() -> Dict[str, str]:
+    """Lee las credenciales privadas almacenadas en el volumen persistente /app/data/."""
+    if not os.path.exists(SECRETS_FILE):
+        return {}
+    try:
+        import json
+        with open(SECRETS_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        logger.warning("No se pudo leer data/secrets.json: %s", e)
+        return {}
+
+
+def _save_persisted_secret(key: str, value: str) -> None:
+    """Guarda un secreto en data/secrets.json (persistente ante recreación de Docker)."""
+    import json
+    data = _read_persisted_secrets()
+    data[key] = value
+    os.makedirs(os.path.dirname(SECRETS_FILE), exist_ok=True)
+    try:
+        with open(SECRETS_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+    except Exception as e:
+        logger.error("No se pudo escribir en data/secrets.json: %s", e)
+
+
+def _delete_persisted_secret(key: str) -> None:
+    """Elimina un secreto de data/secrets.json."""
+    import json
+    data = _read_persisted_secrets()
+    if key in data:
+        data.pop(key, None)
+        try:
+            with open(SECRETS_FILE, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+        except Exception as e:
+            logger.error("No se pudo actualizar data/secrets.json al eliminar: %s", e)
+
+
+def _get_secret(key: str, default: str = "") -> str:
+    """Recupera un secreto con orden de precedencia: 1) data/secrets.json, 2) os.environ."""
+    persisted = _read_persisted_secrets()
+    if key in persisted and persisted[key]:
+        return str(persisted[key]).strip()
+    return str(os.getenv(key, default)).strip()
 
 
 def _update_env_file(key: str, value: str) -> None:
@@ -105,18 +153,15 @@ def get_settings() -> Dict[str, Any]:
     # Informar estado de configuración de Telegram e InfoJobs sin filtrar tokens secretos
     telegram_bot_token_present = bool(os.getenv("TELEGRAM_BOT_TOKEN"))
     cfg_user_id = data.get("notificaciones", {}).get("telegram", {}).get("allowed_user_id", "")
-    env_user_id = os.getenv("TELEGRAM_ALLOWED_USER_ID", "")
-    current_user_id = str(cfg_user_id or env_user_id or "").strip()
+    current_user_id = _get_secret("TELEGRAM_ALLOWED_USER_ID", str(cfg_user_id or ""))
     if current_user_id == "0":
         current_user_id = ""
 
     cfg_ij_id = data.get("fuentes", {}).get("infojobs_api", {}).get("client_id", "")
-    env_ij_id = os.getenv("INFOJOBS_CLIENT_ID", "")
-    current_ij_id = str(cfg_ij_id or env_ij_id or "").strip()
+    current_ij_id = _get_secret("INFOJOBS_CLIENT_ID", str(cfg_ij_id or ""))
 
     cfg_ij_secret = data.get("fuentes", {}).get("infojobs_api", {}).get("client_secret", "")
-    env_ij_secret = os.getenv("INFOJOBS_CLIENT_SECRET", "")
-    current_ij_secret = str(cfg_ij_secret or env_ij_secret or "").strip()
+    current_ij_secret = _get_secret("INFOJOBS_CLIENT_SECRET", str(cfg_ij_secret or ""))
 
     # Sanitizar fuentes para que NUNCA exponga client_secret
     fuentes_sanitized = copy.deepcopy(data.get("fuentes", {}))
@@ -150,12 +195,12 @@ def get_settings() -> Dict[str, Any]:
 def update_notification_channels(req: NotificationChannelsUpdate) -> Dict[str, Any]:
     """
     Actualiza de forma atómica y persistente las preferencias de canal y claves API:
-    - guardar_en_interfaz: siempre activo (obligatorio)
+    - guardar_en_interfaz: siempre activo (soberano)
     - enviar_telegram: activable/desactivable
     - telegram_user_id: ID de usuario Telegram
-    - adjuntar documentos: siempre activo si Telegram está habilitado (obligatorio)
+    - adjuntar documentos: configurable (True por defecto si Telegram activo)
     - umbral mínimo de puntuación
-    - credenciales InfoJobs (Client ID y Client Secret persistidos fuera de git)
+    - credenciales InfoJobs (Client ID y Client Secret persistidos en /app/data/secrets.json)
     """
     data = _read_settings()
     if "notificaciones" not in data:
@@ -177,24 +222,28 @@ def update_notification_channels(req: NotificationChannelsUpdate) -> Dict[str, A
                 )
             data["notificaciones"]["telegram"]["allowed_user_id"] = clean_user_id
             os.environ["TELEGRAM_ALLOWED_USER_ID"] = clean_user_id
+            _save_persisted_secret("TELEGRAM_ALLOWED_USER_ID", clean_user_id)
             _update_env_file("TELEGRAM_ALLOWED_USER_ID", clean_user_id)
         else:
             # Borrado explícito
             data["notificaciones"]["telegram"]["allowed_user_id"] = ""
             os.environ.pop("TELEGRAM_ALLOWED_USER_ID", None)
+            _delete_persisted_secret("TELEGRAM_ALLOWED_USER_ID")
             _update_env_file("TELEGRAM_ALLOWED_USER_ID", "")
 
-    # Adjuntar documentos siempre activo por diseño
+    # Adjuntar documentos configurable (por defecto activo)
     if "telegram" not in data["notificaciones"]:
         data["notificaciones"]["telegram"] = {}
-    data["notificaciones"]["telegram"]["adjuntar_documentos"] = True
+    data["notificaciones"]["telegram"]["adjuntar_documentos"] = (
+        req.telegram_adjuntar_docs if req.telegram_adjuntar_docs is not None else True
+    )
 
     if req.umbral_minimo_puntuacion is not None:
         if "evaluacion" not in data:
             data["evaluacion"] = {}
         data["evaluacion"]["umbral_minimo_puntuacion"] = req.umbral_minimo_puntuacion
 
-    # Guardar credenciales de InfoJobs API si se proporcionan
+    # Guardar credenciales de InfoJobs API de forma persistente en /app/data/secrets.json
     if req.infojobs_client_id is not None or req.infojobs_client_secret is not None:
         if "fuentes" not in data:
             data["fuentes"] = {}
@@ -205,13 +254,23 @@ def update_notification_channels(req: NotificationChannelsUpdate) -> Dict[str, A
             clean_ij_id = req.infojobs_client_id.strip()
             data["fuentes"]["infojobs_api"]["client_id"] = clean_ij_id
             os.environ["INFOJOBS_CLIENT_ID"] = clean_ij_id
+            if clean_ij_id:
+                _save_persisted_secret("INFOJOBS_CLIENT_ID", clean_ij_id)
+            else:
+                _delete_persisted_secret("INFOJOBS_CLIENT_ID")
             _update_env_file("INFOJOBS_CLIENT_ID", clean_ij_id)
 
         if req.infojobs_client_secret is not None:
             clean_ij_sec = req.infojobs_client_secret.strip()
-            os.environ["INFOJOBS_CLIENT_SECRET"] = clean_ij_sec
+            if clean_ij_sec:
+                os.environ["INFOJOBS_CLIENT_SECRET"] = clean_ij_sec
+                _save_persisted_secret("INFOJOBS_CLIENT_SECRET", clean_ij_sec)
+                _update_env_file("INFOJOBS_CLIENT_SECRET", clean_ij_sec)
+            else:
+                os.environ.pop("INFOJOBS_CLIENT_SECRET", None)
+                _delete_persisted_secret("INFOJOBS_CLIENT_SECRET")
+                _update_env_file("INFOJOBS_CLIENT_SECRET", "")
             data["fuentes"]["infojobs_api"].pop("client_secret", None)
-            _update_env_file("INFOJOBS_CLIENT_SECRET", clean_ij_sec)
 
     _save_settings(data)
 

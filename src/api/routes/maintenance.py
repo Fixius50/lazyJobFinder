@@ -41,18 +41,24 @@ def stop_services() -> Dict[str, Any]:
     output_msgs = []
 
     if client:
+        success = True
         try:
             ollama_c = client.containers.get("lazyjob_ollama")
             ollama_c.stop(timeout=10)
             output_msgs.append("lazyjob_ollama detenido con éxito.")
         except Exception as e:
             output_msgs.append(f"Ollama: {e}")
+            success = False
         
         db = get_db()
-        db.log_event("INFO", "maintenance", "Servicios de fondo (Ollama) detenidos ordenadamente mediante Docker SDK.")
+        db.log_event(
+            "INFO" if success else "ERROR",
+            "maintenance",
+            "Servicios de fondo (Ollama) gestionados ordenadamente mediante Docker SDK.",
+        )
         return {
-            "success": True,
-            "message": "Servicios de fondo detenidos limpiamente vía Docker SDK.",
+            "success": success,
+            "message": "Servicios de fondo detenidos limpiamente vía Docker SDK." if success else "Error deteniendo lazyjob_ollama.",
             "output": "\n".join(output_msgs),
         }
 
@@ -73,7 +79,7 @@ def stop_services() -> Dict[str, Any]:
             raise HTTPException(status_code=500, detail=f"Fallo al detener servicios: {str(e)}")
 
     return {
-        "success": True,
+        "success": False,
         "message": "No se detectó CLI docker ni socket directo para detener contenedores. Utiliza start.bat en el host.",
         "output": "No-op",
     }
@@ -86,7 +92,8 @@ def down_containers(req: DownContainersRequest) -> Dict[str, Any]:
     SALVAGUARDA ESTRICTA:
     - Por defecto conserva el 100% de los volúmenes (los modelos descargados y la base de datos sobreviven).
     - Solo si remove_volumes es True Y la frase de confirmación es 'DESTRUIR_VOLUMENES_PERMANENTE',
-      se ejecuta con la bandera de volumen -v.
+      se destruye el volumen de modelos (lazyjob_ollama_models).
+    - Los datos de SQLite (/app/data) NUNCA se destruyen aquí para evitar pérdidas accidentales de historial.
     """
     import shutil
     from .system import _get_docker_client
@@ -100,7 +107,7 @@ def down_containers(req: DownContainersRequest) -> Dict[str, Any]:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Para eliminar volúmenes y modelos permanentemente, debes escribir exactamente '{phrase_destroy}'.",
             )
-        action_msg = "Contenedores Y VOLÚMENES eliminados permanentemente."
+        action_msg = "Contenedores Y VOLÚMENES de modelos eliminados permanentemente."
     else:
         if req.confirmation_phrase != phrase_down:
             raise HTTPException(
@@ -133,12 +140,26 @@ def down_containers(req: DownContainersRequest) -> Dict[str, Any]:
             c = client.containers.get("lazyjob_ollama")
             c.stop(timeout=10)
             c.remove(v=req.remove_volumes)
+            
+            vol_msg = "Volumen con nombre de modelos preservado."
+            if req.remove_volumes:
+                try:
+                    vol = client.volumes.get("lazyjob_ollama_models")
+                    vol.remove(force=True)
+                    vol_msg = "Volumen con nombre 'lazyjob_ollama_models' eliminado permanentemente."
+                except Exception as ve:
+                    vol_msg = f"Volumen 'lazyjob_ollama_models' no eliminado o no hallado: {ve}"
+
             db = get_db()
-            db.log_event("WARNING", "maintenance", f"Contenedor lazyjob_ollama eliminado vía Docker SDK (remove_volumes={req.remove_volumes}).")
+            db.log_event(
+                "WARNING",
+                "maintenance",
+                f"Contenedor lazyjob_ollama eliminado vía Docker SDK ({vol_msg}). Datos de SQLite conservados intactos.",
+            )
             return {
                 "success": True,
-                "message": f"Contenedor Ollama eliminado vía Docker SDK. Para eliminar el contenedor app completo, utiliza start.bat en el host.",
-                "output": "lazyjob_ollama eliminado con éxito.",
+                "message": f"Contenedor Ollama eliminado vía Docker SDK. {vol_msg}. Los datos SQLite y de la aplicación se conservan intactos.",
+                "output": f"lazyjob_ollama eliminado con éxito.\n{vol_msg}",
                 "volumes_removed": req.remove_volumes,
             }
         except Exception as ce:

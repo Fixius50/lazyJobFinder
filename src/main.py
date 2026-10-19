@@ -22,6 +22,21 @@ try:
 except ImportError:
     pass
 
+# Cargar secretos persistentes en el volumen local (/app/data/secrets.json)
+# Garantiza que las claves API y de Telegram sobrevivan a la recreación de contenedores Docker
+_SECRETS_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "secrets.json")
+if os.path.exists(_SECRETS_PATH):
+    try:
+        import json
+        with open(_SECRETS_PATH, "r", encoding="utf-8") as _f:
+            _persisted = json.load(_f)
+            for _k, _v in _persisted.items():
+                if _v:
+                    os.environ[_k] = str(_v)
+        logger.info("Credenciales persistentes cargadas correctamente desde data/secrets.json.")
+    except Exception as _sec_err:
+        logger.warning("No se pudieron cargar secretos de data/secrets.json: %s", _sec_err)
+
 from .scheduler.runner import JobPipelineRunner
 
 

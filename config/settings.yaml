@@ -20,6 +20,7 @@ fuentes:
     - google
   infojobs_api:
     habilitado: true
+    client_id: ''
 evaluacion:
   umbral_minimo_puntuacion: 65
   generar_documentos: true

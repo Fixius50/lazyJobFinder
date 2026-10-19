@@ -34,19 +34,49 @@ def stop_services() -> Dict[str, Any]:
     Apagado ordinario: detiene los contenedores de forma ordenada sin destruir nada.
     Conserva contenedores, imágenes y volúmenes intactos.
     """
-    cmd = ["docker", "compose", "stop"]
-    try:
-        res = subprocess.run(cmd, capture_output=True, text=True, timeout=25, check=False)
+    import shutil
+    from .system import _get_docker_client
+
+    client = _get_docker_client()
+    output_msgs = []
+
+    if client:
+        try:
+            ollama_c = client.containers.get("lazyjob_ollama")
+            ollama_c.stop(timeout=10)
+            output_msgs.append("lazyjob_ollama detenido con éxito.")
+        except Exception as e:
+            output_msgs.append(f"Ollama: {e}")
+        
         db = get_db()
-        db.log_event("INFO", "maintenance", "Servicios detenidos ordenadamente mediante docker compose stop.")
+        db.log_event("INFO", "maintenance", "Servicios de fondo (Ollama) detenidos ordenadamente mediante Docker SDK.")
         return {
-            "success": res.returncode == 0,
-            "message": "Servicios detenidos limpiamente.",
-            "output": res.stdout or res.stderr,
+            "success": True,
+            "message": "Servicios de fondo detenidos limpiamente vía Docker SDK.",
+            "output": "\n".join(output_msgs),
         }
-    except Exception as e:
-        logger.error("Error al detener servicios: %s", e)
-        raise HTTPException(status_code=500, detail=f"Fallo al detener servicios: {str(e)}")
+
+    # Fallback si el binario docker está disponible en PATH (ej. host local)
+    if shutil.which("docker"):
+        cmd = ["docker", "compose", "stop"]
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=25, check=False)
+            db = get_db()
+            db.log_event("INFO", "maintenance", "Servicios detenidos ordenadamente mediante docker compose stop.")
+            return {
+                "success": res.returncode == 0,
+                "message": "Servicios detenidos limpiamente.",
+                "output": res.stdout or res.stderr,
+            }
+        except Exception as e:
+            logger.error("Error al detener servicios: %s", e)
+            raise HTTPException(status_code=500, detail=f"Fallo al detener servicios: {str(e)}")
+
+    return {
+        "success": True,
+        "message": "No se detectó CLI docker ni socket directo para detener contenedores. Utiliza start.bat en el host.",
+        "output": "No-op",
+    }
 
 
 @router.post("/down-containers")
@@ -58,6 +88,9 @@ def down_containers(req: DownContainersRequest) -> Dict[str, Any]:
     - Solo si remove_volumes es True Y la frase de confirmación es 'DESTRUIR_VOLUMENES_PERMANENTE',
       se ejecuta con la bandera de volumen -v.
     """
+    import shutil
+    from .system import _get_docker_client
+
     phrase_destroy = CONFIRMATION_PHRASES["destroy_volumes"]
     phrase_down = CONFIRMATION_PHRASES["down_containers"]
 
@@ -67,7 +100,6 @@ def down_containers(req: DownContainersRequest) -> Dict[str, Any]:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Para eliminar volúmenes y modelos permanentemente, debes escribir exactamente '{phrase_destroy}'.",
             )
-        cmd = ["docker", "compose", "down", "-v"]
         action_msg = "Contenedores Y VOLÚMENES eliminados permanentemente."
     else:
         if req.confirmation_phrase != phrase_down:
@@ -75,22 +107,48 @@ def down_containers(req: DownContainersRequest) -> Dict[str, Any]:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Frase de confirmación errónea. Escribe '{phrase_down}'.",
             )
-        cmd = ["docker", "compose", "down"]
         action_msg = "Contenedores eliminados. Los volúmenes y datos persistentes se han conservado intactos."
 
-    try:
-        res = subprocess.run(cmd, capture_output=True, text=True, timeout=35, check=False)
-        db = get_db()
-        db.log_event("WARNING", "maintenance", action_msg)
-        return {
-            "success": res.returncode == 0,
-            "message": action_msg,
-            "output": res.stdout or res.stderr,
-            "volumes_removed": req.remove_volumes,
-        }
-    except Exception as e:
-        logger.error("Error en down_containers: %s", e)
-        raise HTTPException(status_code=500, detail=f"Fallo en operación Docker: {str(e)}")
+    # Si docker CLI está presente (ej. en el host o contenedor con docker-cli)
+    if shutil.which("docker"):
+        cmd = ["docker", "compose", "down", "-v"] if req.remove_volumes else ["docker", "compose", "down"]
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=35, check=False)
+            db = get_db()
+            db.log_event("WARNING", "maintenance", action_msg)
+            return {
+                "success": res.returncode == 0,
+                "message": action_msg,
+                "output": res.stdout or res.stderr,
+                "volumes_removed": req.remove_volumes,
+            }
+        except Exception as e:
+            logger.error("Error en down_containers: %s", e)
+            raise HTTPException(status_code=500, detail=f"Fallo en operación Docker: {str(e)}")
+
+    # Si se ejecuta dentro del contenedor sin Docker CLI
+    client = _get_docker_client()
+    if client:
+        try:
+            c = client.containers.get("lazyjob_ollama")
+            c.stop(timeout=10)
+            c.remove(v=req.remove_volumes)
+            db = get_db()
+            db.log_event("WARNING", "maintenance", f"Contenedor lazyjob_ollama eliminado vía Docker SDK (remove_volumes={req.remove_volumes}).")
+            return {
+                "success": True,
+                "message": f"Contenedor Ollama eliminado vía Docker SDK. Para eliminar el contenedor app completo, utiliza start.bat en el host.",
+                "output": "lazyjob_ollama eliminado con éxito.",
+                "volumes_removed": req.remove_volumes,
+            }
+        except Exception as ce:
+            logger.error("Fallo al eliminar contenedor vía SDK: %s", ce)
+            raise HTTPException(status_code=500, detail=f"Fallo al gestionar contenedor vía SDK: {str(ce)}")
+
+    raise HTTPException(
+        status_code=503,
+        detail="El entorno dentro del contenedor no dispone de Docker CLI ni socket accesible para eliminar la infraestructura. Ejecuta 'docker compose down' desde la consola del host.",
+    )
 
 
 @router.post("/clean-documents")

@@ -1,5 +1,4 @@
-"""Rutas para lectura y actualización segura de configuraciones del sistema y canales."""
-
+import copy
 import logging
 import os
 from typing import Any, Dict, List, Optional
@@ -14,6 +13,39 @@ router = APIRouter(prefix="/settings", tags=["Configuración y Canales"])
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 SETTINGS_FILE = os.path.join(BASE_DIR, "config", "settings.yaml")
+
+
+def _update_env_file(key: str, value: str) -> None:
+    """Actualiza una variable en el archivo local .env sin tocar otros valores."""
+    env_path = os.path.join(BASE_DIR, ".env")
+    lines = []
+    if os.path.exists(env_path):
+        try:
+            with open(env_path, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+        except Exception as e:
+            logger.warning("No se pudo leer .env para actualizar %s: %s", key, e)
+            return
+
+    new_lines = []
+    found = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith(f"{key}=") or stripped.startswith(f"#{key}="):
+            new_lines.append(f"{key}={value}\n")
+            found = True
+        else:
+            new_lines.append(line)
+
+    if not found and value:
+        new_lines.append(f"{key}={value}\n")
+
+    try:
+        with open(env_path, "w", encoding="utf-8") as f:
+            f.writelines(new_lines)
+    except Exception as e:
+        logger.warning("No se pudo escribir en .env: %s", e)
+
 
 
 class NotificationChannelsUpdate(BaseModel):
@@ -46,12 +78,17 @@ def _read_settings() -> Dict[str, Any]:
 
 
 def _save_settings(data: Dict[str, Any]) -> None:
+    # NUNCA persistir client_secret en settings.yaml (archivo versionado en git)
+    if "fuentes" in data and "infojobs_api" in data["fuentes"]:
+        data["fuentes"]["infojobs_api"].pop("client_secret", None)
+
     try:
         with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
             yaml.dump(data, f, allow_unicode=True, sort_keys=False)
         # Notificar al runner para recargar configuraciones en caliente
         runner = get_runner()
-        runner.reload_settings()
+        if runner:
+            runner.reload_settings()
     except Exception as e:
         logger.error("Error guardando settings.yaml: %s", e)
         raise HTTPException(status_code=500, detail="No se pudo guardar la configuración.")
@@ -81,9 +118,14 @@ def get_settings() -> Dict[str, Any]:
     env_ij_secret = os.getenv("INFOJOBS_CLIENT_SECRET", "")
     current_ij_secret = str(cfg_ij_secret or env_ij_secret or "").strip()
 
+    # Sanitizar fuentes para que NUNCA exponga client_secret
+    fuentes_sanitized = copy.deepcopy(data.get("fuentes", {}))
+    if "infojobs_api" in fuentes_sanitized:
+        fuentes_sanitized["infojobs_api"].pop("client_secret", None)
+
     return {
         "busqueda": data.get("busqueda", {}),
-        "fuentes": data.get("fuentes", {}),
+        "fuentes": fuentes_sanitized,
         "evaluacion": data.get("evaluacion", {}),
         "notificaciones": data.get("notificaciones", {}),
         "horario": data.get("horario", {}),
@@ -113,7 +155,7 @@ def update_notification_channels(req: NotificationChannelsUpdate) -> Dict[str, A
     - telegram_user_id: ID de usuario Telegram
     - adjuntar documentos: siempre activo si Telegram está habilitado (obligatorio)
     - umbral mínimo de puntuación
-    - infojobs_client_id e infojobs_client_secret
+    - credenciales InfoJobs (Client ID y Client Secret persistidos fuera de git)
     """
     data = _read_settings()
     if "notificaciones" not in data:
@@ -135,10 +177,12 @@ def update_notification_channels(req: NotificationChannelsUpdate) -> Dict[str, A
                 )
             data["notificaciones"]["telegram"]["allowed_user_id"] = clean_user_id
             os.environ["TELEGRAM_ALLOWED_USER_ID"] = clean_user_id
+            _update_env_file("TELEGRAM_ALLOWED_USER_ID", clean_user_id)
         else:
             # Borrado explícito
             data["notificaciones"]["telegram"]["allowed_user_id"] = ""
             os.environ.pop("TELEGRAM_ALLOWED_USER_ID", None)
+            _update_env_file("TELEGRAM_ALLOWED_USER_ID", "")
 
     # Adjuntar documentos siempre activo por diseño
     if "telegram" not in data["notificaciones"]:
@@ -161,11 +205,13 @@ def update_notification_channels(req: NotificationChannelsUpdate) -> Dict[str, A
             clean_ij_id = req.infojobs_client_id.strip()
             data["fuentes"]["infojobs_api"]["client_id"] = clean_ij_id
             os.environ["INFOJOBS_CLIENT_ID"] = clean_ij_id
+            _update_env_file("INFOJOBS_CLIENT_ID", clean_ij_id)
 
         if req.infojobs_client_secret is not None:
             clean_ij_sec = req.infojobs_client_secret.strip()
-            data["fuentes"]["infojobs_api"]["client_secret"] = clean_ij_sec
             os.environ["INFOJOBS_CLIENT_SECRET"] = clean_ij_sec
+            data["fuentes"]["infojobs_api"].pop("client_secret", None)
+            _update_env_file("INFOJOBS_CLIENT_SECRET", clean_ij_sec)
 
     _save_settings(data)
 

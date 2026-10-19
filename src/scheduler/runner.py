@@ -118,6 +118,13 @@ class JobPipelineRunner:
                 total_found = metrics["total_encontradas"]
                 new_count = metrics["nuevas_guardadas"]
 
+                # Preferencias de canales
+                send_tg_pref = (
+                    self.settings.get("notificaciones", {}).get("enviar_telegram", True)
+                    and self.settings.get("notificaciones", {}).get("telegram", {}).get("habilitado", True)
+                )
+                save_ui_pref = self.settings.get("notificaciones", {}).get("guardar_en_interfaz", True)
+
                 if not new_jobs:
                     logger.info("No se encontraron ofertas nuevas en este ciclo.")
                     self.db.finish_pipeline_run(
@@ -127,21 +134,16 @@ class JobPipelineRunner:
                         new_jobs=0,
                         relevant_jobs=0,
                     )
-                    if self.telegram_bot.is_configured():
+                    if send_tg_pref and self.telegram_bot.is_configured():
                         await self.telegram_bot.send_message(
                             f"ℹ️ <b>Escaneo {tag.lower()} finalizado:</b>\n"
                             f"Se escanearon {total_found} ofertas en las fuentes, pero no hay vacantes nuevas hoy."
                         )
-                        # 2. Evaluación con pre-filtro y Ollama
+                    return
+
+                # 2. Evaluación con pre-filtro y Ollama
                 min_score = self.settings.get("evaluacion", {}).get("umbral_minimo_puntuacion", 65)
                 generate_docs = self.settings.get("evaluacion", {}).get("generar_documentos", True)
-
-                # Preferencias de canales independientes
-                save_ui_pref = self.settings.get("notificaciones", {}).get("guardar_en_interfaz", True)
-                send_tg_pref = (
-                    self.settings.get("notificaciones", {}).get("enviar_telegram", True)
-                    and self.settings.get("notificaciones", {}).get("telegram", {}).get("habilitado", True)
-                )
 
                 for job in new_jobs:
                     # Ceder brevemente el control al event loop para atender peticiones HTTP (healthcheck/UI)
@@ -245,7 +247,7 @@ class JobPipelineRunner:
                     error_message=error_encountered,
                 )
                 self.db.log_event("CRITICAL", "pipeline", f"Fallo catastrófico: {str(e)}")
-                if self.telegram_bot.is_configured():
+                if send_tg_pref and self.telegram_bot.is_configured():
                     await self.telegram_bot.send_message(f"⚠️ <b>Alerta del sistema:</b> Error en el escaneo: {str(e)}")
 
     def check_missed_run_on_startup(self) -> None:
@@ -312,4 +314,5 @@ class JobPipelineRunner:
         self.connectors_mgr.reload_connectors()
         self.scoring_engine.settings = self.settings
         self.telegram_bot.settings = self.settings
+        self.telegram_bot.reload_credentials()
         logger.info("Configuraciones recargadas dinámicamente en JobPipelineRunner.")

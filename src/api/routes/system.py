@@ -206,8 +206,24 @@ def execute_service_action(req: ServiceActionRequest) -> Dict[str, Any]:
             detail="Socket Docker no disponible desde el contenedor. Comprueba los permisos de /var/run/docker.sock.",
         )
 
-    # El servicio controlable de fondo es lazyjob_ollama
-    # lazyjob_app es el backend web que aloja esta API y no debe auto-detenerse
+    # Distinción de ámbito según el servicio solicitado:
+    if service == "lazyjobfinder":
+        if action == "stop":
+            return {
+                "success": False,
+                "message": "lazyjob_app aloja la API web activa. Para apagar el contenedor app sin interrumpir abruptamente el servidor, utiliza start.bat en Windows.",
+                "action": action,
+                "service": service,
+            }
+        if action == "start":
+            return {
+                "success": True,
+                "message": "El contenedor lazyjob_app ya se encuentra en ejecución y operativo.",
+                "action": action,
+                "service": service,
+            }
+
+    # Para "ollama" o "all", el contenedor de fondo a gestionar es lazyjob_ollama
     target_container = "lazyjob_ollama"
 
     try:
@@ -219,11 +235,17 @@ def execute_service_action(req: ServiceActionRequest) -> Dict[str, Any]:
         elif action == "start":
             c.start()
 
+        msg = (
+            f"Servicio {target_container} ({action}) ejecutado correctamente."
+            if service == "ollama"
+            else f"Operación '{action}' completada sobre los servicios de fondo ({target_container}). lazyjob_app se mantiene activo para conservar el panel."
+        )
+
         db = get_db()
         db.log_event("INFO", "docker", f"Acción '{action}' ejecutada sobre '{target_container}' vía Docker SDK.")
         return {
             "success": True,
-            "message": f"Servicio {target_container} ({action}) ejecutado correctamente.",
+            "message": msg,
             "action": action,
             "service": service,
         }

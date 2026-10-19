@@ -43,22 +43,32 @@ class TelegramJobBot:
         self.manual_search_callback = manual_search_callback
         self.connectors_manager = connectors_manager
 
-        self.token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-        raw_user_id = os.getenv("TELEGRAM_ALLOWED_USER_ID", "").strip()
-        if not raw_user_id or raw_user_id == "0":
-            cfg_user_id = self.settings.get("notificaciones", {}).get("telegram", {}).get("allowed_user_id")
-            if cfg_user_id:
-                raw_user_id = str(cfg_user_id).strip()
-
-        try:
-            self.allowed_user_id = int(raw_user_id) if raw_user_id else 0
-        except ValueError:
-            self.allowed_user_id = 0
+        self.token = ""
+        self.allowed_user_id: int = 0
+        self.reload_credentials()
 
         self.app: Optional[Application] = None
         self.last_manual_search_time: float = 0.0
         self.manual_search_cooldown: int = 300  # 5 minutos de enfriamiento para comandos pesados
         self._is_manual_search_running: bool = False
+
+    def reload_credentials(self) -> None:
+        """Recalcula las credenciales y el ID autorizado dinámicamente."""
+        self.token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+        # Precedencia clara: si settings tiene una configuración explícita para allowed_user_id, manda sobre env
+        tg_cfg = self.settings.get("notificaciones", {}).get("telegram", {})
+        if "allowed_user_id" in tg_cfg and tg_cfg["allowed_user_id"] is not None:
+            raw_user_id = str(tg_cfg["allowed_user_id"]).strip()
+        else:
+            raw_user_id = os.getenv("TELEGRAM_ALLOWED_USER_ID", "").strip()
+
+        if raw_user_id and raw_user_id.isdigit():
+            self.allowed_user_id = int(raw_user_id)
+        else:
+            self.allowed_user_id = 0
+
+        logger.info("Credenciales Telegram actualizadas. ID autorizado activo: %d (Configurado: %s)",
+                    self.allowed_user_id, self.is_configured())
 
     def is_configured(self) -> bool:
         """Verifica si las credenciales de Telegram están debidamente establecidas y no son placeholders."""

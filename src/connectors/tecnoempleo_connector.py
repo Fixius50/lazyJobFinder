@@ -1,5 +1,6 @@
 """Conector para Tecnoempleo mediante extracción HTML directa y canales RSS."""
 
+from datetime import datetime
 import html
 import logging
 import re
@@ -149,6 +150,33 @@ class TecnoempleoConnector(BaseConnector):
                             for r in ["teletrabajo", "remoto", "100% remoto", "remote", "híbrido", "hibrido"]
                         )
 
+                        # Filtrar por ubicación si se especifican ubicaciones concretas distintas a Spain/España
+                        if locations:
+                            norm_locations = [l.strip().lower() for l in locations if l.strip()]
+                            is_broad = any(b in norm_locations for b in ["spain", "españa", "espana"])
+                            if not is_broad:
+                                match_loc = any(
+                                    nl in loc.lower() or (nl in ["remoto", "teletrabajo", "remote"] and is_remote)
+                                    for nl in norm_locations
+                                )
+                                if not match_loc:
+                                    continue
+
+                        # Extracción de fecha real del card (ej: "19/10/2026")
+                        pub_date = "Reciente"
+                        date_match = re.search(r"(\d{1,2}/\d{1,2}/\d{4})", card.text)
+                        if date_match:
+                            try:
+                                dt = datetime.strptime(date_match.group(1), "%d/%m/%Y")
+                                pub_date = dt.strftime("%Y-%m-%d")
+                                if hours_old and hours_old > 0:
+                                    diff_hours = (datetime.now() - dt).total_seconds() / 3600
+                                    # Margen de 24h por actualización de huso horario
+                                    if diff_hours > (hours_old + 24):
+                                        continue
+                            except Exception:
+                                pass
+
                         desc_elem = card.find("span", class_=lambda cl: cl and "hidden-md-down" in cl)
                         desc = desc_elem.text.strip() if desc_elem else " ".join(span_texts[:3])
                         clean_desc = clean_html(desc)
@@ -161,7 +189,7 @@ class TecnoempleoConnector(BaseConnector):
                             location=loc,
                             is_remote=is_remote,
                             description=clean_desc or f"Oferta de {title} en {company} ({loc})",
-                            date_posted="Reciente",
+                            date_posted=pub_date,
                             raw_data={"source": "html_scraper"},
                         )
 

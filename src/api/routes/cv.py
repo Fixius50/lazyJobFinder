@@ -36,49 +36,39 @@ def _ensure_upload_dir():
 def _get_active_cv_info() -> Dict[str, Any]:
     """Recupera la información del CV actualmente seleccionado sin enviar datos a la IA."""
     _ensure_upload_dir()
-    selected_filename = "default"
+    selected_filename = "none"
     if os.path.exists(ACTIVE_CV_CONFIG_FILE):
         try:
             import json
             with open(ACTIVE_CV_CONFIG_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                selected_filename = data.get("selected_filename", "default")
+                selected_filename = data.get("selected_filename", "none")
         except Exception:
-            selected_filename = "default"
+            selected_filename = "none"
 
-    if selected_filename == "default" or not os.path.exists(os.path.join(UPLOAD_DIR, selected_filename)):
-        # CV Base Canónico
-        if os.path.exists(BASE_CV_PATH):
-            stat = os.stat(BASE_CV_PATH)
+    if selected_filename and selected_filename not in ("none", "default"):
+        target_path = os.path.join(UPLOAD_DIR, os.path.basename(selected_filename))
+        if os.path.exists(target_path):
+            stat = os.stat(target_path)
             return {
-                "type": "canonical",
-                "filename": "cv_base.md",
-                "path": "config/cv_base.md",
+                "type": "custom",
+                "filename": os.path.basename(target_path),
+                "path": f"data/uploaded_cvs/{os.path.basename(target_path)}",
                 "size_bytes": stat.st_size,
                 "modified_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stat.st_mtime)),
-                "is_default": True,
-                "description": "Perfil maestro canónico verificado (config/cv_base.md).",
+                "is_default": False,
+                "description": "CV personalizado cargado localmente.",
             }
-        return {
-            "type": "none",
-            "filename": "Ninguno",
-            "size_bytes": 0,
-            "modified_at": "n/a",
-            "is_default": True,
-            "description": "No se encontró el CV base.",
-        }
 
-    # Archivo subido activo
-    target_path = os.path.join(UPLOAD_DIR, selected_filename)
-    stat = os.stat(target_path)
+    # Si no hay CV cargado o seleccionado:
     return {
-        "type": "custom",
-        "filename": selected_filename,
-        "path": f"data/uploaded_cvs/{selected_filename}",
-        "size_bytes": stat.st_size,
-        "modified_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stat.st_mtime)),
+        "type": "none",
+        "filename": "Ninguno",
+        "path": "",
+        "size_bytes": 0,
+        "modified_at": "n/a",
         "is_default": False,
-        "description": "CV personalizado cargado localmente.",
+        "description": "Sin CV activo. Las ofertas se conservarán sin filtrar por currículum.",
     }
 
 
@@ -115,18 +105,7 @@ def list_uploaded_cvs() -> List[Dict[str, Any]]:
     _ensure_upload_dir()
     cvs = []
 
-    # 1. Base canónico siempre presente
-    if os.path.exists(BASE_CV_PATH):
-        stat = os.stat(BASE_CV_PATH)
-        cvs.append({
-            "filename": "cv_base.md",
-            "id": "default",
-            "is_default": True,
-            "size_bytes": stat.st_size,
-            "modified_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stat.st_mtime)),
-        })
-
-    # 2. Subidos a data/uploaded_cvs/
+    # Solo archivos CV subidos a data/uploaded_cvs/
     if os.path.exists(UPLOAD_DIR):
         for entry in os.scandir(UPLOAD_DIR):
             if entry.is_file():
@@ -214,7 +193,9 @@ def select_active_cv(req: SelectCVRequest) -> Dict[str, Any]:
     _ensure_upload_dir()
     choice = req.filename.strip()
 
-    if choice != "default":
+    if choice in ("none", "Ninguno", "", "default"):
+        choice = "none"
+    else:
         # Evitar directory traversal
         clean_name = os.path.basename(choice)
         full_path = os.path.join(UPLOAD_DIR, clean_name)
@@ -234,3 +215,58 @@ def select_active_cv(req: SelectCVRequest) -> Dict[str, Any]:
         "selected": choice,
         "active_info": _get_active_cv_info(),
     }
+
+
+@router.delete("/{filename}")
+def delete_uploaded_cv(filename: str) -> Dict[str, Any]:
+    """
+    Elimina un archivo CV personalizado subido previamente en data/uploaded_cvs/.
+    Si el archivo eliminado era el CV activo, restablece la configuración a 'none' (sin filtrado).
+    """
+    _ensure_upload_dir()
+    clean_name = os.path.basename(filename.strip())
+
+    if not clean_name or clean_name in ("none", "Ninguno"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Nombre de archivo inválido para eliminación.",
+        )
+
+    target_path = os.path.join(UPLOAD_DIR, clean_name)
+    if not os.path.exists(target_path):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"El archivo CV '{clean_name}' no existe en el almacenamiento local.",
+        )
+
+    try:
+        os.remove(target_path)
+    except Exception as e:
+        logger.error("Error al eliminar archivo CV '%s': %s", clean_name, e)
+        raise HTTPException(status_code=500, detail=f"No se pudo eliminar el archivo: {str(e)}")
+
+    # Si era el CV activo seleccionado, volver a 'none'
+    reverted_to_none = False
+    if os.path.exists(ACTIVE_CV_CONFIG_FILE):
+        try:
+            import json
+            with open(ACTIVE_CV_CONFIG_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if data.get("selected_filename") == clean_name:
+                with open(ACTIVE_CV_CONFIG_FILE, "w", encoding="utf-8") as f:
+                    json.dump({"selected_filename": "none", "updated_at": time.time()}, f)
+                reverted_to_none = True
+        except Exception as e:
+            logger.warning("Error comprobando active_cv.json tras borrado: %s", e)
+
+    db = get_db()
+    db.log_event("INFO", "cv", f"Archivo CV eliminado: {clean_name} (restaurado a sin CV: {reverted_to_none})")
+
+    return {
+        "success": True,
+        "message": f"Currículum '{clean_name}' eliminado correctamente del almacenamiento local.",
+        "reverted_to_none": reverted_to_none,
+        "active_info": _get_active_cv_info(),
+    }
+
+

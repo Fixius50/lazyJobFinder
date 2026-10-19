@@ -156,28 +156,32 @@ class JobPipelineRunner:
                         if score >= min_score and eval_res.get("should_apply"):
                             doc_paths = None
                             if generate_docs:
-                                # 3. Adaptación honesta y validada de CV y Carta de Presentación
-                                cv_md, diff_audit = await asyncio.to_thread(self.cv_tailorer.tailor, job, eval_res)
-                                letter_md = await asyncio.to_thread(self.letter_generator.generate, job, eval_res)
+                                from ..tailoring.cv_reader import get_active_cv_text_and_meta
+                                _, cv_meta = get_active_cv_text_and_meta()
 
-                                # 4. Compilación PDF ATS-friendly con ReportLab
-                                doc_paths = await asyncio.to_thread(
-                                    self.pdf_renderer.render_cv_and_letter,
-                                    job=job,
-                                    cv_md=cv_md,
-                                    diff_audit=diff_audit,
-                                    letter_md=letter_md,
-                                )
+                                if cv_meta.get("has_cv"):
+                                    # 3. Adaptación honesta y validada de CV y Carta de Presentación
+                                    cv_md, diff_audit = await asyncio.to_thread(self.cv_tailorer.tailor, job, eval_res)
+                                    letter_md = await asyncio.to_thread(self.letter_generator.generate, job, eval_res)
 
-                                # 5. Persistir rutas en base de datos
-                                self.db.save_documents({
-                                    "job_id": job["id"],
-                                    "cv_pdf_path": doc_paths["cv_pdf_path"],
-                                    "cv_md_path": doc_paths["cv_md_path"],
-                                    "letter_pdf_path": doc_paths["letter_pdf_path"],
-                                    "letter_md_path": doc_paths["letter_md_path"],
-                                    "diff_summary": yaml.dump(diff_audit, allow_unicode=True),
-                                })
+                                    # 4. Compilación PDF ATS-friendly con ReportLab
+                                    doc_paths = await asyncio.to_thread(
+                                        self.pdf_renderer.render_cv_and_letter,
+                                        job=job,
+                                        cv_md=cv_md,
+                                        diff_audit=diff_audit,
+                                        letter_md=letter_md,
+                                    )
+
+                                    # 5. Persistir rutas en base de datos
+                                    self.db.save_documents({
+                                        "job_id": job["id"],
+                                        "cv_pdf_path": doc_paths["cv_pdf_path"],
+                                        "cv_md_path": doc_paths["cv_md_path"],
+                                        "letter_pdf_path": doc_paths["letter_pdf_path"],
+                                        "letter_md_path": doc_paths["letter_md_path"],
+                                        "diff_summary": yaml.dump(diff_audit, allow_unicode=True),
+                                    })
 
                             # 6. Notificar por Telegram solo si el canal está expresamente habilitado
                             if send_tg_pref and self.telegram_bot.is_configured():

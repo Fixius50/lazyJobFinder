@@ -90,47 +90,56 @@ def extract_cv_text(file_path: str) -> str:
 def get_active_cv_text_and_meta() -> Tuple[str, Dict[str, Any]]:
     """
     Recupera el texto y los metadatos del CV actualmente configurado como activo.
-    Si se ha seleccionado un PDF o Markdown subido en data/uploaded_cvs/, lee ese archivo.
-    Si está en 'default' o no existe el archivo personalizado, lee config/cv_base.md.
+    Si se ha subido y seleccionado un archivo en data/uploaded_cvs/, lee ese archivo.
+    Si no hay archivos subidos o está en 'none', devuelve texto vacío con has_cv=False (sin filtrado de CV).
     """
-    selected_filename = "default"
+    selected_filename = "none"
     if os.path.exists(ACTIVE_CV_CONFIG_FILE):
         try:
             with open(ACTIVE_CV_CONFIG_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                selected_filename = data.get("selected_filename", "default")
+                selected_filename = data.get("selected_filename", "none")
         except Exception:
-            selected_filename = "default"
+            selected_filename = "none"
 
-    target_path = BASE_CV_PATH
-    is_default = True
-    cv_type = "canonical"
-
-    if selected_filename != "default":
+    if selected_filename and selected_filename not in ("none", "default"):
         custom_path = os.path.join(UPLOAD_DIR, os.path.basename(selected_filename))
         if os.path.exists(custom_path):
-            target_path = custom_path
-            is_default = False
-            cv_type = "custom"
+            try:
+                text = extract_cv_text(custom_path)
+                return text, {
+                    "filename": os.path.basename(custom_path),
+                    "path": custom_path,
+                    "is_default": False,
+                    "type": "custom",
+                    "extension": os.path.splitext(custom_path)[1].lower(),
+                    "exists": True,
+                    "has_cv": True,
+                    "char_count": len(text),
+                    "word_count": len(text.split()),
+                }
+            except Exception as e:
+                logger.error("Error extrayendo texto del CV activo (%s): %s", custom_path, e)
+                return "", {
+                    "filename": os.path.basename(custom_path),
+                    "path": custom_path,
+                    "is_default": False,
+                    "type": "custom",
+                    "extension": os.path.splitext(custom_path)[1].lower(),
+                    "exists": True,
+                    "has_cv": False,
+                    "error": str(e),
+                }
 
-    meta = {
-        "filename": os.path.basename(target_path),
-        "path": target_path,
-        "is_default": is_default,
-        "type": cv_type,
-        "extension": os.path.splitext(target_path)[1].lower(),
-        "exists": os.path.exists(target_path),
+    # Si no hay CV activo configurado:
+    return "", {
+        "filename": "Ninguno",
+        "path": "",
+        "is_default": False,
+        "type": "none",
+        "extension": "",
+        "exists": False,
+        "has_cv": False,
+        "char_count": 0,
+        "word_count": 0,
     }
-
-    if not os.path.exists(target_path):
-        return "", meta
-
-    try:
-        text = extract_cv_text(target_path)
-        meta["char_count"] = len(text)
-        meta["word_count"] = len(text.split())
-        return text, meta
-    except Exception as e:
-        logger.error("Error extrayendo texto del CV activo (%s): %s", target_path, e)
-        meta["error"] = str(e)
-        return "", meta

@@ -233,7 +233,31 @@ class ScoringEngine:
         }
 
     def evaluate(self, job: Dict[str, Any]) -> Dict[str, Any]:
-        """Evalúa la oferta utilizando Ollama con distinción de requisitos obligatorios vs deseables y verificación factual."""
+        """
+        Evalúa la oferta utilizando Ollama con el CV activo.
+        Si no hay ningún CV activo (has_cv=False), no filtra ni descarta:
+        acepta y conserva la oferta directamente para que el usuario no pierda vacantes.
+        """
+        from ..tailoring.cv_reader import get_active_cv_text_and_meta
+        cv_text, cv_meta = get_active_cv_text_and_meta()
+
+        if not cv_meta.get("has_cv") or not cv_text.strip():
+            logger.info("Oferta ID %d aceptada directamente: no hay CV activo configurado (sin filtrado)", job["id"])
+            no_cv_eval = {
+                "job_id": job["id"],
+                "score": 100,
+                "fit_level": "BUENO",
+                "matched_skills": [],
+                "missing_skills": [],
+                "strengths": ["Oferta registrada sin filtrado de CV."],
+                "gaps": [],
+                "reasoning": "Sin filtro de CV: No hay ningún currículum activo configurado. La vacante se acepta y conserva directamente.",
+                "should_apply": True,
+            }
+            self.db.save_evaluation(no_cv_eval)
+            self.db.update_job_status(job["id"], "evaluated")
+            return no_cv_eval
+
         passes, reason, meta = self.prefilter(job)
         if not passes:
             logger.info("Oferta ID %d descartada en pre-filtro: %s", job["id"], reason)
@@ -253,17 +277,16 @@ class ScoringEngine:
             return discarded_eval
 
         system_prompt = (
-            "Eres un evaluador técnico de empleo especializado en el mercado de software en España. "
-            "Tu tarea es evaluar objetivamente la afinidad entre una vacante y el perfil REAL de un candidato titulado en "
-            "Desarrollo de Aplicaciones Multiplataforma (DAM).\n\n"
+            "Eres un evaluador técnico de empleo especializado en el mercado laboral en España. "
+            "Tu tarea es evaluar objetivamente la afinidad entre una vacante y el currículum REAL del candidato proporcionado.\n\n"
             "DIRECTRICES DE ANÁLISIS:\n"
             "1. DISTINGUE REQUISITOS OBLIGATORIOS VS DESEABLES: Si una tecnología o año de experiencia aparece como "
             "'se valorará', 'deseable' o 'un plus', NO debe impedir que la oferta sea considerada si el candidato "
             "cumple la base tecnológica.\n"
             "2. VERACIDAD ABSOLUTA: Jamás inventes que el candidato tiene experiencia laboral previa ni tecnologías "
-            "que no estén en su perfil YAML.\n"
+            "que no estén expresamente en su currículum.\n"
             "3. PUNTUACIÓN (0 a 100):\n"
-            "   - 80-100: Excelente encaje (junior/entry-level con Java, SQL, PHP, web Full Stack o DAM).\n"
+            "   - 80-100: Excelente encaje.\n"
             "   - 65-79: Buen encaje (tecnologías base presentes, requisitos adicionales asumibles como deseables).\n"
             "   - 45-64: Encaje moderado (muchos requisitos avanzados pero base compatible).\n"
             "   - 0-44: Incompatible.\n"
@@ -274,8 +297,8 @@ class ScoringEngine:
 
         sanitized_description = sanitize_untrusted_job_text(job.get("description", ""))
         user_prompt = (
-            f"### PERFIL REAL CANÓNICO (DAM):\n"
-            f"```yaml\n{yaml.dump(self.profile, allow_unicode=True)}\n```\n\n"
+            f"### CURRÍCULUM ACTIVO DEL CANDIDATO ({cv_meta.get('filename')}):\n"
+            f"```markdown\n{cv_text[:4000]}\n```\n\n"
             f"### VACANTE A EVALUAR:\n"
             f"Título: {job.get('title')}\n"
             f"Empresa: {job.get('company')}\n"

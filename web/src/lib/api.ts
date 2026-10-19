@@ -151,6 +151,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ filename }),
     }),
+  deleteCV: (filename: string) =>
+    request<{ success: boolean; message: string; active_info: ActiveCVInfo }>(
+      `/cv/${encodeURIComponent(filename)}`,
+      { method: "DELETE" }
+    ),
   previewActiveCV: () =>
     request<{
       filename: string;

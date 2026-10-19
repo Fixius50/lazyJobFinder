@@ -8,7 +8,8 @@ export const APPLICATION_STATUSES = {
   notified: { label: "Notificada", badge: "warning" as const },
   applied: { label: "Postulada", badge: "default" as const },
   interview: { label: "Entrevista", badge: "success" as const },
-  rejected: { label: "Descartada", badge: "destructive" as const },
+  discarded: { label: "Descartada", badge: "destructive" as const },
+  rejected: { label: "Rechazada", badge: "destructive" as const },
   archived: { label: "Archivada", badge: "secondary" as const },
 };
 

@@ -9,11 +9,13 @@ import {
   Database,
   Bell,
   Terminal,
+  Info,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ApplicationsView } from "@/components/views/applications-view";
 import { SettingsAndServicesView } from "@/components/views/settings-and-services-view";
 import { NotificationChannelsDialog } from "@/components/features/notifications/notification-channels-dialog";
+import { StatusGuideDialog } from "@/components/features/jobs/status-guide-dialog";
 import { PreflightResponse, api } from "@/lib/api";
 
 type TabKey = "applications" | "settings";
@@ -23,6 +25,7 @@ export default function UnifiedDashboard() {
   const [pipelineRunning, setPipelineRunning] = useState<boolean>(false);
   const [preflight, setPreflight] = useState<PreflightResponse | null>(null);
   const [notificationsOpen, setNotificationsOpen] = useState<boolean>(false);
+  const [statusGuideOpen, setStatusGuideOpen] = useState<boolean>(false);
 
   // Cargar tab desde la URL si existe (?tab=...)
   useEffect(() => {
@@ -191,6 +194,18 @@ export default function UnifiedDashboard() {
               <span className="hidden sm:inline">Notificaciones</span>
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
             </Button>
+
+            {/* Botón de Información ("i") para Guía de Estados */}
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setStatusGuideOpen(true)}
+              className="h-8 px-2 sm:px-2.5 text-xs flex items-center gap-1 shadow-sm"
+              title="Guía de Estados y Etiquetas de las Ofertas"
+            >
+              <Info className="h-3.5 w-3.5 text-primary" />
+              <span className="hidden sm:inline">Guía</span>
+            </Button>
           </div>
         </div>
       </header>
@@ -199,6 +214,12 @@ export default function UnifiedDashboard() {
       <NotificationChannelsDialog
         open={notificationsOpen}
         onOpenChange={setNotificationsOpen}
+      />
+
+      {/* Modal Desplegable de Guía de Estados */}
+      <StatusGuideDialog
+        open={statusGuideOpen}
+        onOpenChange={setStatusGuideOpen}
       />
 
       {/* Contenido Principal Fluido con Separación Máxima de 5vw de los Bordes */}

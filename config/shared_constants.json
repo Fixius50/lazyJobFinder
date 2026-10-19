@@ -5,7 +5,8 @@
     "notified": { "label": "Notificada", "badge": "warning" },
     "applied": { "label": "Postulada", "badge": "default" },
     "interview": { "label": "Entrevista", "badge": "success" },
-    "rejected": { "label": "Descartada", "badge": "destructive" },
+    "discarded": { "label": "Descartada", "badge": "destructive" },
+    "rejected": { "label": "Rechazada", "badge": "destructive" },
     "archived": { "label": "Archivada", "badge": "secondary" }
   },
   "portal_sources": {

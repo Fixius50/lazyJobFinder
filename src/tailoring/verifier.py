@@ -10,81 +10,66 @@ logger = logging.getLogger("lazyJobFinder.tailoring.verifier")
 class ProfileVerifier:
     """
     Valida mediante código que ninguna afirmación profesional generada contradiga o invente datos.
-    Distingue explícitamente entre competencias formativas/académicas y experiencia profesional en empresas.
+    Soporta cualquier perfil profesional (técnico, administrativo, creativo, salud, etc.)
+    extrayendo las competencias y titulación directamente del perfil del usuario o su CV.
     """
 
-    def __init__(self, profile: Dict[str, Any]):
-        self.profile = profile
+    def __init__(self, profile: Dict[str, Any], cv_text: str = ""):
+        self.profile = profile or {}
+        self.cv_text = cv_text or ""
+        self.cv_text_lower = self.cv_text.lower()
         self.allowed_skills = self._extract_allowed_skills()
         self.allowed_institutions = self._extract_allowed_institutions()
         self.allowed_degrees = self._extract_allowed_degrees()
         self.allowed_projects = self._extract_allowed_projects()
-        # Verificar si el perfil cuenta con historial laboral comercial
-        self.has_commercial_employment = bool(profile.get("experiencia_laboral", []))
+        self.has_commercial_employment = bool(profile.get("experiencia_laboral", [])) or "experiencia" in self.cv_text_lower
 
     def _extract_allowed_skills(self) -> Set[str]:
         skills = set()
         competencias = self.profile.get("competencias_tecnicas", {})
+        if isinstance(competencias, dict):
+            for k, val in competencias.items():
+                if isinstance(val, list):
+                    for item in val:
+                        if isinstance(item, dict):
+                            skills.add(item.get("nombre", "").lower().strip())
+                            for c in item.get("conceptos", []):
+                                skills.add(c.lower().strip())
+                        elif isinstance(item, str):
+                            skills.add(item.lower().strip())
+                elif isinstance(val, str):
+                    skills.add(val.lower().strip())
+        elif isinstance(competencias, list):
+            for item in competencias:
+                if isinstance(item, str):
+                    skills.add(item.lower().strip())
 
-        for item in competencias.get("lenguajes", []):
-            if isinstance(item, dict):
-                skills.add(item.get("nombre", "").lower().strip())
-                for c in item.get("conceptos", []):
-                    skills.add(c.lower().strip())
-            elif isinstance(item, str):
-                skills.add(item.lower().strip())
+        # Habilidades adicionales generales del perfil
+        for h in self.profile.get("habilidades", []):
+            if isinstance(h, str):
+                skills.add(h.lower().strip())
 
-        for db in competencias.get("bases_de_datos", []):
-            skills.add(db.lower().strip())
-            if "mysql" in db.lower():
-                skills.add("mysql")
-            if "postgres" in db.lower():
-                skills.add("postgresql")
-                skills.add("postgres")
-            if "mongodb" in db.lower():
-                skills.add("mongodb")
-            if "oracle" in db.lower():
-                skills.add("oracle")
-
-        for fw in competencias.get("frameworks_y_librerias", []):
-            skills.add(fw.lower().strip())
-            if "spring" in fw.lower():
-                skills.add("spring")
-                skills.add("spring boot")
-
-        for h in competencias.get("herramientas_y_entornos", []):
-            skills.add(h.lower().strip())
-            if "git" in h.lower():
-                skills.add("git")
-                skills.add("github")
-            if "linux" in h.lower():
-                skills.add("linux")
-            if "rest" in h.lower():
-                skills.add("rest")
-                skills.add("api rest")
-                skills.add("apis rest")
-
-        skills.update({"java", "sql", "pl/sql", "javascript", "php", "html", "css", "html5", "css3", "json", "xml", "poo", "dam", "full stack"})
         return {s for s in skills if s}
 
     def _extract_allowed_institutions(self) -> Set[str]:
         inst = set()
         for f in self.profile.get("formacion", []):
-            if f.get("institucion"):
+            if isinstance(f, dict) and f.get("institucion"):
                 inst.add(f.get("institucion").lower().strip())
         return inst
 
     def _extract_allowed_degrees(self) -> Set[str]:
         degs = set()
         for f in self.profile.get("formacion", []):
-            if f.get("titulo"):
+            if isinstance(f, dict) and f.get("titulo"):
                 degs.add(f.get("titulo").lower().strip())
-        degs.add("desarrollo de aplicaciones multiplataforma")
-        degs.add("dam")
+        candidato = self.profile.get("candidato", {})
+        if candidato.get("titulo_profesional"):
+            degs.add(candidato.get("titulo_profesional").lower().strip())
         return degs
 
     def _extract_allowed_projects(self) -> List[Dict[str, Any]]:
-        return self.profile.get("proyectos_destacados", [])
+        return self.profile.get("proyectos", []) or self.profile.get("proyectos_destacados", [])
 
     def get_approved_atomic_facts(self) -> Dict[str, Any]:
         """
@@ -92,10 +77,22 @@ class ProfileVerifier:
         Esta es la ÚNICA fuente de verdad autorizada para la IA.
         """
         candidato = self.profile.get("candidato", {})
+        formacion = self.profile.get("formacion", [])
+        titulo_principal = (
+            formacion[0].get("titulo") if formacion and isinstance(formacion[0], dict) and formacion[0].get("titulo")
+            else candidato.get("titulo_profesional", "Profesional")
+        )
+
+        exp_list = self.profile.get("experiencia_laboral", [])
+        if exp_list:
+            historial = f"{len(exp_list)} puestos previos acreditados"
+        else:
+            historial = "Formación académica y proyectos prácticos acreditados"
+
         return {
             "candidato": {
-                "nombre": candidato.get("nombre_completo", "Roberto"),
-                "titulo": candidato.get("titulo_profesional", "Desarrollador Junior (DAM)"),
+                "nombre": candidato.get("nombre_completo", "Candidato"),
+                "titulo": candidato.get("titulo_profesional", titulo_principal),
                 "ciudad": candidato.get("ciudad", "España"),
             },
             "formacion_academica": [
@@ -104,9 +101,9 @@ class ProfileVerifier:
                     "institucion": f.get("institucion"),
                     "año": f.get("fecha_fin"),
                 }
-                for f in self.profile.get("formacion", [])
+                for f in formacion if isinstance(f, dict)
             ],
-            "experiencia_comercial_previa": "Ninguna en empresas (perfil junior recién titulado en FP DAM)",
+            "experiencia_comercial_previa": historial,
             "competencias_tecnicas_certificadas": sorted(list(self.allowed_skills)),
             "proyectos_academicos_certificados": [
                 {
@@ -114,7 +111,7 @@ class ProfileVerifier:
                     "tecnologias": p.get("tecnologias", []),
                     "descripcion": p.get("descripcion", "").strip(),
                 }
-                for p in self.allowed_projects
+                for p in self.allowed_projects if isinstance(p, dict)
             ],
         }
 
@@ -211,28 +208,41 @@ class ProfileVerifier:
         return generated_summary.strip(), ["Contenido validado algorítmicamente contra el perfil canónico."]
 
     def _build_canonical_summary(self, matched_skills: List[str], company: str, job_title: str) -> str:
-        """Construye un resumen certificado a partir de los datos estructurados aprobados en profile.yaml."""
-        verified_matched = [s for s in matched_skills if s.lower() in self.allowed_skills]
-        tech_clause = f" con especial foco en {', '.join(verified_matched[:3])}" if verified_matched else ""
+        """Construye un resumen profesional verídico adaptado a cualquier disciplina laboral."""
+        candidato = self.profile.get("candidato", {})
+        titulo = candidato.get("titulo_profesional") or "Profesional"
+        resumen_base = self.profile.get("resumen_base", "").strip()
+
+        if resumen_base:
+            return resumen_base
+
+        verified_matched = [s for s in matched_skills if s.lower() in self.allowed_skills or (self.cv_text_lower and s.lower() in self.cv_text_lower)]
+        skills_clause = f" con competencias destacadas en {', '.join(verified_matched[:4])}" if verified_matched else ""
 
         return (
-            f"Titulado en Desarrollo de Aplicaciones Multiplataforma (DAM){tech_clause}, "
-            f"con sólida preparación técnica adquirida en programación orientada a objetos (Java), persistencia en bases de datos relacionales "
-            f"(SQL) y creación de APIs REST. Proactivo y comprometido con las buenas prácticas, con alta motivación por incorporarme al "
-            f"equipo de {company} para aportar valor en la vacante de {job_title} y continuar consolidando mi carrera profesional."
+            f"{titulo}{skills_clause}. "
+            f"Perfil proactivo, riguroso y comprometido con la excelencia, con alta motivación por incorporarme "
+            f"al equipo de {company} para aportar valor en la vacante de {job_title} y continuar creciendo profesionalmente."
         )
 
     def validate_matched_skills(self, claimed_skills: List[str]) -> List[str]:
-        """Filtra y devuelve exclusivamente las habilidades que existen fehacientemente en el perfil canónico."""
+        """Filtra y devuelve las habilidades verificables en el perfil del usuario o en su CV activo."""
         verified = []
         for skill in claimed_skills:
             clean = skill.strip()
             if not clean:
                 continue
-            if clean.lower() in self.allowed_skills:
+            clean_lower = clean.lower()
+            # 1. Comprobar contra competencias del perfil
+            if clean_lower in self.allowed_skills:
                 verified.append(clean)
-            elif any(allowed in clean.lower() for allowed in ["java", "sql", "pl/sql", "dam", "linux", "git", "php", "rest", "nosql"]):
+            # 2. Comprobar si figura textualmente en el CV activo
+            elif self.cv_text_lower and clean_lower in self.cv_text_lower:
+                verified.append(clean)
+            # 3. Si no hay perfil ni CV cargado, aceptar las detectadas objetivamente por el motor
+            elif not self.allowed_skills and not self.cv_text_lower:
                 verified.append(clean)
             else:
-                logger.debug("Habilidad descartada por no existir en profile.yaml: '%s'", clean)
+                logger.debug("Habilidad descartada por no figurar en CV ni perfil: '%s'", clean)
         return verified
+

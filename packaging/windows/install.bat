@@ -67,6 +67,19 @@ if exist "images.tar" (
     )
 )
 
+:: 4.1 Restaurar modelo de Ollama en el volumen persistente si ollama_model.tar.gz esta presente
+if exist "ollama_model.tar.gz" (
+    echo.
+    echo [i] Restaurando datos del modelo IA empaquetado en el volumen persistente...
+    docker volume create lazyjob_ollama_models >nul 2>&1
+    docker run --rm -v lazyjob_ollama_models:/root/.ollama -v "%~dp0":/backup alpine tar xzf /backup/ollama_model.tar.gz -C /root/.ollama >nul 2>&1
+    if %ERRORLEVEL% equ 0 (
+        echo [OK] Modelo IA precargado en el volumen local de Ollama.
+    ) else (
+        echo [!] No se pudo precargar ollama_model.tar.gz directamente. Se descargara al primer inicio.
+    )
+)
+
 :: 5. Crear acceso directo en el Escritorio con PowerShell
 echo.
 echo [i] Creando acceso directo en el Escritorio...

@@ -3,19 +3,20 @@
 
 Genera los paquetes de instalación y distribución autónoma para Windows y GNU/Linux,
 garantizando:
+- Contexto de construcción de Docker 100% aislado (cero riesgo de incluir datos personales).
 - Inclusión del frontend estático precompilado en web/out.
-- Uso de plantillas limpias de configuración sin datos personales ni secretos.
-- Verificación previa de seguridad (anti-fuga de credenciales).
-- Empaquetado de Docker Compose de producción y exportación de imágenes/modelos.
+- Uso exclusivo de plantillas limpias de configuración sin datos personales ni secretos.
+- Auditoría estricta y bloqueante de seguridad previa (anti-fuga de credenciales).
+- Empaquetado de Docker Compose de producción con soporte de versiones dinámicas.
+- Empaquetado real del modelo de Ollama en el volumen persistente (o aviso explícito si se omite).
 - Generación de instalador Inno Setup (.exe), portable (.zip), tarball (.tar.gz) y ejecutable Linux (.run).
-- Emisión del manifiesto de release con hashes criptográficos SHA-256.
+- Emisión del manifiesto de release unificado con hashes criptográficos SHA-256.
 """
 
 import argparse
 import hashlib
 import json
 import os
-import platform
 import re
 import shutil
 import subprocess
@@ -52,48 +53,82 @@ def compute_sha256(filepath: str) -> str:
 
 
 class ReleaseBuilder:
-    def __init__(self, version: str = "1.0.0", clean: bool = False, skip_docker: bool = False, skip_model: bool = False):
+    def __init__(
+        self,
+        version: str = "1.0.0",
+        clean: bool = False,
+        skip_docker: bool = False,
+        skip_model: bool = False,
+        build_frontend: bool = False,
+    ):
         self.version = version
         self.clean = clean
         self.skip_docker = skip_docker
         self.skip_model = skip_model
+        self.build_frontend = build_frontend
+        self.model_included = False
         self.manifest_data = self._load_base_manifest()
 
     def _load_base_manifest(self) -> Dict:
         manifest_path = os.path.join(PACKAGING_DIR, "release-manifest.json")
         if os.path.exists(manifest_path):
-            with open(manifest_path, "r", encoding="utf-8") as f:
-                return json.load(f)
+            try:
+                with open(manifest_path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception as e:
+                log(f"Error leyendo base manifest: {e}", "WARN")
         return {"name": "lazyJobFinder", "version": self.version}
 
-    def audit_security(self) -> None:
-        """Escanea las plantillas y el entorno de empaquetado para evitar fuga de secretos."""
-        log("Ejecutando auditoría de seguridad previa...", "INFO")
+    def audit_security(self, target_dir: str) -> None:
+        """
+        Escanea exhaustivamente las plantillas y el staging para evitar fuga de secretos.
+        Es BLOQUEANTE: cualquier hallazgo sospechoso o error de lectura aborta la publicación.
+        """
+        log(f"Ejecutando auditoría de seguridad estricta en {target_dir}...", "INFO")
         suspicious_patterns = [
             (r"\b[0-9]{8,10}:[a-zA-Z0-9_-]{35}\b", "Token real de bot de Telegram"),
-            (r"client_secret:\s*['\"][a-zA-Z0-9_\-]{20,}['\"]", "Client Secret real"),
+            (r"client_secret:\s*['\"][a-zA-Z0-9_\-]{16,}['\"]", "Client Secret real"),
             (r"password:\s*['\"][^'\"]{4,}['\"]", "Contraseña en texto plano"),
+            (r"-----BEGIN (RSA|EC|OPENSSH|PRIVATE) KEY-----", "Clave privada criptográfica"),
         ]
 
-        # Comprobar que en config-templates no haya secretos
-        for root, _, files in os.walk(CONFIG_TEMPLATES_DIR):
+        forbidden_filenames = [
+            re.compile(r"^.*\.db(-wal|-shm)?$", re.IGNORECASE),
+            re.compile(r"^.*\.sqlite(3)?$", re.IGNORECASE),
+            re.compile(r"^secrets\.json$", re.IGNORECASE),
+            re.compile(r"^\.env$", re.IGNORECASE),  # .env real nunca se distribuye, solo .env.example
+            re.compile(r"^active_cv\.json$", re.IGNORECASE),
+        ]
+
+        for root, _, files in os.walk(target_dir):
             for file in files:
                 filepath = os.path.join(root, file)
+                relpath = os.path.relpath(filepath, target_dir)
+
+                # 1. Comprobar nombres de archivos prohibidos
+                for pattern in forbidden_filenames:
+                    if pattern.match(file):
+                        raise RuntimeError(
+                            f"AUDITORÍA DE SEGURIDAD FALLIDA: Archivo prohibido detectado en la distribución: {relpath}"
+                        )
+
+                # 2. Comprobar contenido contra patrones sospechosos de credenciales
                 try:
                     with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
                         content = f.read()
-                    for pattern, desc in suspicious_patterns:
-                        if re.search(pattern, content):
-                            raise ValueError(f"Fuga potencial de credenciales detectada en {file}: {desc}")
+                    for pat, desc in suspicious_patterns:
+                        if re.search(pat, content):
+                            raise RuntimeError(
+                                f"AUDITORÍA DE SEGURIDAD FALLIDA en '{relpath}': {desc}"
+                            )
+                except UnicodeDecodeError:
+                    pass  # Archivos binarios ignorados de análisis textual
                 except Exception as e:
-                    log(f"Error revisando {filepath}: {e}", "WARN")
+                    if not isinstance(e, RuntimeError):
+                        raise RuntimeError(f"Error auditando '{relpath}': {e}") from e
+                    raise
 
-        # Comprobar que no se copien bases de datos ni archivos .env con datos reales
-        env_real = os.path.join(ROOT_DIR, ".env")
-        if os.path.exists(env_real):
-            log("Archivo .env local detectado. Será excluido de la distribución.", "INFO")
-
-        log("Auditoría de seguridad completada con éxito. No se detectaron secretos.", "SUCCESS")
+        log("Auditoría de seguridad superada con éxito. Cero secretos detectados.", "SUCCESS")
 
     def verify_frontend(self) -> None:
         """Comprueba que el frontend Next.js esté exportado en web/out."""
@@ -101,13 +136,18 @@ class ReleaseBuilder:
         index_html = os.path.join(out_dir, "index.html")
 
         if not os.path.exists(index_html):
-            log("web/out no contiene index.html. Compilando panel web con npm run build...", "INFO")
-            web_dir = os.path.join(ROOT_DIR, "web")
-            shell_cmd = "npm run build"
-            ret = subprocess.call(shell_cmd, cwd=web_dir, shell=True)
-            if ret != 0:
-                raise RuntimeError("Fallo durante la compilación estática de Next.js en web/.")
-            log("Panel web compilado correctamente.", "SUCCESS")
+            if self.build_frontend:
+                log("web/out no contiene index.html. Compilando panel web con npm run build...", "INFO")
+                web_dir = os.path.join(ROOT_DIR, "web")
+                ret = subprocess.call("npm run build", cwd=web_dir, shell=True)
+                if ret != 0:
+                    raise RuntimeError("Fallo durante la compilación estática de Next.js en web/.")
+                log("Panel web compilado correctamente.", "SUCCESS")
+            else:
+                raise RuntimeError(
+                    "El frontend estático no está compilado en 'web/out/index.html'.\n"
+                    "Por favor ejecuta 'npm run build' en la carpeta web/ o añade el argumento '--build-frontend'."
+                )
         else:
             log(f"Frontend estático validado en: {out_dir}", "SUCCESS")
 
@@ -118,11 +158,18 @@ class ReleaseBuilder:
             shutil.rmtree(STAGING_DIR)
         os.makedirs(STAGING_DIR, exist_ok=True)
 
-        # 1. Copiar Docker Compose de producción
-        shutil.copy2(
-            os.path.join(PACKAGING_DIR, "compose.release.yaml"),
-            os.path.join(STAGING_DIR, "docker-compose.yml"),
+        # 1. Copiar Docker Compose de producción interpolando la versión del release
+        compose_src = os.path.join(PACKAGING_DIR, "compose.release.yaml")
+        with open(compose_src, "r", encoding="utf-8") as f:
+            compose_content = f.read()
+
+        # Sustituir etiquetas fijas por la versión dinámica actual
+        compose_content = compose_content.replace(
+            "${LAZYJOB_IMAGE:-lazyjobfinder:latest}",
+            f"lazyjobfinder:{self.version}",
         )
+        with open(os.path.join(STAGING_DIR, "docker-compose.yml"), "w", encoding="utf-8") as f:
+            f.write(compose_content)
 
         # 2. Copiar .env.example
         shutil.copy2(
@@ -163,42 +210,114 @@ class ReleaseBuilder:
             if os.path.exists(doc_src):
                 shutil.copy2(doc_src, os.path.join(STAGING_DIR, doc))
 
-        log("Directorio de staging preparado correctamente.", "SUCCESS")
+        # Ejecutar auditoría bloqueante sobre el staging resultante
+        self.audit_security(STAGING_DIR)
+        log("Directorio de staging preparado y auditado correctamente.", "SUCCESS")
 
     def build_docker_images(self) -> None:
-        """Construye la imagen Docker de lazyJobFinder y exporta las imágenes a un archivo tar."""
+        """
+        Construye la imagen Docker de lazyJobFinder desde un CONTEXTO TOTALMENTE AISLADO.
+        Garantiza que ningún archivo personal o de desarrollo pueda filtrarse a la imagen.
+        """
         if self.skip_docker:
             log("Omitiendo empaquetado de imágenes Docker (--skip-docker).", "WARN")
             return
 
-        # Comprobar si el daemon de Docker responde
         try:
             res = subprocess.run(["docker", "info"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             if res.returncode != 0:
-                log("Daemon de Docker no disponible actualmente. Omitiendo 'docker save'.", "WARN")
+                log("Daemon de Docker no disponible actualmente. Omitiendo construcción de imágenes.", "WARN")
                 return
         except Exception:
             log("Comando docker no encontrado. Omitiendo construcción de imágenes.", "WARN")
             return
 
+        # 1. Crear contexto de compilación aislado
+        isolated_context = os.path.join(PACKAGING_DIR, "staging_build_context")
+        if os.path.exists(isolated_context):
+            shutil.rmtree(isolated_context)
+        os.makedirs(isolated_context, exist_ok=True)
+
+        log("Creando contexto de construcción Docker aislado (sin datos personales)...", "INFO")
+        shutil.copy2(os.path.join(ROOT_DIR, "Dockerfile"), os.path.join(isolated_context, "Dockerfile"))
+        shutil.copy2(os.path.join(ROOT_DIR, "requirements.txt"), os.path.join(isolated_context, "requirements.txt"))
+        shutil.copytree(os.path.join(ROOT_DIR, "src"), os.path.join(isolated_context, "src"))
+
+        # El directorio config dentro de la imagen contiene ÚNICAMENTE las plantillas limpias
+        shutil.copytree(CONFIG_TEMPLATES_DIR, os.path.join(isolated_context, "config"))
+
+        # El frontend compilado
+        shutil.copytree(os.path.join(ROOT_DIR, "web", "out"), os.path.join(isolated_context, "web", "out"))
+
         app_tag = f"lazyjobfinder:{self.version}"
-        log(f"Construyendo imagen de producción: {app_tag}...", "INFO")
+        log(f"Construyendo imagen de producción aislada: {app_tag}...", "INFO")
         build_cmd = ["docker", "build", "-t", app_tag, "-t", "lazyjobfinder:latest", "."]
-        ret = subprocess.call(build_cmd, cwd=ROOT_DIR)
+        ret = subprocess.call(build_cmd, cwd=isolated_context)
+
+        # Limpiar el contexto temporal inmediatamente
+        shutil.rmtree(isolated_context, ignore_errors=True)
+
         if ret != 0:
-            raise RuntimeError("Fallo al construir la imagen Docker de lazyjobfinder.")
+            raise RuntimeError("Fallo al construir la imagen Docker aislada de lazyjobfinder.")
 
         log("Asegurando presencia de la imagen oficial de Ollama...", "INFO")
         subprocess.call(["docker", "pull", "ollama/ollama:latest"])
 
+        # 2. Exportación de imágenes a images.tar en staging
         images_tar = os.path.join(STAGING_DIR, "images.tar")
-        log(f"Exportando imágenes a {images_tar}...", "INFO")
+        log(f"Exportando imágenes base a {images_tar}...", "INFO")
         save_cmd = ["docker", "save", "-o", images_tar, app_tag, "lazyjobfinder:latest", "ollama/ollama:latest"]
         ret = subprocess.call(save_cmd)
         if ret == 0:
             log(f"Imágenes exportadas con éxito ({os.path.getsize(images_tar) // (1024*1024)} MB).", "SUCCESS")
         else:
-            log("No se pudo exportar images.tar. Las imágenes se descargarán o construirán en el destino.", "WARN")
+            log("No se pudo exportar images.tar.", "WARN")
+
+        # 3. Exportación real del modelo de Ollama si no se omite
+        if not self.skip_model:
+            self.export_ollama_model()
+
+    def export_ollama_model(self) -> None:
+        """Exporta los datos reales del modelo de Ollama (qwen2.5:3b-instruct) a un archivo tar."""
+        log("Iniciando empaquetado del modelo de IA (qwen2.5:3b-instruct)...", "INFO")
+        model_tar = os.path.join(STAGING_DIR, "ollama_model.tar.gz")
+
+        # Comprobar si el volumen lazyjob_ollama_models existe o tiene datos
+        check_vol = subprocess.run(
+            ["docker", "volume", "inspect", "lazyjob_ollama_models"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        if check_vol.returncode != 0:
+            log("Creando volumen lazyjob_ollama_models y asegurando descarga del modelo...", "INFO")
+            subprocess.run(["docker", "volume", "create", "lazyjob_ollama_models"], check=False)
+
+        # Verificar o descargar el modelo usando un contenedor efímero
+        pull_cmd = [
+            "docker", "run", "--rm",
+            "-v", "lazyjob_ollama_models:/root/.ollama",
+            "ollama/ollama:latest",
+            "ollama", "pull", "qwen2.5:3b-instruct",
+        ]
+        ret = subprocess.call(pull_cmd)
+        if ret == 0:
+            log("Modelo qwen2.5:3b-instruct verificado en el volumen. Exportando a archivo tar.gz...", "INFO")
+            # Exportar el contenido del volumen usando alpine
+            export_cmd = [
+                "docker", "run", "--rm",
+                "-v", "lazyjob_ollama_models:/root/.ollama:ro",
+                "-v", f"{STAGING_DIR}:/backup",
+                "alpine", "tar", "czf", "/backup/ollama_model.tar.gz", "-C", "/root/.ollama", ".",
+            ]
+            exp_ret = subprocess.call(export_cmd)
+            if exp_ret == 0 and os.path.exists(model_tar):
+                self.model_included = True
+                size_mb = os.path.getsize(model_tar) / (1024 * 1024)
+                log(f"Modelo IA empaquetado con éxito: ollama_model.tar.gz ({size_mb:.1f} MB).", "SUCCESS")
+                return
+
+        log("No se pudo exportar el modelo a archivo tar.gz. El instalador descargará el modelo en primer arranque.", "WARN")
+        self.model_included = False
 
     def build_windows_distribution(self) -> List[str]:
         """Genera el paquete portable ZIP y compila el instalador .EXE con Inno Setup si está disponible."""
@@ -231,19 +350,18 @@ class ReleaseBuilder:
         iss_file = os.path.join(PACKAGING_DIR, "windows", "installer.iss")
         if iscc_path and os.path.exists(iss_file):
             log(f"Compilando instalador Inno Setup con {iscc_path}...", "INFO")
-            cmd = [iscc_path, iss_file]
+            cmd = [iscc_path, f"/DMyAppVersion={self.version}", iss_file]
             ret = subprocess.call(cmd)
             exe_path = os.path.join(DIST_DIR, f"{base_name}.exe")
             if ret == 0 and os.path.exists(exe_path):
                 artifacts.append(exe_path)
                 log(f"Instalador ejecutable de Windows generado: {exe_path}", "SUCCESS")
             else:
-                log("Inno Setup finalizó con advertencias o no generó el binario final.", "WARN")
+                log("Inno Setup finalizó con advertencias.", "WARN")
         else:
             log(
                 "Inno Setup (ISCC.exe) no está instalado en el sistema. "
-                f"El archivo de proyecto Inno Setup queda disponible en '{iss_file}' "
-                "y el paquete portable Windows (.zip) contiene el instalador interactivo 'install.bat'.",
+                "El paquete portable Windows (.zip) contiene el instalador autónomo 'install.bat'.",
                 "INFO",
             )
 
@@ -291,7 +409,6 @@ class ReleaseBuilder:
                 f_out.write(run_header.encode("utf-8"))
                 with open(tar_path, "rb") as f_in:
                     shutil.copyfileobj(f_in, f_out)
-            # Marcar como ejecutable
             try:
                 os.chmod(run_path, 0o755)
             except Exception:
@@ -304,11 +421,14 @@ class ReleaseBuilder:
         return artifacts
 
     def emit_release_manifest(self, artifacts: List[str]) -> None:
-        """Emite el manifiesto final con sumas de comprobación SHA-256 e inventario completo."""
+        """Emite el manifiesto final unificado con sumas de comprobación SHA-256 e inventario completo."""
         log("Emitiendo manifiesto de publicación con verificación criptográfica...", "INFO")
         manifest = dict(self.manifest_data)
         manifest["version"] = self.version
         manifest["build_timestamp"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        manifest["components"]["app_image"] = f"lazyjobfinder:{self.version}"
+        manifest["components"]["ai_model_prepackaged"] = self.model_included
+        manifest["components"]["ai_model_download_fallback"] = not self.model_included
         manifest["artifacts"] = []
 
         sums_lines = []
@@ -324,12 +444,10 @@ class ReleaseBuilder:
             })
             sums_lines.append(f"{sha}  {filename}")
 
-        # Guardar release-manifest.json en dist/
         manifest_path = os.path.join(DIST_DIR, "release-manifest.json")
         with open(manifest_path, "w", encoding="utf-8") as f:
             json.dump(manifest, f, indent=2, ensure_ascii=False)
 
-        # Guardar SHA256SUMS.txt en dist/
         sums_path = os.path.join(DIST_DIR, "SHA256SUMS.txt")
         with open(sums_path, "w", encoding="utf-8") as f:
             f.write("\n".join(sums_lines) + "\n")
@@ -343,16 +461,16 @@ class ReleaseBuilder:
         print(f"       CONSTRUCCIÓN DE DISTRIBUCIÓN lazyJobFinder v{self.version}")
         print("=" * 70 + "\n")
 
-        # 1. Auditoría de seguridad
-        self.audit_security()
+        # 1. Auditoría inicial de plantillas
+        self.audit_security(CONFIG_TEMPLATES_DIR)
 
         # 2. Verificación del frontend estático
         self.verify_frontend()
 
-        # 3. Preparación del directorio staging
+        # 3. Preparación del directorio staging y auditoría de staging
         self.prepare_staging()
 
-        # 4. Construcción de imágenes Docker (si está habilitado)
+        # 4. Construcción de imágenes Docker (en contexto aislado)
         self.build_docker_images()
 
         # 5. Generación de artefactos según plataforma
@@ -402,7 +520,12 @@ def main() -> None:
     parser.add_argument(
         "--skip-model",
         action="store_true",
-        help="Omitir exportación masiva del modelo de Ollama",
+        help="Omitir exportación pesada del modelo de Ollama en archivo tar",
+    )
+    parser.add_argument(
+        "--build-frontend",
+        action="store_true",
+        help="Compilar 'npm run build' si falta web/out",
     )
     parser.add_argument(
         "--clean",
@@ -417,6 +540,7 @@ def main() -> None:
         clean=args.clean,
         skip_docker=args.skip_docker,
         skip_model=args.skip_model,
+        build_frontend=args.build_frontend,
     )
     builder.run(platforms_target=args.platform)
 

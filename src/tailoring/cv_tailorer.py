@@ -88,20 +88,23 @@ class CVTailorer:
         job_title = job.get("title", "")
         company = job.get("company", "")
 
+        titulo_candidato = atomic_facts["candidato"]["titulo"]
+        skills_str = ", ".join(verified_skills) if verified_skills else "competencias acreditadas"
+
         prompt = (
             f"Eres un asistente de redacción curricular que opera bajo una política de CERO ALUCINACIONES.\n\n"
             f"### HECHOS ATÓMICOS APROBADOS (ÚNICA FUENTE DE VERDAD):\n"
-            f"- Titulación: Formación Profesional de Grado Superior en DAM (2024).\n"
-            f"- Historial comercial: {atomic_facts['experiencia_comercial_previa']}.\n"
-            f"- Competencias verificadas para este puesto: {', '.join(verified_skills) or 'Java, SQL y arquitectura POO'}.\n"
+            f"- Titulación o Perfil: {titulo_candidato}.\n"
+            f"- Historial y Experiencia: {atomic_facts['experiencia_comercial_previa']}.\n"
+            f"- Competencias verificadas para este puesto: {skills_str}.\n"
             f"- Resumen base aprobado: '{self.profile.get('resumen_base', '').strip()}'\n\n"
             f"### VACANTE:\n"
             f"- Puesto: {job_title}\n"
             f"- Empresa: {company}\n\n"
             f"INSTRUCCIONES:\n"
-            f"Reformula y enfoca el resumen (máximo 4 líneas) resaltando honestamente las competencias DAM que encajan.\n"
+            f"Reformula y enfoca el resumen profesional (máximo 4 líneas) resaltando honestamente las competencias del perfil que mejor encajan con la vacante.\n"
             f"PROHIBICIÓN ESTRICTA: No inventes empresas donde supuestamente trabajó, ni años de experiencia laboral, "
-            f"ni titulaciones universitarias, ni tecnologías ajenas.\n"
+            f"ni titulaciones no acreditadas, ni competencias ajenas.\n"
             f"Devuelve ÚNICAMENTE el texto redactado del resumen sin comentarios."
         )
 

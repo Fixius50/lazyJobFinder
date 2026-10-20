@@ -34,24 +34,25 @@ class CoverLetterGenerator:
         raw_matched = eval_result.get("matched_skills", [])
         verified_matched = self.verifier.validate_matched_skills(raw_matched)
         missing = eval_result.get("missing_skills", [])
-        atomic_facts = self.verifier.get_approved_atomic_facts()
+        titulo_candidato = atomic_facts["candidato"]["titulo"]
+        skills_str = ", ".join(verified_matched) if verified_matched else "competencias funcionales y formativas acreditadas"
 
         # Intento con LLM local guiado estrictamente por hechos atómicos aprobados
         prompt = (
             f"Redacta una carta de presentación formal y profesional en español para una candidatura de empleo.\n\n"
             f"### HECHOS ATÓMICOS APROBADOS DEL CANDIDATO (ÚNICA FUENTE DE VERDAD):\n"
             f"- Nombre: {nombre}\n"
-            f"- Titulación: Formación Profesional de Grado Superior en DAM (2024).\n"
-            f"- Historial comercial: {atomic_facts['experiencia_comercial_previa']}.\n"
-            f"- Tecnologías demostrables que coinciden con la vacante: {', '.join(verified_matched) or 'Java, SQL y programación orientada a objetos'}.\n\n"
+            f"- Especialidad o Titulación: {titulo_candidato}.\n"
+            f"- Historial y Experiencia: {atomic_facts['experiencia_comercial_previa']}.\n"
+            f"- Competencias demostrables que coinciden con la vacante: {skills_str}.\n\n"
             f"### DATOS DE LA VACANTE:\n"
             f"- Puesto: {puesto}\n"
             f"- Empresa a la que postula: {empresa}\n"
-            f"- Requisitos adicionales donde manifiesta total disposición para aprender: {', '.join(missing[:2]) or 'nuevas herramientas empresariales'}.\n\n"
+            f"- Requisitos adicionales donde manifiesta total disposición para aprender: {', '.join(missing[:2]) or 'nuevas herramientas y procedimientos'}.\n\n"
             f"DIRECTRICES DE VERACIDAD:\n"
             f"1. Estructura en 3 o 4 párrafos claros y directos (máximo 250 palabras).\n"
             f"2. Expresa motivación genuina por el proyecto de {empresa} y por consolidar la carrera profesional en {puesto}.\n"
-            f"3. Resalta la base técnica sólida adquirida en DAM y los proyectos prácticos realizados.\n"
+            f"3. Resalta la base formativa y profesional sólida adquirida y los proyectos prácticos realizados.\n"
             f"4. PROHIBIDO inventar empresas pasadas ficticias o atribuir años de experiencia laboral comercial previa inexistentes.\n"
             f"5. Tono humilde, profesional, resolutivo y entusiasta por seguir aprendiendo.\n"
             f"Devuelve ÚNICAMENTE el cuerpo de la carta en español."

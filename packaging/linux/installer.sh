@@ -31,17 +31,14 @@ if ! docker compose version &> /dev/null; then
     exit 1
 fi
 
-# 3. Comprobar permisos del usuario en Docker
+# 3. Comprobar permisos del usuario en Docker (Requisito obligatorio)
 if ! docker info &> /dev/null; then
-    echo -e "${YELLOW}[!] El usuario actual ($USER) no tiene permisos directos para el daemon de Docker.${NC}"
-    echo "Ejecuta lo siguiente y vuelve a iniciar sesión:"
+    echo -e "${RED}[ERROR] El usuario actual ($USER) no tiene acceso al daemon de Docker.${NC}"
+    echo "Para otorgar permisos a tu usuario sin requerir sudo constante, ejecuta:"
     echo "  sudo usermod -aG docker $USER"
     echo "  newgrp docker"
-    echo ""
-    read -p "¿Deseas intentar continuar de todos modos? [s/N]: " RESP
-    if [[ ! "$RESP" =~ ^[sS]$ ]]; then
-        exit 1
-    fi
+    echo "A continuación, vuelve a ejecutar este instalador."
+    exit 1
 fi
 
 # 4. Determinar directorio de instalación
@@ -86,6 +83,13 @@ done
 if [ -f "$SCRIPT_DIR/images.tar" ]; then
     echo -e "${GREEN}[i] Importando imágenes de contenedores locales (lazyjobfinder y ollama)...${NC}"
     docker load -i "$SCRIPT_DIR/images.tar"
+fi
+
+# 6.1 Restaurar modelo de IA en el volumen de Ollama si ollama_model.tar.gz existe
+if [ -f "$SCRIPT_DIR/ollama_model.tar.gz" ]; then
+    echo -e "${GREEN}[i] Restaurando modelo de IA empaquetado en el volumen de Ollama...${NC}"
+    docker volume create lazyjob_ollama_models >/dev/null 2>&1 || true
+    docker run --rm -v lazyjob_ollama_models:/root/.ollama -v "$SCRIPT_DIR":/backup alpine tar xzf /backup/ollama_model.tar.gz -C /root/.ollama >/dev/null 2>&1 || echo "[!] Advertencia: no se pudo desempaquetar el modelo directamente. Se descargará al primer arranque."
 fi
 
 # 7. Crear enlace en PATH

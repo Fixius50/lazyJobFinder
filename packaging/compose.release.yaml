@@ -8,12 +8,14 @@
 # - Persistencia de datos, configuración y modelos en la carpeta de instalación
 # =============================================================================
 
+name: lazyjob
+
 services:
   # ---------------------------------------------------------------------------
   # 1. MOTOR DE IA LOCAL (Ollama)
   # ---------------------------------------------------------------------------
   ollama:
-    image: ollama/ollama:latest
+    image: ${OLLAMA_IMAGE:-ollama/ollama:latest}
     container_name: lazyjob_ollama
     restart: unless-stopped
     ports:
@@ -37,7 +39,7 @@ services:
   # 2. APLICACIÓN PRINCIPAL (Backend FastAPI + Frontend Unificado)
   # ---------------------------------------------------------------------------
   lazyjobfinder:
-    image: lazyjobfinder:1.0.0
+    image: ${LAZYJOB_IMAGE:-lazyjobfinder:latest}
     container_name: lazyjob_app
     restart: unless-stopped
     env_file:
@@ -52,7 +54,7 @@ services:
       - ./data:/app/data
       # Configuración del usuario (filtros de búsqueda, horarios y perfil)
       - ./config:/app/config
-      # Socket de Docker para consultar estado de servicios desde la UI local
+      # Socket de Docker para consultar estado de servicios desde la UI local (opcional)
       - /var/run/docker.sock:/var/run/docker.sock:ro
     depends_on:
       ollama:

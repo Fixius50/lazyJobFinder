@@ -153,28 +153,31 @@ class ProfileVerifier:
             if re.search(pattern, text_lower):
                 violations.append(f"Titulación no respaldada en el perfil: Detectada mención indebida ({pattern}).")
 
-        # 3. Validación de roles ficticios
+        # 3. Validación de roles no respaldados (solo si no figuran en el CV o perfil)
         fictitious_roles = [
-            r"\b(fui|como)\s+(lead|senior|arquitecto|project\s+manager|jefe\s+de\s+equipo)\b",
-            r"\blideré\s+equipos?\b",
-            r"\bgestión\s+de\s+personal\b",
-            r"\bgestión\s+de\s+presupuestos?\b",
+            (r"\b(fui|como)\s+(lead|senior|arquitecto|project\s+manager|jefe\s+de\s+equipo)\b", "rol de liderazgo o seniority"),
+            (r"\blideré\s+equipos?\b", "liderazgo de equipos"),
+            (r"\bgestión\s+de\s+personal\b", "gestión de personal"),
+            (r"\bgestión\s+de\s+presupuestos?\b", "gestión de presupuestos"),
         ]
-        for pattern in fictitious_roles:
+        for pattern, desc in fictitious_roles:
             if re.search(pattern, text_lower):
-                violations.append(f"Afirmación no respaldada: Se atribuye un rol de antigüedad o gestión ({pattern}).")
+                # Si el término figura en el CV o perfil del candidato, es verídico
+                if not any(re.search(pattern, src) for src in [self.cv_text_lower, str(self.profile).lower()]):
+                    violations.append(f"Afirmación no respaldada: Se atribuye {desc} no documentado.")
 
-        # 4. Tecnologías ajenas no respaldadas
+        # 4. Tecnologías o competencias no respaldadas
         words = re.findall(r"\b[A-Za-z0-9#\+\./\-]+\b", text)
-        blacklisted_techs = {
+        common_advanced_techs = {
             "kubernetes", "k8s", "aws", "azure", "gcp", "react native", "flutter",
             "scala", "golang", "c#", ".net", "cobol", "rust", "angular", "react",
             "django", "ruby", "rails", "swift", "kotlin", "objective-c"
         }
         for word in words:
             w_lower = word.lower()
-            if w_lower in blacklisted_techs and w_lower not in self.allowed_skills:
-                violations.append(f"Tecnología no respaldada en el perfil canónico: '{word}'.")
+            if w_lower in common_advanced_techs:
+                if w_lower not in self.allowed_skills and w_lower not in self.cv_text_lower:
+                    violations.append(f"Competencia no respaldada en el perfil ni en el CV: '{word}'.")
 
         return len(violations) == 0, violations
 

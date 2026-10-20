@@ -1,187 +1,189 @@
 # lazyJobFinder
 
-Sistema local, autonomo y gratuito (0 EUR/mes) de busqueda, evaluacion de afinidad ATS y adaptacion de candidaturas de empleo para desarrolladores de software.
+> **Buscador autónomo, local y gratuito (0 €/mes) de ofertas de empleo con IA y Telegram para cualquier profesional.**
 
-lazyJobFinder se ejecuta localmente mediante contenedores Docker. Escanea multiples portales de empleo en Espana, deduplica las ofertas, evalua su afinidad tecnica mediante un modelo de lenguaje local (Ollama) sin enviar datos a APIs externas de pago, genera documentos PDF adaptados y centraliza todo en un panel web interactivo y notificaciones opcionales en Telegram.
-
----
-
-## Caracteristicas del Sistema
-
-- Inferencia 100% Local (Coste 0 EUR/mes): Evaluacion, scoring y redaccion procesados integramente en tu equipo con Ollama (`qwen2.5:3b-instruct` en CPU Q4_K_M). Cero dependencias de OpenAI, Anthropic o servicios cloud de pago.
-- Multi-Portal con Aislamiento de Fallos: Conectores independientes para Tecnoempleo (RSS oficial), InfoJobs (API de desarrolladores) y JobSpy (Indeed Espana, LinkedIn, Glassdoor y Google Jobs). Si un portal falla o aplica rate-limit, los demas continuan sin interrupcion.
-- Deduplicacion Inteligente: Algoritmo difuso basado en RapidFuzz (`url_hash` y `content_fingerprint`) que detecta y agrupa vacantes duplicadas publicadas en multiples plataformas.
-- Garantia Anti-Alucinacion: El generador contrasta estrictamente cada oferta con tu perfil real (`config/profile.yaml`). No inventa empresas ni competencias inexistentes. Si faltan tecnologias exigidas, las penaliza en el scoring y las lista de forma transparente.
-- Documentos PDF Profesionales: Compilacion rigida con ReportLab (`pdf_renderer.py`). El modelo LLM no altera el diseno ni el formato visual del PDF. El CV base (`config/cv_base.md`) permanece inmutable como lectura canonica.
-- Base de Datos SQLite en modo WAL: Persistencia transaccional local con Write-Ahead Logging para lecturas y escrituras concurrentes de alta velocidad.
-- Panel Web SPA Unificado: Interfaz grafica moderna en Next.js con Tailwind CSS relativo, separacion de pantalla fluida (maximo 5vw), filtros deslizantes de puntuacion, selector de modalidad (presencial, teletrabajo o hibrido), subida y previsualizacion de CV, monitorizacion Docker y consola de logs en vivo por Server-Sent Events (SSE).
-- Canal Telegram Desacoplado: Opcion de recibir alertas matutinas con los PDFs adjuntos en el movil, sin dependencia obligatoria del bot para operar el sistema.
+**lazyJobFinder** se ejecuta de forma autónoma en tu propio ordenador mediante contenedores Docker. Escanea múltiples portales de empleo en España (Tecnoempleo, InfoJobs, Indeed, LinkedIn, Glassdoor y Google Jobs), deduplica ofertas repetidas, evalúa su afinidad mediante un modelo de lenguaje local (Ollama) sin enviar datos personales a APIs externas de pago, adapta cartas de presentación y centraliza todo en un panel web moderno con notificaciones opcionales por Telegram.
 
 ---
 
-## Requisitos Previos
+## ✨ Características Principales
 
-1. Docker Desktop instalado y en ejecucion (con motor WSL2 en Windows).
-2. Git instalado.
-3. Node.js 18+ y npm (requerido unicamente si deseas ejecutar el panel web en modo desarrollo en el puerto 3000; no es necesario si usas el modo unificado de Docker en el puerto 8000).
-
----
-
-## Como Arrancarlo
-
-### Paso 1: Clonar y configurar variables de entorno
-
-Clona el repositorio y genera tu archivo `.env` a partir de la plantilla:
-
-```bash
-cp .env.example .env
-```
-
-Edita `.env` con tus preferencias basicas. Las credenciales de Telegram o InfoJobs son opcionales; si no las configuras, el sistema funcionara en modo 100% local a traves del panel web.
-
-```ini
-# Configuracion minima opcional
-DATABASE_PATH=data/lazyjobfinder.db
-OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=qwen2.5:3b-instruct
-
-# Opcional: Telegram (dejar vacio si solo usas el panel web)
-TELEGRAM_BOT_TOKEN=
-TELEGRAM_ALLOWED_USER_ID=
-```
+- **Inferencia IA 100% Local (Coste 0 €/mes):** Evaluación, scoring y redacción procesados íntegramente en tu equipo con Ollama (`qwen2.5:3b-instruct` en CPU Q4_K_M). Cero dependencias de OpenAI, Anthropic o servicios cloud de pago.
+- **Universal para Cualquier Profesión:** Admite cualquier tipo de currículum y carrera laboral (tecnología, administración, marketing, diseño, salud, educación, etc.).
+- **Modo Cero Filtro o Filtro Inteligente:**
+  - **Sin CV activo:** El sistema conserva **todas** las ofertas descubiertas sin descartes para que no te pierdas ninguna vacante.
+  - **Con CV activo (PDF, Markdown o TXT):** La IA evalúa la afinidad contra tu experiencia real, asigna una puntuación del 0 al 100 y genera documentos ATS adaptados.
+- **Multi-Portal con Aislamiento de Fallos:** Conectores independientes para Tecnoempleo (RSS oficial), InfoJobs (API oficial) y JobSpy (Indeed España, LinkedIn, Glassdoor y Google Jobs). Si un portal falla o aplica rate-limit, los demás continúan sin interrupción.
+- **Deduplicación Inteligente:** Algoritmo difuso basado en RapidFuzz (`url_hash` y `content_fingerprint`) que detecta y agrupa vacantes idénticas publicadas en diferentes portales.
+- **Garantía Anti-Alucinación:** No inventa empresas ni competencias inexistentes. Si faltan requisitos exigidos, los detecta con honestidad y los expone transparentemente.
+- **Documentos Profesionales:** Compilación de cartas de presentación y CV adaptados mediante plantillas fijas y ReportLab, asegurando maquetación cuidada.
+- **Panel Web Unificado en http://localhost:8000:** Interfaz visual completa desarrollada en Next.js y servida directamente por el backend FastAPI:
+  - Filtros interactivos por afinidad y modalidad (Remoto, Híbrido, Presencial).
+  - Gestor de CV con subida local (PDF, MD, TXT), borrado y previsualización del texto extraído.
+  - Monitorización en tiempo real de servicios (Docker y Ollama) y consola de logs en vivo vía SSE.
+  - Configuración rápida de términos de búsqueda, ubicaciones y umbrales.
+- **Canal Telegram Desacoplado:** Opción de recibir alertas matutinas en el móvil con los documentos adjuntos, sin ser obligatorio para operar el sistema.
+- **Sistema de Empaquetado y Distribución:** Generador automatizado de instaladores para **Windows** (`.exe` y `.zip` portable) y **GNU/Linux** (`.run` ejecutable y `.tar.gz`) con auditoría de seguridad previa y verificación SHA-256.
 
 ---
 
-### Paso 2: Ejecucion en Windows con el lanzador `start.bat`
+## 📋 Requisitos del Sistema
 
-El repositorio incluye el script `start.bat`, disenado para automatizar la deteccion de Docker Desktop, arrancar contenedores, sincronizar puertos y abrir la interfaz.
+1. **Docker Desktop** (en Windows con motor WSL2) o **Docker Engine + Docker Compose v2** (en Linux).
+2. **Mínimo 4 GB de RAM** disponibles para contenedores Docker.
+3. **Mínimo 8 GB de espacio en disco** para imágenes y modelos de IA locales.
 
-#### Opcion A: Modo Interactivo (Recomendado)
-Haz doble clic en `start.bat` o ejecutalo en tu terminal:
+---
+
+## 🚀 Inicio Rápido en Windows (`start.bat`)
+
+El proyecto incluye un lanzador simplificado [`start.bat`](file:///c:/Users/rober/Desktop/Proyectos%20propios/lazyJobFinder/start.bat) que automatiza todo:
+
+Haz doble clic en `start.bat` o ejecútalo en la terminal:
 
 ```cmd
 .\start.bat
 ```
 
-Se mostrara un menu numerado donde podras elegir la opcion deseada:
-- `[1]` Arrancar TODO unificado: Levanta Ollama, la base de datos y la aplicacion web lista en `http://localhost:8000`.
-- `[2]` Arrancar solo Docker: Levanta los servicios en segundo plano sin abrir terminales adicionales.
-- `[3]` Arrancar Panel Web en Modo Desarrollo: Inicia Next.js en `http://localhost:3000` con hot-reload.
-- `[4]` Diagnostico de estado: Comprueba la conexion de Docker, Ollama y el backend FastAPI.
-- `[5]` Descargar modelo IA: Descarga el modelo `qwen2.5:3b-instruct` en Ollama.
-- `[6]` Detener servicios: Apaga todos los contenedores de manera limpia.
-- `[7]` Reconstruir y Actualizar TODO: Recompila el panel web (Next.js) a estatico y reconstruye la imagen Docker del backend sin cache para aplicar cambios recientes.
+Se abrirá el menú unificado:
 
-#### Opcion B: Comandos Directos por Linea de Comandos (CLI)
-Puedes invocar las acciones directamente con flags:
+```text
+=====================================================================
+                lazyJobFinder - Lanzador Principal
+       Sistema Local, Autónomo y Gratuito de Búsqueda de Empleo
+=====================================================================
 
-```cmd
-# Arrancar todo el sistema unificado
-.\start.bat --all
+Selecciona qué deseas ejecutar:
 
-# Reconstruir y actualizar frontend y backend con los ultimos cambios de codigo
-.\start.bat --build
-
-# Arrancar unicamente los contenedores Docker
-.\start.bat --docker
-
-# Iniciar el panel web de desarrollo en puerto 3000
-.\start.bat --web
-
-# Verificar estado y conectividad de los servicios
-.\start.bat --status
-
-# Descargar o actualizar el modelo en Ollama
-.\start.bat --pull
-
-# Detener todos los contenedores
-.\start.bat --stop
+  [1] Arrancar lazyJobFinder (Todo unificado en http://localhost:8000)
+  [2] Empaquetar Distribución e Instaladores (Windows y Linux)
+  [Q] Salir (Detiene los servicios en ejecución)
 ```
+
+### ¿Qué hace la Opción [1]?
+1. Comprueba y crea tu archivo `.env` automáticamente si falta.
+2. Inicia Docker Desktop si estaba cerrado y espera a que el motor esté listo.
+3. Levanta los contenedores en segundo plano.
+4. Comprueba si el modelo `qwen2.5:3b-instruct` ya existe en Ollama; si ya está, **no lo vuelve a descargar**.
+5. Espera a que el backend responda y abre automáticamente tu navegador en **`http://localhost:8000`**.
+6. Al pulsar cualquier tecla en la consola o pulsar `[Q]`, **detiene automáticamente todos los contenedores** para no consumir memoria.
 
 ---
 
-### Paso 3: Ejecucion Manual en Linux o Mac (Docker Compose)
+## 🐧 Inicio en GNU/Linux y macOS
 
-Si trabajas en Linux o macOS, puedes arrancar el entorno mediante Docker Compose directamente:
+Si utilizas Linux o macOS, puedes arrancarlo mediante Docker Compose estándar:
 
 ```bash
-# 1. Levantar contenedores en segundo plano
+# 1. Preparar archivo de entorno
+cp .env.example .env
+
+# 2. Levantar los contenedores en segundo plano
 docker compose up -d
 
-# 2. Descargar el modelo de IA en el contenedor de Ollama
+# 3. Descargar el modelo de IA en Ollama (solo la primera vez)
 docker compose exec ollama ollama pull qwen2.5:3b-instruct
 
-# 3. Comprobar que el servicio responde
-curl http://localhost:8000/api/health
+# 4. Abrir en el navegador
+xdg-open http://localhost:8000 || open http://localhost:8000
 ```
 
-Accede a la interfaz web en tu navegador en:
-`http://localhost:8000`
+---
+
+## 💼 Cómo Adaptarlo a tu Perfil
+
+lazyJobFinder se adapta a cualquier profesional en dos sencillos pasos:
+
+### 1. Términos de Búsqueda
+En la pestaña **Ajustes** del panel web (o editando [`config/settings.yaml`](file:///c:/Users/rober/Desktop/Proyectos%20propios/lazyJobFinder/config/settings.yaml)), indica los puestos y ubicaciones que te interesan:
+```yaml
+busqueda:
+  terminos:
+    - "Diseñador Gráfico"
+    - "Marketing Digital"
+  ubicaciones:
+    - "Spain"
+    - "Remoto"
+  antiguedad_horas: 48
+  limite_por_fuente: 15
+```
+
+### 2. Cargar tu Currículum
+1. Ve a la sección **Currículum Activo** en el panel web.
+2. Pulsa el botón **Subir CV** y selecciona tu archivo (`.pdf`, `.md` o `.txt`).
+3. El sistema extraerá el texto de forma segura y local.
+4. Selecciona tu CV en el desplegable. A partir de ese momento, la IA evaluará las ofertas contrastándolas con tu currículum real.
+5. *¿Prefieres no filtrar?* Deja seleccionado **"Sin CV (Sin filtrado de ofertas)"** y se guardarán todas las ofertas descubiertas.
 
 ---
 
-## Puertos y Direcciones del Sistema
+## 📦 Empaquetado y Creación de Instaladores
 
-- `http://localhost:8000`: Panel Web de Administracion y API REST de FastAPI (produccion y Docker unificado).
-- `http://localhost:8000/api/docs`: Documentacion interactiva Swagger / OpenAPI del backend.
-- `http://localhost:3000`: Servidor de desarrollo Next.js (unicamente al ejecutar `start.bat --web` o `npm run dev`).
-- `http://localhost:11434`: Motor de inferencia Ollama local.
+lazyJobFinder cuenta con un orquestador completo para generar distribuciones independientes para usuarios finales:
+
+```cmd
+# Desde Windows con start.bat
+.\start.bat --package
+
+# O directamente con Python
+python packaging/build_release.py
+```
+
+### Opciones del empaquetador:
+- `--platform {all,windows,linux}`: Elige la plataforma de destino.
+- `--version 1.0.0`: Define la versión semántica.
+- `--skip-docker`: Genera los paquetes de scripts e instaladores sin compilar las imágenes Docker.
+- `--skip-model`: Genera paquetes ligeros dejando la descarga del modelo para el primer arranque del usuario.
+
+### Artefactos generados en `dist/`:
+- **Windows:** Instalador guiado Inno Setup (`.exe`) y paquete portable (`.zip`) con instalador autónomo `install.bat`.
+- **Linux:** Instalador ejecutable autoextraíble (`.run`) y tarball (`.tar.gz`) con instalador interactivo `installer.sh`.
+- **Seguridad:** Manifiesto unificado `release-manifest.json` y sumas de verificación `SHA256SUMS.txt`.
+- **Garantía Anti-Fuga:** Las imágenes se construyen desde un contexto aislado con plantillas limpias, impidiendo que tus credenciales o CV personales se empaqueten en la distribución.
 
 ---
 
-## Estructura del Proyecto
+## 🧭 Puertos y Direcciones Locales
+
+| Servicio | URL | Descripción |
+| :--- | :--- | :--- |
+| **Panel Web Unificado** | `http://localhost:8000` | Interfaz gráfica SPA de control y gestión |
+| **Documentación API** | `http://127.0.0.1:8000/api/docs` | Swagger interactivo de FastAPI |
+| **Motor Ollama** | `http://localhost:11434` | API de inferencia de modelos IA locales |
+| **Panel Dev (Opcional)** | `http://localhost:3000` | Entorno de desarrollo Next.js con hot-reload (`npm run dev`) |
+
+---
+
+## 📁 Estructura del Repositorio
 
 ```
 lazyJobFinder/
-├── .agents/                  # Reglas del proyecto para agentes y desarrollo
-│   └── rules/
-│       └── project_rules.md  # Normas de arquitectura, anti-alucinacion y frontend
-├── config/
-│   ├── profile.yaml          # Perfil profesional canónico (habilidades y proyectos reales)
-│   ├── settings.yaml         # Parametros de busqueda, umbrales y programacion
-│   ├── shared_constants.json # Contrato unificado de estados y portales
-│   └── cv_base.md            # Curriculo base de referencia (solo lectura)
-├── data/                     # Volumen persistente local
-│   ├── documents/            # Carpetas con los PDFs y Markdown generados
-│   ├── uploaded_cvs/         # CVs alternativos subidos desde la interfaz
-│   └── lazyjobfinder.db      # Base de datos SQLite WAL
-├── docs/                     # Documentacion tecnica en profundidad
-├── src/
-│   ├── api/                  # Backend FastAPI (rutas de jobs, cv, system, settings)
-│   ├── connectors/           # Conectores de empleo (Tecnoempleo, InfoJobs, JobSpy)
-│   ├── evaluator/            # Scoring ATS y cliente estructurado Ollama JSON
-│   ├── scheduler/            # Planificador APScheduler con recuperacion de ejecuciones
-│   ├── tailoring/            # Renderizador PDF ReportLab y lector de CV multiformato
-│   ├── telegram_bot/         # Bot opcional de notificaciones Telegram
-│   ├── database.py           # Gestor SQLite con deduplicacion difusa
-│   └── main.py               # Orquestador principal de procesos
+├── config/                   # Configuración activa del usuario (settings, perfil)
+├── data/                     # Base de datos SQLite, CVs subidos y documentos (excluido de git)
+├── docs/                     # Documentación técnica y guías de arquitectura
+├── packaging/                # Infraestructura de empaquetado e instaladores
+│   ├── build_release.py      # Orquestador maestro de builds
+│   ├── compose.release.yaml  # Docker Compose de producción para usuarios
+│   ├── config-templates/     # Plantillas limpias sin datos personales
+│   ├── windows/              # Scripts e instalador Inno Setup para Windows
+│   └── linux/                # Scripts e instalador autoextraíble para Linux
+├── src/                      # Código fuente del backend Python (FastAPI, conectores, IA)
+│   ├── api/                  # Endpoints REST (jobs, cv, settings, system)
+│   ├── connectors/           # Conectores multi-portal (Tecnoempleo, InfoJobs, JobSpy)
+│   ├── evaluator/            # Scoring universal y cliente de Ollama
+│   ├── scheduler/            # Planificador diario de ejecuciones
+│   └── tailoring/            # Extractor multiformato de CV y generador de cartas
 ├── web/                      # Frontend Next.js 14 + Tailwind CSS
-│   ├── src/app/              # Dashboard SPA principal y paginas estaticas
-│   ├── src/components/
-│   │   ├── ui/               # Primitivas visuales (botones, badges, tooltips)
-│   │   ├── features/         # Componentes organizados por dominio (jobs, services, cv)
-│   │   └── views/            # Vistas principales integradas
-│   ├── src/lib/              # Cliente de API y utilidades
-│   └── src/types/            # Tipos e interfaces TypeScript estructurados
-├── start.bat                 # Lanzador de inicio rapido multifuncion para Windows
-├── docker-compose.yml        # Orquestacion de contenedores Docker
-└── Dockerfile                # Imagen Docker optimizada para Python 3.11
+├── dist/                     # Paquetes e instaladores generados listos para distribuir
+├── Dockerfile                # Imagen optimizada con frontend pre-integrado
+├── docker-compose.yml        # Orquestador Docker local para desarrollo
+└── start.bat                 # Lanzador rápido unificado para Windows
 ```
 
 ---
 
-## Flujo de Trabajo y Uso Diario
+## 🛡️ Privacidad y Seguridad
 
-1. Abre el panel web en `http://localhost:8000` (o `http://localhost:3000` en desarrollo).
-2. Pestana Candidaturas:
-   - Visualiza ofertas encontradas, puntuacion de afinidad y estado.
-   - Ajusta el slider de afinidad minima (`0% a 100%`) para filtrar ofertas aptas.
-   - Filtra por modalidad: Presencial, Teletrabajo (100% Remoto) o Hibrido.
-   - Sube o cambia tu CV activo en el panel lateral; el sistema calculara la afinidad contra el CV seleccionado.
-   - Previsualiza y descarga los PDFs adaptados de CV y carta generados por ReportLab.
-3. Pestana Configuracion y Servicios:
-   - Configura terminos de busqueda, ubicaciones, filtros de exclusion y umbrales minimos.
-   - Monitorea el estado de Ollama y de la aplicacion en tiempo real.
-   - Revisa la consola de logs en vivo transmitida por SSE sin recargar la pagina.
-   - Ejecuta limpiezas de historial con confirmacion protegida cuando desees reiniciar las ofertas.
-4. Boton Escanear Ahora: Ubicado en la cabecera superior para disparar el pipeline de busqueda bajo demanda en cualquier momento.
+1. **100% Local:** Tus currículums, datos personales y notas jamás se envían a servidores de terceros ni a modelos de IA en la nube.
+2. **Puertos enlazados a 127.0.0.1:** La API y los servicios se vinculan estrictamente a localhost para evitar exposición en redes locales o públicas.
+3. **Cero Telemetría:** Sin recopilación de métricas, cookies de seguimiento ni dependencias ocultas.

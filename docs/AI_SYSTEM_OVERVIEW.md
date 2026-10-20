@@ -7,7 +7,7 @@
 
 ## 1. Misión, Restricciones y Clarificación de Privacidad
 
-**lazyJobFinder** es un sistema autónomo, local y con un coste objetivo de **0 €/mes** diseñado para encontrar, normalizar, evaluar y adaptar candidaturas de empleo para un desarrollador de software junior con formación de **Desarrollo de Aplicaciones Multiplataforma (DAM)** en España.
+**lazyJobFinder** es un sistema autónomo, local y con un coste objetivo de **0 €/mes** diseñado para encontrar, normalizar, evaluar y adaptar candidaturas de empleo para **cualquier perfil profesional** (tecnología, administración, diseño, educación, salud, etc.) en España.
 
 ### Restricciones Técnicas
 1. **Coste objetivo 0 €/mes**: No utiliza APIs de IA comerciales ni servicios de pago (cero OpenAI, Anthropic o servicios cloud de inferencia).
@@ -15,6 +15,7 @@
 3. **Procesamiento de IA 100% Local**: La extracción del perfil, el scoring y la adaptación de documentos se ejecutan exclusivamente en localhost dentro del contenedor. Ningún servicio externo de IA recibe el currículum.
 4. **Canales desacoplados de visualización y notificación**: Panel Web SPA local moderno (Next.js exportado estáticamente y servido por FastAPI en http://localhost:8000) para control de servicios, inspección de ofertas y gestión de CV; complementado por un bot privado de Telegram opcional para notificaciones de resumen y entrega de PDFs.
 5. **Ninguna candidatura automática**: El sistema jamás envía solicitudes ni contacta con empresas automáticamente. El control de postulación permanece 100% en manos del usuario.
+6. **Soporte de Currículum Universal**: El motor de evaluación y pre-filtrado no descarta por categorías rígidas preestablecidas. Si no se selecciona ningún CV, el sistema conserva todas las ofertas descubiertas; si se sube un CV (PDF/MD/TXT), la IA contrasta directamente las competencias y experiencia reales del candidato contra los requisitos de la vacante.
 
 > [!WARNING]
 > ### Clarificación de Privacidad, Huella de Red y Transmisión de Datos

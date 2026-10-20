@@ -60,24 +60,26 @@ if exist "images.tar" (
     echo.
     echo [i] Importando imagenes de contenedores locales (lazyjobfinder y ollama)...
     docker load -i "images.tar"
-    if %ERRORLEVEL% equ 0 (
-        echo [OK] Imagenes de contenedores importadas correctamente.
-    ) else (
-        echo [!] Advertencia al cargar imagenes desde images.tar.
+    if %ERRORLEVEL% neq 0 (
+        echo [ERROR] Fallo al cargar las imagenes desde images.tar.
+        pause
+        exit /b 1
     )
+    echo [OK] Imagenes de contenedores importadas correctamente.
 )
 
 :: 4.1 Restaurar modelo de Ollama en el volumen persistente si ollama_model.tar.gz esta presente
 if exist "ollama_model.tar.gz" (
     echo.
     echo [i] Restaurando datos del modelo IA empaquetado en el volumen persistente...
-    docker volume create lazyjob_ollama_models >nul 2>&1
-    docker run --rm -v lazyjob_ollama_models:/root/.ollama -v "%~dp0":/backup alpine tar xzf /backup/ollama_model.tar.gz -C /root/.ollama >nul 2>&1
-    if %ERRORLEVEL% equ 0 (
-        echo [OK] Modelo IA precargado en el volumen local de Ollama.
-    ) else (
-        echo [!] No se pudo precargar ollama_model.tar.gz directamente. Se descargara al primer inicio.
+    docker compose up --no-start ollama >nul 2>&1
+    docker compose run --rm --entrypoint /bin/sh -v "%~dp0":/backup ollama -c "tar xzf /backup/ollama_model.tar.gz -C /root/.ollama"
+    if %ERRORLEVEL% neq 0 (
+        echo [ERROR] No se pudo restaurar el modelo de IA en el volumen de Ollama.
+        pause
+        exit /b 1
     )
+    echo [OK] Modelo IA precargado en el volumen local de Ollama.
 )
 
 :: 5. Crear acceso directo en el Escritorio con PowerShell

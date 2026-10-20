@@ -69,13 +69,14 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDi
 
 [Run]
 ; 1. Cargar imágenes Docker en el motor local al terminar la instalación
-Filename: "cmd.exe"; Parameters: "/c if exist ""{app}\images.tar"" docker load -i ""{app}\images.tar"""; StatusMsg: "Cargando imágenes de Docker y Ollama en el sistema local..."; Flags: runhidden waituntilterminated skipifdoesntexist
+Filename: "cmd.exe"; Parameters: "/c cd /d ""{app}"" && if exist ""{app}\images.tar"" docker load -i ""{app}\images.tar"""; StatusMsg: "Cargando imágenes de Docker y Ollama en el sistema local..."; Flags: runhidden waituntilterminated skipifdoesntexist
 
-; 2. Restaurar modelo de IA en el volumen de Ollama si ollama_model.tar.gz está incluido
-Filename: "cmd.exe"; Parameters: "/c if exist ""{app}\ollama_model.tar.gz"" docker volume create lazyjob_ollama_models && docker run --rm -v lazyjob_ollama_models:/root/.ollama -v ""{app}"":/backup alpine tar xzf /backup/ollama_model.tar.gz -C /root/.ollama"; StatusMsg: "Restaurando modelo de IA empaquetado en el volumen persistente de Ollama..."; Flags: runhidden waituntilterminated skipifdoesntexist
+; 2. Restaurar modelo de IA en el volumen de Ollama si ollama_model.tar.gz está incluido (usando el propio contenedor de ollama, sin depender de alpine)
+Filename: "cmd.exe"; Parameters: "/c cd /d ""{app}"" && if exist ""{app}\ollama_model.tar.gz"" (docker compose up --no-start ollama && docker compose run --rm --entrypoint /bin/sh -v ""{app}"":/backup ollama -c ""tar xzf /backup/ollama_model.tar.gz -C /root/.ollama"")"; StatusMsg: "Restaurando modelo de IA empaquetado en el volumen persistente de Ollama..."; Flags: runhidden waituntilterminated skipifdoesntexist
 
 ; 3. Opción para arrancar la aplicación inmediatamente tras la instalación
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: shellexec postinstall nowait skipifsilent
+
 
 [UninstallRun]
 ; Detener contenedores Docker antes de desinstalar

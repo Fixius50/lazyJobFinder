@@ -63,11 +63,16 @@ if %ERRORLEVEL% neq 0 (
 )
 
 :: 3. Si existe images.tar y las imagenes no estan cargadas, importarlas
-docker image inspect lazyjobfinder:1.0.0 >nul 2>&1
+docker image inspect ollama/ollama:latest >nul 2>&1
 if %ERRORLEVEL% neq 0 (
     if exist "images.tar" (
         echo [i] Importando imagenes de contenedores empaquetadas (lazyJobFinder y Ollama)...
         docker load -i "images.tar"
+        if %ERRORLEVEL% neq 0 (
+            echo [ERROR] No se pudieron cargar las imagenes de images.tar.
+            pause
+            exit /b 1
+        )
     )
 )
 

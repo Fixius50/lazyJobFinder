@@ -82,14 +82,22 @@ done
 # 6. Importar imágenes si images.tar existe
 if [ -f "$SCRIPT_DIR/images.tar" ]; then
     echo -e "${GREEN}[i] Importando imágenes de contenedores locales (lazyjobfinder y ollama)...${NC}"
-    docker load -i "$SCRIPT_DIR/images.tar"
+    if ! docker load -i "$SCRIPT_DIR/images.tar"; then
+        echo -e "${RED}[ERROR] Fallo al cargar las imágenes de images.tar.${NC}"
+        exit 1
+    fi
 fi
 
 # 6.1 Restaurar modelo de IA en el volumen de Ollama si ollama_model.tar.gz existe
 if [ -f "$SCRIPT_DIR/ollama_model.tar.gz" ]; then
     echo -e "${GREEN}[i] Restaurando modelo de IA empaquetado en el volumen de Ollama...${NC}"
-    docker volume create lazyjob_ollama_models >/dev/null 2>&1 || true
-    docker run --rm -v lazyjob_ollama_models:/root/.ollama -v "$SCRIPT_DIR":/backup alpine tar xzf /backup/ollama_model.tar.gz -C /root/.ollama >/dev/null 2>&1 || echo "[!] Advertencia: no se pudo desempaquetar el modelo directamente. Se descargará al primer arranque."
+    cd "$INSTALL_DIR"
+    docker compose up --no-start ollama >/dev/null 2>&1 || true
+    if ! docker compose run --rm --entrypoint /bin/sh -v "$SCRIPT_DIR":/backup ollama -c "tar xzf /backup/ollama_model.tar.gz -C /root/.ollama"; then
+        echo -e "${RED}[ERROR] No se pudo restaurar el modelo de IA en el volumen de Ollama.${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}[OK] Modelo IA precargado en el volumen local de Ollama.${NC}"
 fi
 
 # 7. Crear enlace en PATH

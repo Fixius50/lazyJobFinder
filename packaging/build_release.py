@@ -250,74 +250,130 @@ class ReleaseBuilder:
         shutil.copytree(os.path.join(ROOT_DIR, "web", "out"), os.path.join(isolated_context, "web", "out"))
 
         app_tag = f"lazyjobfinder:{self.version}"
-        log(f"Construyendo imagen de producción aislada: {app_tag}...", "INFO")
-        build_cmd = ["docker", "build", "-t", app_tag, "-t", "lazyjobfinder:latest", "."]
+        log(f"Construyendo imagen de producción aislada ({app_tag}) forzando plataforma linux/amd64...", "INFO")
+        build_cmd = [
+            "docker", "build",
+            "--platform", "linux/amd64",
+            "-t", app_tag,
+            "-t", "lazyjobfinder:latest",
+            ".",
+        ]
         ret = subprocess.call(build_cmd, cwd=isolated_context)
 
         # Limpiar el contexto temporal inmediatamente
         shutil.rmtree(isolated_context, ignore_errors=True)
 
         if ret != 0:
-            raise RuntimeError("Fallo al construir la imagen Docker aislada de lazyjobfinder.")
+            raise RuntimeError("Fallo crítico al construir la imagen Docker aislada de lazyjobfinder.")
 
-        log("Asegurando presencia de la imagen oficial de Ollama...", "INFO")
-        subprocess.call(["docker", "pull", "ollama/ollama:latest"])
+        log("Asegurando presencia de la imagen oficial de Ollama (linux/amd64)...", "INFO")
+        ret_pull = subprocess.call(["docker", "pull", "--platform", "linux/amd64", "ollama/ollama:latest"])
+        if ret_pull != 0:
+            raise RuntimeError("Fallo crítico al descargar la imagen base de ollama/ollama:latest.")
 
         # 2. Exportación de imágenes a images.tar en staging
         images_tar = os.path.join(STAGING_DIR, "images.tar")
         log(f"Exportando imágenes base a {images_tar}...", "INFO")
         save_cmd = ["docker", "save", "-o", images_tar, app_tag, "lazyjobfinder:latest", "ollama/ollama:latest"]
         ret = subprocess.call(save_cmd)
-        if ret == 0:
-            log(f"Imágenes exportadas con éxito ({os.path.getsize(images_tar) // (1024*1024)} MB).", "SUCCESS")
-        else:
-            log("No se pudo exportar images.tar.", "WARN")
+        if ret != 0 or not os.path.exists(images_tar) or os.path.getsize(images_tar) < 1024 * 1024:
+            raise RuntimeError("Fallo crítico: no se pudo exportar images.tar con las imágenes de lazyjobfinder y Ollama.")
+        log(f"Imágenes exportadas con éxito ({os.path.getsize(images_tar) // (1024*1024)} MB).", "SUCCESS")
 
-        # 3. Exportación real del modelo de Ollama si no se omite
+        # 3. Exportación real y aislada del modelo de Ollama si no se omite
         if not self.skip_model:
             self.export_ollama_model()
+        else:
+            log("Distribución configurada como LIGERA (--skip-model): se omitirá el modelo de IA en el paquete.", "WARN")
+            self.model_included = False
 
     def export_ollama_model(self) -> None:
-        """Exporta los datos reales del modelo de Ollama (qwen2.5:3b-instruct) a un archivo tar."""
-        log("Iniciando empaquetado del modelo de IA (qwen2.5:3b-instruct)...", "INFO")
+        """
+        Descarga y exporta EXCLUSIVAMENTE los datos del modelo qwen2.5:3b-instruct
+        usando un volumen efímero dedicado y limpio, evitando empaquetar otros modelos
+        presentes en el entorno del desarrollador.
+        """
+        log("Iniciando empaquetado aislado del modelo de IA (qwen2.5:3b-instruct)...", "INFO")
         model_tar = os.path.join(STAGING_DIR, "ollama_model.tar.gz")
+        ephemeral_volume = f"lazyjob_export_model_{int(time.time())}"
 
-        # Comprobar si el volumen lazyjob_ollama_models existe o tiene datos
-        check_vol = subprocess.run(
-            ["docker", "volume", "inspect", "lazyjob_ollama_models"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        if check_vol.returncode != 0:
-            log("Creando volumen lazyjob_ollama_models y asegurando descarga del modelo...", "INFO")
-            subprocess.run(["docker", "volume", "create", "lazyjob_ollama_models"], check=False)
+        try:
+            # 1. Crear volumen aislado y limpio
+            log(f"Creando volumen temporal limpio '{ephemeral_volume}' para descarga aislada...", "INFO")
+            subprocess.run(["docker", "volume", "create", ephemeral_volume], check=True)
 
-        # Verificar o descargar el modelo usando un contenedor efímero
-        pull_cmd = [
-            "docker", "run", "--rm",
-            "-v", "lazyjob_ollama_models:/root/.ollama",
-            "ollama/ollama:latest",
-            "ollama", "pull", "qwen2.5:3b-instruct",
-        ]
-        ret = subprocess.call(pull_cmd)
-        if ret == 0:
-            log("Modelo qwen2.5:3b-instruct verificado en el volumen. Exportando a archivo tar.gz...", "INFO")
-            # Exportar el contenido del volumen usando alpine
+            # 2. Iniciar servidor Ollama temporal en segundo plano sobre el volumen limpio
+            container_name = f"lazyjob_model_puller_{int(time.time())}"
+            run_server_cmd = [
+                "docker", "run", "-d",
+                "--name", container_name,
+                "-v", f"{ephemeral_volume}:/root/.ollama",
+                "ollama/ollama:latest",
+                "serve",
+            ]
+            run_res = subprocess.run(run_server_cmd, capture_output=True, text=True)
+            if run_res.returncode != 0:
+                raise RuntimeError(f"Fallo al iniciar contenedor de exportación de Ollama: {run_res.stderr}")
+
+            # Esperar a que el servidor Ollama esté listo
+            log("Esperando inicialización del servidor Ollama temporal...", "INFO")
+            ready = False
+            for _ in range(15):
+                time.sleep(2)
+                check_cmd = ["docker", "exec", container_name, "ollama", "list"]
+                check_res = subprocess.run(check_cmd, capture_output=True, text=True)
+                if check_res.returncode == 0:
+                    ready = True
+                    break
+
+            if not ready:
+                raise RuntimeError("El servidor temporal de Ollama no respondió a tiempo.")
+
+            # 3. Descargar el modelo requerido qwen2.5:3b-instruct
+            log("Descargando modelo oficial qwen2.5:3b-instruct en el volumen limpio...", "INFO")
+            pull_cmd = ["docker", "exec", container_name, "ollama", "pull", "qwen2.5:3b-instruct"]
+            pull_res = subprocess.run(pull_cmd)
+            if pull_res.returncode != 0:
+                raise RuntimeError("Fallo durante 'ollama pull qwen2.5:3b-instruct' en el contenedor temporal.")
+
+            # 4. Verificar mediante 'ollama list' que el modelo está registrado
+            verify_cmd = ["docker", "exec", container_name, "ollama", "list"]
+            verify_res = subprocess.run(verify_cmd, capture_output=True, text=True)
+            if "qwen2.5:3b-instruct" not in verify_res.stdout:
+                raise RuntimeError(
+                    f"El modelo qwen2.5:3b-instruct no aparece en 'ollama list': {verify_res.stdout}"
+                )
+            log("Modelo qwen2.5:3b-instruct verificado en 'ollama list'.", "SUCCESS")
+
+            # 5. Detener el contenedor de servicio para volcar los datos a salvo
+            subprocess.run(["docker", "stop", "-t", "5", container_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(["docker", "rm", "-f", container_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+            # 6. Exportar los datos usando la imagen de ollama (que ya incluye tar) para no depender de alpine
+            log(f"Exportando datos limpios del modelo a {model_tar}...", "INFO")
             export_cmd = [
                 "docker", "run", "--rm",
-                "-v", "lazyjob_ollama_models:/root/.ollama:ro",
+                "-v", f"{ephemeral_volume}:/source_ollama:ro",
                 "-v", f"{STAGING_DIR}:/backup",
-                "alpine", "tar", "czf", "/backup/ollama_model.tar.gz", "-C", "/root/.ollama", ".",
+                "--entrypoint", "/bin/sh",
+                "ollama/ollama:latest",
+                "-c",
+                "tar czf /backup/ollama_model.tar.gz -C /source_ollama .",
             ]
             exp_ret = subprocess.call(export_cmd)
-            if exp_ret == 0 and os.path.exists(model_tar):
-                self.model_included = True
-                size_mb = os.path.getsize(model_tar) / (1024 * 1024)
-                log(f"Modelo IA empaquetado con éxito: ollama_model.tar.gz ({size_mb:.1f} MB).", "SUCCESS")
-                return
+            if exp_ret != 0 or not os.path.exists(model_tar) or os.path.getsize(model_tar) < 50 * 1024 * 1024:
+                raise RuntimeError(
+                    "Fallo al comprimir ollama_model.tar.gz o el tamaño del modelo es sospechosamente pequeño."
+                )
 
-        log("No se pudo exportar el modelo a archivo tar.gz. El instalador descargará el modelo en primer arranque.", "WARN")
-        self.model_included = False
+            self.model_included = True
+            size_mb = os.path.getsize(model_tar) / (1024 * 1024)
+            log(f"Modelo IA empaquetado con éxito: ollama_model.tar.gz ({size_mb:.1f} MB).", "SUCCESS")
+
+        finally:
+            # Limpiar contenedores y volumen efímero
+            subprocess.run(["docker", "rm", "-f", container_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(["docker", "volume", "rm", "-f", ephemeral_volume], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     def build_windows_distribution(self) -> List[str]:
         """Genera el paquete portable ZIP y compila el instalador .EXE con Inno Setup si está disponible."""
@@ -426,11 +482,23 @@ class ReleaseBuilder:
         manifest = dict(self.manifest_data)
         manifest["version"] = self.version
         manifest["build_timestamp"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        manifest["distribution_type"] = "complete" if self.model_included and not self.skip_docker else "lightweight"
         manifest["components"]["app_image"] = f"lazyjobfinder:{self.version}"
         manifest["components"]["ai_model_prepackaged"] = self.model_included
         manifest["components"]["ai_model_download_fallback"] = not self.model_included
-        manifest["artifacts"] = []
 
+        # Actualizar nombres esperados de archivo con la versión dinámica real
+        if "platforms" in manifest:
+            for p, p_data in manifest["platforms"].items():
+                if "target_file" in p_data:
+                    ext = ".exe" if p == "windows" else ".run"
+                    p_data["target_file"] = f"lazyJobFinder-{self.version}-{p}-x64{ext}"
+                if "portable_archive" in p_data:
+                    p_data["portable_archive"] = f"lazyJobFinder-{self.version}-{p}-x64.zip"
+                if "archive" in p_data:
+                    p_data["archive"] = f"lazyJobFinder-{self.version}-{p}-x64.tar.gz"
+
+        manifest["artifacts"] = []
         sums_lines = []
         for artifact in artifacts:
             filename = os.path.basename(artifact)
@@ -454,6 +522,24 @@ class ReleaseBuilder:
 
         log(f"Manifiesto guardado en: {manifest_path}", "SUCCESS")
         log(f"Sumas de comprobación guardadas en: {sums_path}", "SUCCESS")
+
+    def audit_final_artifacts(self, artifacts: List[str]) -> None:
+        """Audita el inventario final de artefactos antes de dar por buena la release."""
+        log("Ejecutando auditoría final de integridad e inventario sobre artefactos generados...", "INFO")
+        if not artifacts:
+            raise RuntimeError("Auditoría final fallida: No se generó ningún artefacto en dist/.")
+
+        # Si no se especificó --skip-docker ni --skip-model, verificar que los artefactos contengan peso de distribución completa
+        if not self.skip_docker and not self.skip_model:
+            for art in artifacts:
+                # Un paquete completo con imágenes y modelo debe pesar al menos 1.5 GB
+                size_mb = os.path.getsize(art) / (1024 * 1024)
+                if size_mb < 200:
+                    raise RuntimeError(
+                        f"Auditoría final fallida: El artefacto '{os.path.basename(art)}' pesa solo {size_mb:.1f} MB. "
+                        "Para distribución completa se requiere la inclusión de images.tar y ollama_model.tar.gz."
+                    )
+        log("Auditoría final de artefactos superada con éxito.", "SUCCESS")
 
     def run(self, platforms_target: str = "all") -> None:
         start_time = time.time()
@@ -484,8 +570,12 @@ class ReleaseBuilder:
         if build_linux:
             artifacts.extend(self.build_linux_distribution())
 
-        # 6. Manifiesto e integridad
+        # 6. Auditoría final sobre artefactos empaquetados
+        self.audit_final_artifacts(artifacts)
+
+        # 7. Manifiesto e integridad
         self.emit_release_manifest(artifacts)
+
 
         elapsed = time.time() - start_time
         print("\n" + "=" * 70)

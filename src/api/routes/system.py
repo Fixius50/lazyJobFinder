@@ -106,6 +106,37 @@ def _inspect_services() -> Dict[str, Dict[str, Any]]:
     return services
 
 
+def _find_compose_container(client, service_name: str, project_name: Optional[str] = None):
+    """
+    Localiza un contenedor de forma dinámica por la etiqueta de servicio de Docker Compose
+    (com.docker.compose.service) y opcionalmente por el proyecto (com.docker.compose.project).
+    Elimina cualquier dependencia de nombres fijos de contenedor.
+    """
+    if not client:
+        return None
+    try:
+        containers = client.containers.list(all=True)
+        for c in containers:
+            labels = c.labels or {}
+            c_svc = labels.get("com.docker.compose.service", "")
+            c_proj = labels.get("com.docker.compose.project", "")
+
+            # Si se especificó project_name, debe coincidir
+            if project_name and c_proj and c_proj != project_name:
+                continue
+
+            if c_svc == service_name:
+                return c
+
+        # Fallback por coincidencia de nombre si no hay etiquetas compose
+        for c in containers:
+            if service_name in c.name.lower():
+                return c
+    except Exception as e:
+        logger.debug("Error buscando contenedor para servicio '%s': %s", service_name, e)
+    return None
+
+
 @router.get("/status")
 def get_services_status() -> Dict[str, Any]:
     """
@@ -114,18 +145,20 @@ def get_services_status() -> Dict[str, Any]:
     - arrancando
     - saludable
     - error
+    Utiliza resolución 100% dinámica por etiquetas de Compose.
     """
     client = _get_docker_client()
     services_status = {}
+    current_project = os.getenv("COMPOSE_PROJECT_NAME")
 
     if client:
-        container_map = {
-            "ollama": "lazyjob_ollama",
-            "lazyjobfinder": "lazyjob_app",
+        services_to_query = {
+            "ollama": "ollama",
+            "lazyjobfinder": "lazyjobfinder",
         }
-        for svc_name, c_name in container_map.items():
-            try:
-                c = client.containers.get(c_name)
+        for svc_key, compose_svc in services_to_query.items():
+            c = _find_compose_container(client, compose_svc, current_project)
+            if c:
                 c_state = c.status.lower()
                 health_dict = c.attrs.get("State", {}).get("Health", {})
                 h_status = health_dict.get("Status", "").lower()
@@ -146,17 +179,17 @@ def get_services_status() -> Dict[str, Any]:
                 else:
                     norm = "error"
 
-                services_status[svc_name] = {
+                services_status[svc_key] = {
                     "status": norm,
                     "health": h_status or "n/a",
-                    "container_name": c_name,
+                    "container_name": c.name,
                     "id": c.short_id,
                 }
-            except Exception:
-                services_status[svc_name] = {
+            else:
+                services_status[svc_key] = {
                     "status": "detenido",
                     "health": "desconocido",
-                    "container_name": c_name,
+                    "container_name": f"{compose_svc} (no detectado)",
                 }
     else:
         # Fallback autónomo: comprueba Ollama vía HTTP y el propio proceso FastAPI
@@ -299,30 +332,35 @@ def get_container_logs(
 ) -> Dict[str, str]:
     """
     Obtiene los registros recientes de Docker para un panel específico (ollama, app).
-    Prioriza la consulta mediante el SDK de Docker (docker-py), seguido de docker CLI,
+    Prioriza la consulta dinámica mediante el SDK de Docker (docker-py), seguido de docker CLI,
     y con fallback a los eventos registrados en la base de datos SQLite.
     """
     import shutil
 
-    # 1. Intento vía Docker Python Client (a través del socket /var/run/docker.sock)
+    # 1. Intento vía Docker Python Client con resolución dinámica por etiquetas
     client = _get_docker_client()
+    current_project = os.getenv("COMPOSE_PROJECT_NAME")
     if client:
         try:
+            services_to_inspect = []
             if service in ("ollama", "container_ollama"):
-                targets = ["lazyjob_ollama"]
+                services_to_inspect = ["ollama"]
             elif service in ("lazyjobfinder", "app", "container_app"):
-                targets = ["lazyjob_app"]
+                services_to_inspect = ["lazyjobfinder"]
             else:
-                targets = ["lazyjob_app", "lazyjob_ollama"]
+                services_to_inspect = ["lazyjobfinder", "ollama"]
 
             logs_list = []
-            for name in targets:
-                try:
-                    c = client.containers.get(name)
-                    raw = c.logs(tail=tail).decode("utf-8", errors="replace")
-                    logs_list.append(f"--- [Contenedor: {name}] ---\n{raw.strip()}")
-                except Exception as ce:
-                    logs_list.append(f"--- [Contenedor: {name}] ---\n(No disponible: {ce})")
+            for svc_name in services_to_inspect:
+                c = _find_compose_container(client, svc_name, current_project)
+                if c:
+                    try:
+                        raw = c.logs(tail=tail).decode("utf-8", errors="replace")
+                        logs_list.append(f"--- [Contenedor: {c.name}] ---\n{raw.strip()}")
+                    except Exception as ce:
+                        logs_list.append(f"--- [Contenedor: {c.name}] ---\n(Error leyendo logs: {ce})")
+                else:
+                    logs_list.append(f"--- [Servicio Compose: {svc_name}] ---\n(Contenedor no encontrado o detenido)")
 
             return {
                 "service": service,

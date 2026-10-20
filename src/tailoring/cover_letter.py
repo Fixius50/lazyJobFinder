@@ -31,6 +31,7 @@ class CoverLetterGenerator:
         puesto = job.get("title", "Desarrollador Junior")
         
         # Validar que solo se presuman habilidades reales
+        atomic_facts = self.verifier.get_approved_atomic_facts()
         raw_matched = eval_result.get("matched_skills", [])
         verified_matched = self.verifier.validate_matched_skills(raw_matched)
         missing = eval_result.get("missing_skills", [])

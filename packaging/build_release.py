@@ -639,17 +639,50 @@ class ReleaseBuilder:
 
         staging_model = os.path.join(STAGING_DIR, "ollama_model.tar.gz")
         if os.path.exists(staging_model):
-            log("  -> Validando estructura interna del modelo Ollama (manifests y blobs)...", "INFO")
+            log("  -> Validando estructura interna y manifiesto del modelo Ollama...", "INFO")
             with tarfile.open(staging_model, "r:gz") as mtf:
                 model_members = [m.replace("\\", "/").lower() for m in mtf.getnames()]
-                # Verificar presencia de blobs y manifests
+                # 1. Verificar presencia de carpetas base
                 has_manifests = any("manifests" in m for m in model_members)
                 has_blobs = any("blobs" in m for m in model_members)
                 if not has_manifests or not has_blobs:
                     raise RuntimeError(
                         "AUDITORÍA FINAL FALLIDA: 'ollama_model.tar.gz' no tiene la estructura de directorios válida de Ollama (manifests/blobs)."
                     )
-            log("  -> Estructura del modelo Ollama verificada correctamente.", "SUCCESS")
+
+                # 2. Verificar que exista el manifiesto específico de qwen2.5:3b-instruct
+                manifest_target_pattern = re.compile(r"manifests/.*/qwen2\.5.*3b.*", re.IGNORECASE)
+                matching_manifests = [m for m in mtf.getnames() if manifest_target_pattern.search(m.replace("\\", "/"))]
+                if not matching_manifests:
+                    raise RuntimeError(
+                        "AUDITORÍA FINAL FALLIDA: 'ollama_model.tar.gz' no contiene el manifiesto específico de 'qwen2.5:3b-instruct'."
+                    )
+
+                # 3. Leer el JSON del manifiesto y verificar que los blobs referenciados existan en el tar
+                try:
+                    manifest_file = mtf.extractfile(matching_manifests[0])
+                    if manifest_file:
+                        manifest_json = json.loads(manifest_file.read().decode("utf-8"))
+                        # Comprobar layer blobs y config blob
+                        required_digests = []
+                        if "config" in manifest_json and "digest" in manifest_json["config"]:
+                            required_digests.append(manifest_json["config"]["digest"].replace("sha256:", "sha256-"))
+                        for layer in manifest_json.get("layers", []):
+                            if "digest" in layer:
+                                required_digests.append(layer["digest"].replace("sha256:", "sha256-"))
+
+                        for dig in required_digests:
+                            blob_exists = any(dig in m for m in model_members)
+                            if not blob_exists:
+                                raise RuntimeError(
+                                    f"AUDITORÍA FINAL FALLIDA: El blob requerido '{dig}' del modelo qwen2.5:3b-instruct no se encuentra en 'ollama_model.tar.gz'."
+                                )
+                        log(f"  -> Manifiesto de {matching_manifests[0]} validado: {len(required_digests)} blobs verificados.", "SUCCESS")
+                except Exception as je:
+                    if not isinstance(je, RuntimeError):
+                        raise RuntimeError(f"Error parseando manifiesto de Ollama en el tar: {je}") from je
+                    raise
+            log("  -> Estructura e integridad del modelo Ollama verificadas con éxito.", "SUCCESS")
 
         log("Auditoría final de seguridad e integridad superada con éxito en todos los artefactos.", "SUCCESS")
 

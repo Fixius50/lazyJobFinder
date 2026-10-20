@@ -163,7 +163,7 @@ export function CvManager({ onCvChanged, className = "" }: CvManagerProps) {
   return (
     <div className={`space-y-4 ${className}`}>
       {/* Tarjeta Unificada de CV Activo y Subida en una sola fila */}
-      <Card className="border bg-card/80 backdrop-blur-sm shadow-sm overflow-hidden">
+      <Card className="border bg-card/80 backdrop-blur-sm shadow-sm">
         <CardHeader className="pb-2 pt-3 px-3 sm:px-4 border-b border-border/40">
           <div className="flex items-center justify-between gap-1">
             <div className="flex items-center gap-1.5">

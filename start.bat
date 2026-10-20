@@ -115,24 +115,28 @@ if %ERRORLEVEL% neq 0 (
 )
 
 :: 3. Compilacion automatica del panel web estatico si no existe o hubo cambios
-if not exist "%~dp0web\out\index.html" (
-    echo   [i] Compilando panel web estatico unificado (Next.js)...
-    if not exist "%~dp0web\node_modules" (
-        pushd "%~dp0web"
-        call npm install
-        popd
-    )
-    pushd "%~dp0web"
-    call npm run build
-    popd
-    if %ERRORLEVEL% equ 0 (
-        echo   [OK] Panel web compilado correctamente.
-    ) else (
-        echo   [!] Advertencia en la compilacion web. Se intentara continuar.
-    )
+if exist "%~dp0web\out\index.html" goto :WEB_OK
+echo   [i] Compilando panel web estatico unificado (Next.js)...
+if exist "%~dp0web\node_modules" goto :DO_BUILD
+pushd "%~dp0web"
+call npm install
+popd
+
+:DO_BUILD
+pushd "%~dp0web"
+call npm run build
+popd
+if %ERRORLEVEL% equ 0 (
+    echo   [OK] Panel web compilado correctamente.
 ) else (
-    echo   [OK] Panel web estatico verificado en web\out.
+    echo   [!] Advertencia en la compilacion web. Se intentara continuar.
 )
+goto :CHECK_DONE
+
+:WEB_OK
+echo   [OK] Panel web estatico verificado en web\out.
+
+:CHECK_DONE
 exit /b 0
 
 :: -----------------------------------------------------------------------------
@@ -176,7 +180,7 @@ if %ERRORLEVEL% equ 0 (
 echo --^> Esperando a que el backend unificado responda en http://127.0.0.1:8000...
 set /a API_RETRY=0
 :WAIT_API
-timeout /t 2 /nobreak >nul
+ping -n 3 127.0.0.1 >nul 2>&1
 curl -s -f --connect-timeout 2 --max-time 3 http://127.0.0.1:8000/api/health >nul 2>&1
 if !ERRORLEVEL! neq 0 (
     set /a API_RETRY+=1

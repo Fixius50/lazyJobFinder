@@ -4,7 +4,6 @@ import React, { useState, useEffect } from "react";
 import {
   Briefcase,
   Settings,
-  ShieldCheck,
   Cpu,
   Database,
   Bell,
@@ -95,19 +94,9 @@ export default function UnifiedDashboard() {
             <div className="h-8 w-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center font-bold text-xs sm:text-sm shadow-sm ring-1 ring-primary/20">
               LJ
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="font-bold text-xs sm:text-sm tracking-tight text-foreground leading-none">
-                  lazyJobFinder
-                </span>
-                <span className="hidden md:inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-400 ring-1 ring-inset ring-emerald-500/20">
-                  <ShieldCheck className="h-3 w-3" /> 100% Local · 0 €
-                </span>
-              </div>
-              <p className="hidden sm:block text-[10px] text-muted-foreground mt-0.5">
-                Búsqueda, scoring IA y tailoring ATS sin intermediarios
-              </p>
-            </div>
+            <span className="font-bold text-sm tracking-tight text-foreground leading-none">
+              lazyJobFinder
+            </span>
           </div>
 
           {/* Selector de Pestañas Central */}
@@ -229,16 +218,6 @@ export default function UnifiedDashboard() {
           {activeTab === "settings" && <SettingsAndServicesView />}
         </div>
       </main>
-
-      {/* Pie de Página Minimalista y Relativo */}
-      <footer className="border-t py-3 px-4 sm:px-[3vw] lg:px-[5vw] text-center text-[11px] text-muted-foreground bg-card/30">
-        <div className="w-full flex flex-col sm:flex-row items-center justify-between gap-2">
-          <span>lazyJobFinder · Arquitectura 100% soberana, local y privada</span>
-          <span className="flex items-center gap-1 text-emerald-400">
-            <ShieldCheck className="h-3.5 w-3.5" /> Procesamiento en RAM y SQLite local
-          </span>
-        </div>
-      </footer>
     </div>
   );
 }

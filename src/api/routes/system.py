@@ -106,46 +106,73 @@ def _inspect_services() -> Dict[str, Dict[str, Any]]:
     return services
 
 
+def _resolve_current_project() -> Optional[str]:
+    """
+    Obtiene el nombre del proyecto de Compose actual desde las variables de entorno
+    o leyendo el archivo .env en la raíz del proyecto.
+    Si no está configurado, devuelve None para forzar política estricta anti-colisión.
+    """
+    proj = os.getenv("COMPOSE_PROJECT_NAME")
+    if proj and proj.strip():
+        return proj.strip()
+
+    env_paths = [
+        os.path.join(os.getcwd(), ".env"),
+        os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), ".env"),
+    ]
+    for env_path in env_paths:
+        if os.path.exists(env_path):
+            try:
+                with open(env_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line.startswith("COMPOSE_PROJECT_NAME="):
+                            val = line.split("=", 1)[1].strip(" \"'")
+                            if val:
+                                return val
+            except Exception:
+                pass
+    return None
+
+
 def _find_compose_container(client, service_name: str, project_name: Optional[str] = None):
     """
     Localiza un contenedor de forma dinámica por la etiqueta de servicio de Docker Compose
     (com.docker.compose.service) y por el proyecto (com.docker.compose.project).
     Garantiza aislamiento estricto entre múltiples instalaciones concurrentes.
+    Si no hay project_name configurado, descarta contenedores de otros proyectos y evita fallbacks arbitrarios.
     """
     if not client:
         return None
     try:
+        resolved_proj = project_name or _resolve_current_project()
         containers = client.containers.list(all=True)
+
         # 1. Búsqueda estricta por etiquetas de Compose
         for c in containers:
             labels = c.labels or {}
             c_svc = labels.get("com.docker.compose.service", "")
             c_proj = labels.get("com.docker.compose.project", "")
 
-            # Si se exige un project_name, la etiqueta de proyecto debe coincidir obligatoriamente
-            if project_name:
-                if c_proj != project_name:
+            if resolved_proj:
+                if c_proj != resolved_proj:
                     continue
-            elif c_proj:
-                # Si no se especificó proyecto pero el contenedor sí tiene etiqueta de proyecto,
-                # no asociarlo arbitrariamente si hay ambigüedad
-                pass
+            else:
+                # Si no hay proyecto configurado, no secuestrar contenedores de proyectos específicos
+                if c_proj:
+                    continue
 
             if c_svc == service_name:
                 return c
 
-        # 2. Fallback por nombre estrictamente acotado al proyecto
-        for c in containers:
-            c_name = c.name.lower()
-            if project_name:
-                proj_prefix = project_name.lower()
-                # Debe comenzar por el prefijo del proyecto específico
+        # 2. Fallback por nombre estrictamente acotado al prefijo del proyecto
+        if resolved_proj:
+            proj_prefix = resolved_proj.lower()
+            for c in containers:
+                c_name = c.name.lower()
                 if (c_name.startswith(f"{proj_prefix}_") or c_name.startswith(f"{proj_prefix}-")) and service_name in c_name:
                     return c
-            else:
-                # Solo si no hay proyecto configurado
-                if c_name == service_name or c_name.startswith(f"{service_name}_"):
-                    return c
+        # Si no hay proyecto configurado, se rechaza cualquier fallback genérico por seguridad
     except Exception as e:
         logger.debug("Error buscando contenedor para servicio '%s': %s", service_name, e)
     return None
@@ -163,7 +190,7 @@ def get_services_status() -> Dict[str, Any]:
     """
     client = _get_docker_client()
     services_status = {}
-    current_project = os.getenv("COMPOSE_PROJECT_NAME")
+    current_project = _resolve_current_project()
 
     if client:
         services_to_query = {
@@ -206,7 +233,6 @@ def get_services_status() -> Dict[str, Any]:
                     "container_name": f"{compose_svc} (no detectado)",
                 }
     else:
-        # Fallback autónomo: comprueba Ollama vía HTTP y el propio proceso FastAPI
         services_status = _inspect_services()
 
     db = get_db()
@@ -259,9 +285,11 @@ def execute_service_action(req: ServiceActionRequest) -> Dict[str, Any]:
             "error_code": "DOCKER_UNAVAILABLE",
         }
 
-    current_project = os.getenv("COMPOSE_PROJECT_NAME")
+    current_project = _resolve_current_project()
+    results = []
+    db = get_db()
 
-    # Si se solicita lazyjobfinder (la propia app)
+    # Procesamiento para servicio único lazyjobfinder
     if service == "lazyjobfinder":
         if action == "stop":
             return {
@@ -270,6 +298,7 @@ def execute_service_action(req: ServiceActionRequest) -> Dict[str, Any]:
                 "message": "lazyJobFinder aloja la API web activa. Para apagar el contenedor app sin interrumpir abruptamente el servidor, utiliza los scripts locales launch/stop.",
                 "action": action,
                 "service": service,
+                "project": current_project,
             }
         if action == "start":
             return {
@@ -278,60 +307,111 @@ def execute_service_action(req: ServiceActionRequest) -> Dict[str, Any]:
                 "message": "El contenedor de la aplicación ya se encuentra en ejecución y operativo.",
                 "action": action,
                 "service": service,
+                "project": current_project,
             }
 
-    # Determinar qué servicios deben ser procesados respetando estrictamente el proyecto actual
-    services_to_act = ["ollama"] if service in ("ollama", "all") else []
-    if service in ("lazyjobfinder", "all") and action == "restart":
-        services_to_act.append("lazyjobfinder")
-
-    results = []
-    db = get_db()
-
-    for svc in services_to_act:
-        target_container = _find_compose_container(client, svc, current_project)
-        if not target_container:
+    # Procesar Ollama (para "ollama" o "all")
+    if service in ("ollama", "all"):
+        target_ollama = _find_compose_container(client, "ollama", current_project)
+        if not target_ollama:
             results.append({
-                "service": svc,
+                "service": "ollama",
                 "success": False,
                 "status": "not_found",
-                "message": f"No se encontró el contenedor del servicio '{svc}' para el proyecto '{current_project or 'default'}'.",
+                "message": f"No se encontró el contenedor de Ollama para el proyecto '{current_project or 'default'}'.",
             })
-            continue
+        else:
+            try:
+                if action == "restart":
+                    target_ollama.restart(timeout=10)
+                elif action == "stop":
+                    target_ollama.stop(timeout=10)
+                elif action == "start":
+                    target_ollama.start()
 
-        try:
-            if action == "restart":
-                target_container.restart(timeout=10)
-            elif action == "stop":
-                target_container.stop(timeout=10)
-            elif action == "start":
-                target_container.start()
+                msg = f"Servicio '{target_ollama.name}' ({action}) ejecutado correctamente."
+                db.log_event("INFO", "docker", f"Acción '{action}' sobre '{target_ollama.name}' (Proyecto: {current_project or 'n/a'}).")
+                results.append({
+                    "service": "ollama",
+                    "container_name": target_ollama.name,
+                    "success": True,
+                    "status": "executed",
+                    "message": msg,
+                })
+            except Exception as ce:
+                logger.warning("Fallo al ejecutar '%s' sobre '%s': %s", action, target_ollama.name, ce)
+                results.append({
+                    "service": "ollama",
+                    "container_name": target_ollama.name,
+                    "success": False,
+                    "status": "error",
+                    "message": f"Fallo al ejecutar '{action}' sobre '{target_ollama.name}': {str(ce)}",
+                })
 
-            msg = f"Servicio '{target_container.name}' ({action}) ejecutado correctamente."
-            db.log_event("INFO", "docker", f"Acción '{action}' ejecutada sobre '{target_container.name}' (Proyecto: {current_project or 'n/a'}).")
+    # Procesar lazyjobfinder cuando se solicita "all" o "lazyjobfinder"
+    if service == "all":
+        if action == "start":
             results.append({
-                "service": svc,
-                "container_name": target_container.name,
+                "service": "lazyjobfinder",
                 "success": True,
-                "status": "executed",
-                "message": msg,
+                "status": "noop",
+                "message": "El contenedor de la aplicación ya se encuentra en ejecución y operativo.",
             })
-        except Exception as ce:
-            logger.warning("Fallo al ejecutar '%s' sobre '%s': %s", action, target_container.name, ce)
+        elif action == "stop":
             results.append({
-                "service": svc,
-                "container_name": target_container.name,
-                "success": False,
-                "status": "error",
-                "message": f"Fallo al ejecutar '{action}' sobre '{target_container.name}': {str(ce)}",
+                "service": "lazyjobfinder",
+                "success": True,
+                "status": "preserved",
+                "message": "La API web se conserva activa para atender la sesión. Para detenerla por completo, ejecuta stop.bat o stop.sh.",
             })
+        elif action == "restart":
+            target_app = _find_compose_container(client, "lazyjobfinder", current_project)
+            if target_app:
+                try:
+                    target_app.restart(timeout=10)
+                    results.append({
+                        "service": "lazyjobfinder",
+                        "container_name": target_app.name,
+                        "success": True,
+                        "status": "executed",
+                        "message": f"Servicio '{target_app.name}' (restart) ejecutado correctamente.",
+                    })
+                except Exception as ce:
+                    results.append({
+                        "service": "lazyjobfinder",
+                        "container_name": target_app.name,
+                        "success": False,
+                        "status": "error",
+                        "message": f"Fallo reiniciando '{target_app.name}': {str(ce)}",
+                    })
+
+    elif service == "lazyjobfinder" and action == "restart":
+        target_app = _find_compose_container(client, "lazyjobfinder", current_project)
+        if target_app:
+            try:
+                target_app.restart(timeout=10)
+                results.append({
+                    "service": "lazyjobfinder",
+                    "container_name": target_app.name,
+                    "success": True,
+                    "status": "executed",
+                    "message": f"Servicio '{target_app.name}' (restart) ejecutado correctamente.",
+                })
+            except Exception as ce:
+                results.append({
+                    "service": "lazyjobfinder",
+                    "container_name": target_app.name,
+                    "success": False,
+                    "status": "error",
+                    "message": f"Fallo reiniciando '{target_app.name}': {str(ce)}",
+                })
 
     all_success = len(results) > 0 and all(r["success"] for r in results)
-    primary_status = results[0]["status"] if results else "not_found"
+    primary_status = results[0]["status"] if len(results) == 1 else ("executed" if all_success else "partial_error")
 
     return {
         "success": all_success,
-        "status": primary_status if len(results) == 1 else ("executed" if all_success else "partial_error"),
+        "status": primary_status,
         "action": action,
         "service": service,
         "project": current_project,

@@ -62,7 +62,7 @@ export function JobFilters({
     if (score >= 75) return `≥ ${score}% · Óptima`;
     if (score >= 50) return `≥ ${score}% · Posible`;
     if (score >= 25) return `≥ ${score}% · Poco probable`;
-    if (score > 0) return `≥ ${score}% · Cualquiera`;
+    if (score > 0) return `≥ ${score}% · Mínima`;
     return "≥ 0% · Cualquiera";
   };
 

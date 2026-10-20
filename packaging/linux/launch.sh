@@ -32,9 +32,9 @@ while [ $RETRY -lt 30 ]; do
 done
 
 # 4. Comprobar modelo de Ollama
-if ! docker exec lazyjob_ollama ollama list 2>/dev/null | grep -qi "qwen2.5:3b-instruct"; then
+if ! docker compose exec -T ollama ollama list 2>/dev/null | grep -qi "qwen2.5:3b-instruct"; then
     echo "--> Descargando modelo qwen2.5:3b-instruct en Ollama..."
-    docker exec lazyjob_ollama ollama pull qwen2.5:3b-instruct
+    docker compose exec -T ollama ollama pull qwen2.5:3b-instruct
 fi
 
 echo ""

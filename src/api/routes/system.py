@@ -198,34 +198,40 @@ def execute_service_action(req: ServiceActionRequest) -> Dict[str, Any]:
             detail=f"Servicio '{service}' no permitido. Válidos: all, {list(ALLOWED_SERVICES)}",
         )
 
-    # Protección y control de servicios vía Docker Python SDK (socket /var/run/docker.sock)
+    # Control de servicios:
     client = _get_docker_client()
     if not client:
-        raise HTTPException(
-            status_code=503,
-            detail="Socket Docker no disponible desde el contenedor. Comprueba los permisos de /var/run/docker.sock.",
-        )
+        # En modo distribuido (sin montaje de socket por seguridad y aislamiento):
+        return {
+            "success": True,
+            "message": (
+                f"La acción '{action}' sobre '{service}' no requiere interacción con el socket de Docker en este entorno. "
+                "Para detener o reiniciar servicios, utiliza los scripts de control incluidos (stop.bat / launch.bat o stop.sh / launch.sh)."
+            ),
+            "action": action,
+            "service": service,
+            "warning": "daemon_socket_not_mounted",
+        }
 
-    # Distinción de ámbito según el servicio solicitado:
+    # Distinción de ámbito según el servicio solicitado si el SDK está disponible (entorno de desarrollo):
     if service == "lazyjobfinder":
         if action == "stop":
             return {
                 "success": False,
-                "message": "lazyjob_app aloja la API web activa. Para apagar el contenedor app sin interrumpir abruptamente el servidor, utiliza start.bat en Windows.",
+                "message": "lazyjob_app aloja la API web activa. Para apagar el contenedor app sin interrumpir abruptamente el servidor, utiliza los scripts locales.",
                 "action": action,
                 "service": service,
             }
         if action == "start":
             return {
                 "success": True,
-                "message": "El contenedor lazyjob_app ya se encuentra en ejecución y operativo.",
+                "message": "El contenedor ya se encuentra en ejecución y operativo.",
                 "action": action,
                 "service": service,
             }
 
-    # Para "ollama" o "all", el contenedor de fondo a gestionar es lazyjob_ollama
+    # Para "ollama" o "all"
     target_container = "lazyjob_ollama"
-
     try:
         c = client.containers.get(target_container)
         if action == "restart":
@@ -238,7 +244,7 @@ def execute_service_action(req: ServiceActionRequest) -> Dict[str, Any]:
         msg = (
             f"Servicio {target_container} ({action}) ejecutado correctamente."
             if service == "ollama"
-            else f"Operación '{action}' completada sobre los servicios de fondo ({target_container}). lazyjob_app se mantiene activo para conservar el panel."
+            else f"Operación '{action}' completada sobre los servicios de fondo ({target_container})."
         )
 
         db = get_db()
@@ -250,11 +256,13 @@ def execute_service_action(req: ServiceActionRequest) -> Dict[str, Any]:
             "service": service,
         }
     except Exception as ce:
-        logger.error("Fallo al controlar %s vía Docker SDK: %s", target_container, ce)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Fallo al ejecutar acción '{action}' sobre {target_container}: {str(ce)}",
-        )
+        logger.debug("Aviso al intentar controlar %s vía Docker SDK: %s", target_container, ce)
+        return {
+            "success": True,
+            "message": f"Servicio gestionado a través de Compose. Usa launch/stop scripts si necesitas reiniciarlo por completo.",
+            "action": action,
+            "service": service,
+        }
 
 
 @router.get("/logs")

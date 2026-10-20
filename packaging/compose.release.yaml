@@ -8,15 +8,12 @@
 # - Persistencia de datos, configuración y modelos en la carpeta de instalación
 # =============================================================================
 
-name: lazyjob
-
 services:
   # ---------------------------------------------------------------------------
   # 1. MOTOR DE IA LOCAL (Ollama)
   # ---------------------------------------------------------------------------
   ollama:
-    image: ${OLLAMA_IMAGE:-ollama/ollama:latest}
-    container_name: lazyjob_ollama
+    image: ${OLLAMA_IMAGE:-ollama/ollama:0.5.7}
     restart: unless-stopped
     ports:
       - "127.0.0.1:11434:11434"
@@ -40,7 +37,6 @@ services:
   # ---------------------------------------------------------------------------
   lazyjobfinder:
     image: ${LAZYJOB_IMAGE:-lazyjobfinder:latest}
-    container_name: lazyjob_app
     restart: unless-stopped
     env_file:
       - .env

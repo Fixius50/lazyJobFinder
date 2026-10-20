@@ -103,11 +103,11 @@ if %ERRORLEVEL% neq 0 (
 )
 
 :: 6. Comprobar si el modelo de IA esta presente en Ollama; si no, descargarlo
-docker exec lazyjob_ollama ollama list 2>nul | findstr /i "qwen2.5:3b-instruct" >nul 2>&1
+docker compose exec -T ollama ollama list 2>nul | findstr /i "qwen2.5:3b-instruct" >nul 2>&1
 if %ERRORLEVEL% neq 0 (
     echo.
     echo [i] Descargando modelo de IA optimizado (qwen2.5:3b-instruct) en Ollama...
-    docker exec lazyjob_ollama ollama pull qwen2.5:3b-instruct
+    docker compose exec -T ollama ollama pull qwen2.5:3b-instruct
 )
 
 echo.

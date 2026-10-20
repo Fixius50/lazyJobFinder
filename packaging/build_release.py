@@ -21,14 +21,19 @@ import re
 import shutil
 import subprocess
 import sys
+import tarfile
 import time
 from typing import Dict, List, Optional, Tuple
+import zipfile
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PACKAGING_DIR = os.path.join(ROOT_DIR, "packaging")
 CONFIG_TEMPLATES_DIR = os.path.join(PACKAGING_DIR, "config-templates")
 STAGING_DIR = os.path.join(PACKAGING_DIR, "staging")
 DIST_DIR = os.path.join(ROOT_DIR, "dist")
+
+# Versión fijada de Ollama para reproducibilidad determinista en builds
+OLLAMA_PINNED_VERSION = "0.5.7"
 
 
 def log(msg: str, level: str = "INFO") -> None:
@@ -266,15 +271,23 @@ class ReleaseBuilder:
         if ret != 0:
             raise RuntimeError("Fallo crítico al construir la imagen Docker aislada de lazyjobfinder.")
 
-        log("Asegurando presencia de la imagen oficial de Ollama (linux/amd64)...", "INFO")
-        ret_pull = subprocess.call(["docker", "pull", "--platform", "linux/amd64", "ollama/ollama:latest"])
+        ollama_pinned_tag = f"ollama/ollama:{OLLAMA_PINNED_VERSION}"
+        log(f"Asegurando presencia de la imagen oficial de Ollama ({ollama_pinned_tag}, linux/amd64)...", "INFO")
+        ret_pull = subprocess.call(["docker", "pull", "--platform", "linux/amd64", ollama_pinned_tag])
         if ret_pull != 0:
-            raise RuntimeError("Fallo crítico al descargar la imagen base de ollama/ollama:latest.")
+            raise RuntimeError(f"Fallo crítico al descargar la imagen base de {ollama_pinned_tag}.")
+
+        # Etiquetar también como :latest para máxima compatibilidad
+        subprocess.call(["docker", "tag", ollama_pinned_tag, "ollama/ollama:latest"])
 
         # 2. Exportación de imágenes a images.tar en staging
         images_tar = os.path.join(STAGING_DIR, "images.tar")
         log(f"Exportando imágenes base a {images_tar}...", "INFO")
-        save_cmd = ["docker", "save", "-o", images_tar, app_tag, "lazyjobfinder:latest", "ollama/ollama:latest"]
+        save_cmd = [
+            "docker", "save", "-o", images_tar,
+            app_tag, "lazyjobfinder:latest",
+            ollama_pinned_tag, "ollama/ollama:latest",
+        ]
         ret = subprocess.call(save_cmd)
         if ret != 0 or not os.path.exists(images_tar) or os.path.getsize(images_tar) < 1024 * 1024:
             raise RuntimeError("Fallo crítico: no se pudo exportar images.tar con las imágenes de lazyjobfinder y Ollama.")
@@ -296,11 +309,14 @@ class ReleaseBuilder:
         log("Iniciando empaquetado aislado del modelo de IA (qwen2.5:3b-instruct)...", "INFO")
         model_tar = os.path.join(STAGING_DIR, "ollama_model.tar.gz")
         ephemeral_volume = f"lazyjob_export_model_{int(time.time())}"
+        container_name = None
+        volume_created = False
 
         try:
             # 1. Crear volumen aislado y limpio
             log(f"Creando volumen temporal limpio '{ephemeral_volume}' para descarga aislada...", "INFO")
             subprocess.run(["docker", "volume", "create", ephemeral_volume], check=True)
+            volume_created = True
 
             # 2. Iniciar servidor Ollama temporal en segundo plano sobre el volumen limpio
             container_name = f"lazyjob_model_puller_{int(time.time())}"
@@ -308,7 +324,7 @@ class ReleaseBuilder:
                 "docker", "run", "-d",
                 "--name", container_name,
                 "-v", f"{ephemeral_volume}:/root/.ollama",
-                "ollama/ollama:latest",
+                f"ollama/ollama:{OLLAMA_PINNED_VERSION}",
                 "serve",
             ]
             run_res = subprocess.run(run_server_cmd, capture_output=True, text=True)
@@ -348,6 +364,7 @@ class ReleaseBuilder:
             # 5. Detener el contenedor de servicio para volcar los datos a salvo
             subprocess.run(["docker", "stop", "-t", "5", container_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             subprocess.run(["docker", "rm", "-f", container_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            container_name = None
 
             # 6. Exportar los datos usando la imagen de ollama (que ya incluye tar) para no depender de alpine
             log(f"Exportando datos limpios del modelo a {model_tar}...", "INFO")
@@ -356,12 +373,12 @@ class ReleaseBuilder:
                 "-v", f"{ephemeral_volume}:/source_ollama:ro",
                 "-v", f"{STAGING_DIR}:/backup",
                 "--entrypoint", "/bin/sh",
-                "ollama/ollama:latest",
+                f"ollama/ollama:{OLLAMA_PINNED_VERSION}",
                 "-c",
                 "tar czf /backup/ollama_model.tar.gz -C /source_ollama .",
             ]
             exp_ret = subprocess.call(export_cmd)
-            if exp_ret != 0 or not os.path.exists(model_tar) or os.path.getsize(model_tar) < 50 * 1024 * 1024:
+            if exp_ret != 0 or not os.path.exists(model_tar) or os.path.getsize(model_tar) < 500 * 1024 * 1024:
                 raise RuntimeError(
                     "Fallo al comprimir ollama_model.tar.gz o el tamaño del modelo es sospechosamente pequeño."
                 )
@@ -371,9 +388,12 @@ class ReleaseBuilder:
             log(f"Modelo IA empaquetado con éxito: ollama_model.tar.gz ({size_mb:.1f} MB).", "SUCCESS")
 
         finally:
-            # Limpiar contenedores y volumen efímero
-            subprocess.run(["docker", "rm", "-f", container_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            subprocess.run(["docker", "volume", "rm", "-f", ephemeral_volume], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            # Limpiar contenedor si quedó instanciado
+            if container_name:
+                subprocess.run(["docker", "rm", "-f", container_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            # Limpiar volumen efímero solo si se creó
+            if volume_created:
+                subprocess.run(["docker", "volume", "rm", "-f", ephemeral_volume], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     def build_windows_distribution(self) -> List[str]:
         """Genera el paquete portable ZIP y compila el instalador .EXE con Inno Setup si está disponible."""
@@ -524,22 +544,80 @@ class ReleaseBuilder:
         log(f"Sumas de comprobación guardadas en: {sums_path}", "SUCCESS")
 
     def audit_final_artifacts(self, artifacts: List[str]) -> None:
-        """Audita el inventario final de artefactos antes de dar por buena la release."""
-        log("Ejecutando auditoría final de integridad e inventario sobre artefactos generados...", "INFO")
+        """
+        Audita exhaustivamente el contenido interno de cada artefacto generado (ZIP, TAR.GZ, RUN).
+        Verifica:
+        1. Que contenga explícitamente images.tar y ollama_model.tar.gz en distribución completa.
+        2. Que no contenga archivos personales, bases de datos (.db, .sqlite) ni credenciales.
+        3. Que el peso total sea coherente (> 1.2 GB para paquete completo).
+        Cualquier anomalía aborta de forma bloqueante la publicación.
+        """
+        log("Ejecutando auditoría profunda de integridad, seguridad e inventario sobre artefactos finales...", "INFO")
         if not artifacts:
             raise RuntimeError("Auditoría final fallida: No se generó ningún artefacto en dist/.")
 
-        # Si no se especificó --skip-docker ni --skip-model, verificar que los artefactos contengan peso de distribución completa
-        if not self.skip_docker and not self.skip_model:
-            for art in artifacts:
-                # Un paquete completo con imágenes y modelo debe pesar al menos 1.5 GB
-                size_mb = os.path.getsize(art) / (1024 * 1024)
-                if size_mb < 200:
+        forbidden_names = [".env", "lazyjobfinder.db", "active_cv.json", "secrets.json", "cv_base.md"]
+
+        for art in artifacts:
+            filename = os.path.basename(art)
+            size_mb = os.path.getsize(art) / (1024 * 1024)
+            log(f"  -> Inspeccionando artefacto: {filename} ({size_mb:.1f} MB)...", "INFO")
+
+            member_names = []
+
+            # Inspección interna según el tipo de archivo comprimido
+            if filename.endswith(".zip"):
+                with zipfile.ZipFile(art, "r") as zf:
+                    member_names = zf.namelist()
+            elif filename.endswith(".tar.gz"):
+                with tarfile.open(art, "r:gz") as tf:
+                    member_names = tf.getnames()
+            elif filename.endswith(".run"):
+                # En el instalador .run autoextraíble, el payload tar.gz está tras el marcador
+                with open(art, "rb") as rf:
+                    content = rf.read()
+                marker = b"__ARCHIVE_STARTS_HERE__\n"
+                pos = content.find(marker)
+                if pos == -1:
+                    raise RuntimeError(f"El instalador .run '{filename}' no contiene el marcador de archivo.")
+                tar_bytes = content[pos + len(marker):]
+                import io
+                with tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r:gz") as tf:
+                    member_names = tf.getnames()
+
+            # Normalizar rutas internas
+            normalized_names = [os.path.normpath(m).replace("\\", "/") for m in member_names]
+
+            # 1. Comprobación de archivos prohibidos dentro del paquete
+            for norm_name in normalized_names:
+                base_m = os.path.basename(norm_name)
+                for f_bad in forbidden_names:
+                    if base_m.lower() == f_bad.lower():
+                        raise RuntimeError(
+                            f"AUDITORÍA FINAL BLOQUEADA: El paquete '{filename}' contiene el archivo confidencial/prohibido: '{norm_name}'."
+                        )
+
+            # 2. Si es distribución completa (sin --skip-docker y sin --skip-model), verificar presencia obligatoria
+            if not self.skip_docker and not self.skip_model and member_names:
+                has_images = any(m.endswith("images.tar") for m in normalized_names)
+                has_model = any(m.endswith("ollama_model.tar.gz") for m in normalized_names)
+
+                if not has_images:
                     raise RuntimeError(
-                        f"Auditoría final fallida: El artefacto '{os.path.basename(art)}' pesa solo {size_mb:.1f} MB. "
-                        "Para distribución completa se requiere la inclusión de images.tar y ollama_model.tar.gz."
+                        f"AUDITORÍA FINAL FALLIDA: El paquete '{filename}' no contiene 'images.tar'."
                     )
-        log("Auditoría final de artefactos superada con éxito.", "SUCCESS")
+                if not has_model:
+                    raise RuntimeError(
+                        f"AUDITORÍA FINAL FALLIDA: El paquete '{filename}' no contiene 'ollama_model.tar.gz'."
+                    )
+
+                if size_mb < 1200:
+                    raise RuntimeError(
+                        f"AUDITORÍA FINAL FALLIDA: El artefacto '{filename}' pesa solo {size_mb:.1f} MB. "
+                        "Un paquete completo con imágenes y modelo debe superar 1.2 GB."
+                    )
+
+        log("Auditoría final de seguridad e integridad superada con éxito en todos los artefactos.", "SUCCESS")
 
     def run(self, platforms_target: str = "all") -> None:
         start_time = time.time()

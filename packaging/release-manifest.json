@@ -1,0 +1,46 @@
+{
+  "name": "lazyJobFinder",
+  "version": "1.0.0",
+  "description": "Buscador autónomo, local y gratuito de ofertas de empleo con IA y Telegram",
+  "author": "Roberto (Fixius50)",
+  "license": "MIT",
+  "platforms": {
+    "windows": {
+      "arch": "x64",
+      "os": "Windows 10 / 11 (64-bit)",
+      "target_file": "lazyJobFinder-1.0.0-windows-x64.exe",
+      "portable_archive": "lazyJobFinder-1.0.0-windows-x64.zip",
+      "requirements": [
+        "Docker Desktop para Windows (con motor WSL2)",
+        "Mínimo 4 GB de RAM disponibles para contenedores",
+        "Mínimo 8 GB de espacio libre en disco (imágenes y modelo de IA)"
+      ]
+    },
+    "linux": {
+      "arch": "x64",
+      "os": "Ubuntu 20.04+, Debian 11+, Fedora 36+, Arch Linux",
+      "target_file": "lazyJobFinder-1.0.0-linux-x64.run",
+      "archive": "lazyJobFinder-1.0.0-linux-x64.tar.gz",
+      "requirements": [
+        "Docker Engine >= 20.10 y Docker Compose Plugin v2",
+        "Usuario añadido al grupo docker ('sudo usermod -aG docker $USER')",
+        "Mínimo 4 GB de RAM y 8 GB de espacio libre en disco"
+      ]
+    }
+  },
+  "components": {
+    "app_image": "lazyjobfinder:1.0.0",
+    "ollama_image": "ollama/ollama:latest",
+    "ai_model": "qwen2.5:3b-instruct",
+    "web_port": 8000,
+    "ollama_port": 11434,
+    "database": "SQLite local (data/lazyjobfinder.db)"
+  },
+  "ports_binding": "127.0.0.1",
+  "security_guarantees": [
+    "100% de inferencia IA en local sin envío de currículums a servicios externos",
+    "Puertos enlazados estrictamente a localhost (127.0.0.1) para evitar exposición en redes locales o públicas",
+    "Cero telemetría externa o rastreadores",
+    "Persistencia de datos y credenciales en carpetas locales protegidas del usuario"
+  ]
+}

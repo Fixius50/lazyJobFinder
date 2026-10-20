@@ -22,9 +22,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copiar el código fuente y las configuraciones base
+# Copiar el código fuente, las configuraciones base y el frontend compilado
 COPY src/ /app/src/
 COPY config/ /app/config/
+COPY web/out/ /app/web/out/
 
 # Crear directorios para persistencia de datos y documentos
 RUN mkdir -p /app/data/documents

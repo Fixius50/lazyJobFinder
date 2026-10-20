@@ -36,3 +36,8 @@ data/active_cv.json
 .idea/
 .vscode/
 *.swp
+
+# Empaquetado y artefactos de distribución
+dist/
+packaging/staging/
+

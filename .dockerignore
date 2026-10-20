@@ -1,0 +1,39 @@
+# Directorios de control de versiones
+.git
+.gitignore
+.github
+
+# Entornos virtuales y caché de Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.coverage
+htmlcov
+.venv
+venv
+env
+
+# Datos locales, base de datos y secretos privados
+data/
+*.db
+*.sqlite
+*.sqlite3
+.env
+data/secrets.json
+data/active_cv.json
+data/uploaded_cvs/
+data/documents/
+
+# Node.js y dependencias del frontend (solo se incluye web/out)
+web/node_modules/
+web/.next/
+web/.env*
+
+# Directorios de empaquetado y artefactos generados
+dist/
+packaging/staging/
+packaging/build/
+*.log
+scratch/

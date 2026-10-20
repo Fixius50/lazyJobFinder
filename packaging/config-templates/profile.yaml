@@ -1,0 +1,68 @@
+# =============================================================================
+# Perfil Profesional Canónico (Plantilla Genérica de Distribución)
+# =============================================================================
+# Este archivo define la base de conocimientos y experiencia que la IA utilizará
+# para evaluar vacantes y redactar cartas de presentación personalizadas.
+# Rellena los datos con tu información real antes de activar el filtrado por perfil.
+
+candidato:
+  nombre_completo: "Candidato / Desarrollador"
+  titulo_profesional: "Desarrollador de Software Junior"
+  email: "tu_email@ejemplo.com"
+  telefono: "+34 600 000 000"
+  ciudad: "España"
+  linkedin: "https://www.linkedin.com/in/tu-perfil"
+  github: "https://github.com/tu-usuario"
+  disponibilidad: "Inmediata"
+  modalidades_preferidas:
+    - "Remoto"
+    - "Híbrido"
+    - "Presencial"
+
+resumen_base: >
+  Profesional de desarrollo de software con sólida base en programación orientada a objetos,
+  bases de datos y creación de aplicaciones web. Proactivo, enfocado en buenas prácticas y
+  con motivación constante para aportar valor en proyectos tecnológicos y aprender nuevas tecnologías.
+
+formacion:
+  - titulo: "Grado en Informática / Ciclo Formativo DAM / DAW"
+    institucion: "Universidad o Centro Oficial de Formación Profesional"
+    ubicacion: "España"
+    fecha_fin: "2024"
+    modulos_destacados:
+      - "Programación Orientada a Objetos"
+      - "Bases de Datos Relacionales (SQL)"
+      - "Desarrollo de Aplicaciones Web"
+      - "Estructuras de Datos y Algoritmos"
+
+competencias_tecnicas:
+  lenguajes:
+    - nombre: "Java"
+      nivel: "Intermedio"
+      conceptos: ["POO", "Colecciones", "Excepciones", "APIs"]
+    - nombre: "JavaScript"
+      nivel: "Intermedio"
+      conceptos: ["ES6+", "DOM", "Fetch", "Async/Await"]
+    - nombre: "Python"
+      nivel: "Básico - Intermedio"
+      conceptos: ["Scripts", "Automatización", "FastAPI"]
+    - nombre: "SQL"
+      nivel: "Intermedio"
+      conceptos: ["Consultas", "Joins", "CRUD", "Relaciones"]
+
+  bases_de_datos:
+    - "PostgreSQL"
+    - "MySQL"
+    - "SQLite"
+
+  frameworks_y_herramientas:
+    - "Git / GitHub"
+    - "Docker"
+    - "Node.js"
+    - "Linux básico"
+
+proyectos:
+  - nombre: "Proyecto Web Personal"
+    descripcion: "Aplicación web completa con autenticación, persistencia de datos y API REST."
+    tecnologias: ["JavaScript", "Python", "SQL"]
+    enlace: "https://github.com/tu-usuario/proyecto-demo"

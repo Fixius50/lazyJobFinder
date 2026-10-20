@@ -10,11 +10,29 @@ echo          Inferencia IA Local y Privada (Sin Coste / Sin Nube)
 echo =====================================================================
 echo.
 
-:: 1. Comprobar .env
+:: 1. Comprobar .env y garantizar COMPOSE_PROJECT_NAME
 if not exist ".env" (
     if exist ".env.example" (
         copy ".env.example" ".env" >nul
-        echo [i] Archivo .env inicializado con exito.
+        set "RAND_SUFFIX=%RANDOM%%TIME:~6,2%"
+        echo.>>".env"
+        echo # Identificador unico de instalacion para aislamiento Docker Compose>>".env"
+        echo COMPOSE_PROJECT_NAME=lazyjob_!RAND_SUFFIX!>>".env"
+        echo [i] Archivo .env inicializado con proyecto unico (lazyjob_!RAND_SUFFIX!).
+    ) else (
+        echo [ERROR] No se encontro el archivo .env ni .env.example.
+        pause
+        exit /b 1
+    )
+) else (
+    :: Verificar que .env contenga COMPOSE_PROJECT_NAME no vacio
+    findstr /r /c:"^COMPOSE_PROJECT_NAME=" ".env" >nul 2>&1
+    if !ERRORLEVEL! neq 0 (
+        set "RAND_SUFFIX=%RANDOM%%TIME:~6,2%"
+        echo.>>".env"
+        echo # Identificador unico de instalacion para aislamiento Docker Compose>>".env"
+        echo COMPOSE_PROJECT_NAME=lazyjob_!RAND_SUFFIX!>>".env"
+        echo [i] Variable COMPOSE_PROJECT_NAME incorporada a .env existente.
     )
 )
 
@@ -62,17 +80,31 @@ if %ERRORLEVEL% neq 0 (
     )
 )
 
-:: 3. Si existe images.tar y las imagenes no estan cargadas, importarlas
-docker image inspect ollama/ollama:latest >nul 2>&1
+:: 3. Verificar imagenes en Docker (ollama/ollama:0.5.7 y lazyjobfinder)
+set "NEED_LOAD=0"
+docker image inspect ollama/ollama:0.5.7 >nul 2>&1
 if %ERRORLEVEL% neq 0 (
+    docker image inspect ollama/ollama:latest >nul 2>&1
+    if !ERRORLEVEL! neq 0 set "NEED_LOAD=1"
+)
+docker image inspect lazyjobfinder:latest >nul 2>&1
+if %ERRORLEVEL% neq 0 set "NEED_LOAD=1"
+
+if "!NEED_LOAD!"=="1" (
     if exist "images.tar" (
         echo [i] Importando imagenes de contenedores empaquetadas (lazyJobFinder y Ollama)...
         docker load -i "images.tar"
-        if %ERRORLEVEL% neq 0 (
+        if !ERRORLEVEL! neq 0 (
             echo [ERROR] No se pudieron cargar las imagenes de images.tar.
             pause
             exit /b 1
         )
+        echo [OK] Imagenes importadas con exito.
+    ) else (
+        echo [ERROR] No se encontraron las imagenes requeridas en Docker ni existe 'images.tar'.
+        echo         Revisa la instalacion o ejecuta install.bat.
+        pause
+        exit /b 1
     )
 )
 
@@ -82,7 +114,7 @@ echo --^> Levantando servicios en Docker...
 docker compose up -d
 if %ERRORLEVEL% neq 0 (
     echo.
-    echo [ERROR] Fallo al iniciar los contenedores de Docker.
+    echo [ERROR] Fallo al iniciar los contenedores de Docker con Compose.
     pause
     exit /b 1
 )
@@ -91,10 +123,15 @@ if %ERRORLEVEL% neq 0 (
 echo.
 echo --^> Conectando con la interfaz local...
 set /a RETRY_COUNT=0
+set "APP_ONLINE=0"
+
 :WAIT_APP
 timeout /t 2 /nobreak >nul
 curl -s -f --connect-timeout 2 --max-time 3 http://127.0.0.1:8000/api/health >nul 2>&1
-if %ERRORLEVEL% neq 0 (
+if %ERRORLEVEL% equ 0 (
+    set "APP_ONLINE=1"
+    goto :APP_READY
+) else (
     set /a RETRY_COUNT+=1
     if !RETRY_COUNT! lss 30 (
         echo     Iniciando motor de busqueda y API... [!RETRY_COUNT!/30]
@@ -102,12 +139,37 @@ if %ERRORLEVEL% neq 0 (
     )
 )
 
-:: 6. Comprobar si el modelo de IA esta presente en Ollama; si no, descargarlo
+:APP_READY
+if "!APP_ONLINE!" neq "1" (
+    echo.
+    echo [ERROR] La API de lazyJobFinder no respondio tras 60 segundos de espera.
+    echo         Los servicios no estan operativos. Revisa los logs con: docker compose logs
+    pause
+    exit /b 1
+)
+
+:: 6. Comprobar si el modelo de IA esta presente en Ollama; si no, descargarlo y verificar
+echo --^> Verificando modelo de inferencia IA en Ollama...
 docker compose exec -T ollama ollama list 2>nul | findstr /i "qwen2.5:3b-instruct" >nul 2>&1
 if %ERRORLEVEL% neq 0 (
     echo.
     echo [i] Descargando modelo de IA optimizado (qwen2.5:3b-instruct) en Ollama...
     docker compose exec -T ollama ollama pull qwen2.5:3b-instruct
+    if !ERRORLEVEL! neq 0 (
+        echo.
+        echo [ERROR] Fallo critico durante la descarga del modelo en Ollama.
+        echo         El sistema no puede operar sin el modelo IA.
+        pause
+        exit /b 1
+    )
+)
+
+:: Doble comprobacion final del modelo
+docker compose exec -T ollama ollama list 2>nul | findstr /i "qwen2.5:3b-instruct" >nul 2>&1
+if %ERRORLEVEL% neq 0 (
+    echo [ERROR] El modelo de IA qwen2.5:3b-instruct no se encuentra disponible en Ollama.
+    pause
+    exit /b 1
 )
 
 echo.

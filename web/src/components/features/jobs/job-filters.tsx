@@ -53,6 +53,7 @@ export function JobFilters({
     if (score >= 75) return "text-emerald-400 bg-emerald-500/10 border-emerald-500/20";
     if (score >= 50) return "text-blue-400 bg-blue-500/10 border-blue-500/20";
     if (score >= 25) return "text-amber-400 bg-amber-500/10 border-amber-500/20";
+    if (score > 0) return "text-orange-400 bg-orange-500/10 border-orange-500/20";
     return "text-muted-foreground bg-muted border-border/50";
   };
 
@@ -61,6 +62,7 @@ export function JobFilters({
     if (score >= 75) return `≥ ${score}% · Óptima`;
     if (score >= 50) return `≥ ${score}% · Posible`;
     if (score >= 25) return `≥ ${score}% · Poco probable`;
+    if (score > 0) return `≥ ${score}% · Cualquiera`;
     return "≥ 0% · Cualquiera";
   };
 

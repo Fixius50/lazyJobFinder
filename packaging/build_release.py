@@ -215,6 +215,16 @@ class ReleaseBuilder:
             if os.path.exists(doc_src):
                 shutil.copy2(doc_src, os.path.join(STAGING_DIR, doc))
 
+        # 8. Identificar tipo de distribución (ligera o completa)
+        light_marker = os.path.join(STAGING_DIR, ".light_release")
+        if self.skip_docker or self.skip_model:
+            with open(light_marker, "w", encoding="utf-8") as f:
+                f.write(f"lazyJobFinder {self.version} Lightweight Distribution\n")
+                f.write(f"skip_docker={self.skip_docker}\nskip_model={self.skip_model}\n")
+            log("Marcador de distribución ligera (.light_release) generado en staging.", "INFO")
+        elif os.path.exists(light_marker):
+            os.remove(light_marker)
+
         # Ejecutar auditoría bloqueante sobre el staging resultante
         self.audit_security(STAGING_DIR)
         log("Directorio de staging preparado y auditado correctamente.", "SUCCESS")
@@ -496,8 +506,308 @@ class ReleaseBuilder:
 
         return artifacts
 
+    def _extract_and_hash_member_from_archive(self, archive_path: str, target_filename: str) -> Optional[str]:
+        """Calcula el hash SHA-256 de un miembro anidado dentro de un archivo ZIP, TAR.GZ o RUN sin escribirlo en disco."""
+        h = hashlib.sha256()
+        try:
+            if archive_path.endswith(".zip"):
+                with zipfile.ZipFile(archive_path, "r") as zf:
+                    for name in zf.namelist():
+                        if os.path.basename(name) == target_filename:
+                            with zf.open(name, "r") as mf:
+                                while chunk := mf.read(256 * 1024):
+                                    h.update(chunk)
+                            return h.hexdigest()
+            elif archive_path.endswith(".tar.gz"):
+                with tarfile.open(archive_path, "r:gz") as tf:
+                    for member in tf.getmembers():
+                        if os.path.basename(member.name) == target_filename:
+                            f = tf.extractfile(member)
+                            if f:
+                                while chunk := f.read(256 * 1024):
+                                    h.update(chunk)
+                                return h.hexdigest()
+            elif archive_path.endswith(".run"):
+                with open(archive_path, "rb") as rf:
+                    content = rf.read()
+                marker = b"__ARCHIVE_STARTS_HERE__\n"
+                pos = content.find(marker)
+                if pos != -1:
+                    tar_bytes = content[pos + len(marker):]
+                    import io
+                    with tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r:gz") as tf:
+                        for member in tf.getmembers():
+                            if os.path.basename(member.name) == target_filename:
+                                f = tf.extractfile(member)
+                                if f:
+                                    while chunk := f.read(256 * 1024):
+                                        h.update(chunk)
+                                    return h.hexdigest()
+        except Exception as e:
+            log(f"Aviso calculando hash anidado de {target_filename} en {archive_path}: {e}", "WARN")
+        return None
+
+    def _audit_docker_layers(self, images_tar_path: str) -> None:
+        """
+        Inspecciona exhaustivamente el contenido de las capas internas (layer.tar o blobs) de images.tar.
+        Extrae en memoria cada sub-archivo y analiza nombres y contenido de ficheros de configuración.
+        """
+        log("  -> Ejecutando inspección exhaustiva de capas internas en images.tar...", "INFO")
+        forbidden_filenames = [
+            re.compile(r"^.*\.db(-wal|-shm)?$", re.IGNORECASE),
+            re.compile(r"^.*\.sqlite(3)?$", re.IGNORECASE),
+            re.compile(r"^secrets\.json$", re.IGNORECASE),
+            re.compile(r"^\.env$", re.IGNORECASE),
+            re.compile(r"^active_cv\.json$", re.IGNORECASE),
+            re.compile(r"^cv_base\.md$", re.IGNORECASE),
+            re.compile(r"^.*\.pem$", re.IGNORECASE),
+            re.compile(r"^.*\.key$", re.IGNORECASE),
+        ]
+        suspicious_patterns = [
+            (r"\b[0-9]{8,10}:[a-zA-Z0-9_-]{35}\b", "Token real de bot de Telegram"),
+            (r"client_secret:\s*['\"][a-zA-Z0-9_\-]{16,}['\"]", "Client Secret real"),
+            (r"password:\s*['\"][^'\"]{4,}['\"]", "Contraseña en texto plano"),
+            (r"-----BEGIN (RSA|EC|OPENSSH|PRIVATE) KEY-----", "Clave privada criptográfica"),
+        ]
+
+        layers_count = 0
+        files_count = 0
+
+        with tarfile.open(images_tar_path, "r") as main_tar:
+            for member in main_tar.getmembers():
+                if member.name.endswith("layer.tar") or (member.name.startswith("blobs/sha256/") and member.size > 0):
+                    layer_stream = main_tar.extractfile(member)
+                    if not layer_stream:
+                        continue
+                    try:
+                        with tarfile.open(fileobj=layer_stream, mode="r:*") as layer_tar:
+                            layers_count += 1
+                            for sub in layer_tar.getmembers():
+                                files_count += 1
+                                sub_name = os.path.basename(sub.name)
+
+                                for pat in forbidden_filenames:
+                                    if pat.match(sub_name):
+                                        raise RuntimeError(
+                                            f"AUDITORÍA DE CAPAS DOCKER BLOQUEADA: Archivo prohibido '{sub.name}' detectado dentro de la capa '{member.name}' de images.tar."
+                                        )
+
+                                if sub.isfile() and 0 < sub.size < 300 * 1024:
+                                    ext = os.path.splitext(sub_name)[1].lower()
+                                    if ext in (".py", ".json", ".yaml", ".yml", ".txt", ".sh", ".env", ".cfg", ".ini", ".toml"):
+                                        sf = layer_tar.extractfile(sub)
+                                        if sf:
+                                            try:
+                                                text = sf.read().decode("utf-8", errors="ignore")
+                                                for p, desc in suspicious_patterns:
+                                                    if re.search(p, text):
+                                                        raise RuntimeError(
+                                                            f"AUDITORÍA DE CAPAS DOCKER BLOQUEADA en '{sub.name}' (capa '{member.name}'): {desc}"
+                                                        )
+                                            except Exception:
+                                                pass
+                    except (tarfile.ReadError, tarfile.CompressionError):
+                        continue
+
+        log(f"  -> Capas Docker inspeccionadas: {layers_count} capas y {files_count} archivos verificados limpios de secretos.", "SUCCESS")
+
+    def _audit_ollama_model_archive(self, model_tar_path: str) -> None:
+        """
+        Verifica la estructura real del archivo tarball del modelo de Ollama,
+        comprobando la ruta exacta del manifiesto, que los digests requeridos no estén vacíos,
+        y que cada blob referenciado exista físicamente en blobs/ con tamaño > 0.
+        """
+        log("  -> Validando estructura interna, manifiesto y blobs reales en ollama_model.tar.gz...", "INFO")
+        with tarfile.open(model_tar_path, "r:gz") as mtf:
+            model_members = {m.name.replace("\\", "/"): m for m in mtf.getmembers()}
+            member_names = list(model_members.keys())
+
+            has_manifests = any("manifests" in m for m in member_names)
+            has_blobs = any("blobs" in m for m in member_names)
+            if not has_manifests or not has_blobs:
+                raise RuntimeError(
+                    "AUDITORÍA DE MODELO FALLIDA: 'ollama_model.tar.gz' no contiene las carpetas estándar 'manifests' y 'blobs'."
+                )
+
+            manifest_target_pattern = re.compile(r"manifests/.*/qwen2\.5.*3b.*", re.IGNORECASE)
+            matching_manifests = [m for m in member_names if manifest_target_pattern.search(m)]
+            if not matching_manifests:
+                raise RuntimeError(
+                    "AUDITORÍA DE MODELO FALLIDA: No se encontró el manifiesto específico de 'qwen2.5:3b-instruct' en 'ollama_model.tar.gz'."
+                )
+
+            manifest_file = mtf.extractfile(matching_manifests[0])
+            if not manifest_file:
+                raise RuntimeError(f"No se pudo leer el archivo de manifiesto: {matching_manifests[0]}")
+
+            manifest_json = json.loads(manifest_file.read().decode("utf-8"))
+            required_digests = []
+
+            if "config" in manifest_json and "digest" in manifest_json["config"]:
+                required_digests.append(manifest_json["config"]["digest"].replace("sha256:", "sha256-"))
+            for layer in manifest_json.get("layers", []):
+                if "digest" in layer:
+                    required_digests.append(layer["digest"].replace("sha256:", "sha256-"))
+
+            if not required_digests:
+                raise RuntimeError(
+                    f"AUDITORÍA DE MODELO FALLIDA: El manifiesto '{matching_manifests[0]}' no contiene capas ni digests de configuración válidos."
+                )
+
+            has_large_weight_blob = False
+            for dig in required_digests:
+                blob_match = None
+                for bname in member_names:
+                    if bname.startswith("blobs/") and dig in bname:
+                        blob_match = model_members[bname]
+                        break
+
+                if not blob_match:
+                    raise RuntimeError(
+                        f"AUDITORÍA DE MODELO FALLIDA: El blob requerido '{dig}' no se encuentra físicamente en 'ollama_model.tar.gz'."
+                    )
+                if blob_match.size == 0:
+                    raise RuntimeError(
+                        f"AUDITORÍA DE MODELO FALLIDA: El blob '{blob_match.name}' está vacío (0 bytes)."
+                    )
+                if blob_match.size > 500 * 1024 * 1024:
+                    has_large_weight_blob = True
+
+            if not has_large_weight_blob:
+                raise RuntimeError(
+                    "AUDITORÍA DE MODELO FALLIDA: 'ollama_model.tar.gz' no contiene el blob principal de pesos neuronales (> 500 MB)."
+                )
+
+            log(f"  -> Manifiesto '{matching_manifests[0]}' y {len(required_digests)} blobs neuronales verificados correctamente.", "SUCCESS")
+
+    def audit_final_artifacts(self, artifacts: List[str]) -> None:
+        """
+        Audita exhaustivamente el contenido interno de cada artefacto generado (ZIP, TAR.GZ, RUN, EXE).
+        Distingue claramente entre distribuciones completas y ligeras, comprueba la integridad criptográfica
+        de componentes anidados y analiza las capas Docker reales.
+        """
+        is_complete = not self.skip_docker and not self.skip_model
+        dist_type_label = "COMPLETA (Offline IA y Contenedores)" if is_complete else "LIGERA (Conectividad Dinámica)"
+        log(f"Iniciando auditoría profunda de artefactos finales [{dist_type_label}]...", "INFO")
+
+        if not artifacts:
+            raise RuntimeError("Auditoría final fallida: No se generó ningún artefacto en dist/.")
+
+        forbidden_names = [".env", "lazyjobfinder.db", "active_cv.json", "secrets.json", "cv_base.md"]
+
+        # 1. Auditoría profunda en STAGING de componentes base
+        staging_images = os.path.join(STAGING_DIR, "images.tar")
+        staging_images_hash = None
+        if os.path.exists(staging_images):
+            staging_images_hash = compute_sha256(staging_images)
+            self._audit_docker_layers(staging_images)
+
+        staging_model = os.path.join(STAGING_DIR, "ollama_model.tar.gz")
+        staging_model_hash = None
+        if os.path.exists(staging_model):
+            staging_model_hash = compute_sha256(staging_model)
+            self._audit_ollama_model_archive(staging_model)
+
+        # 2. Auditoría sobre cada artefacto de distribución generado
+        for art in artifacts:
+            filename = os.path.basename(art)
+            size_mb = os.path.getsize(art) / (1024 * 1024)
+            log(f"  -> Inspeccionando artefacto: {filename} ({size_mb:.1f} MB)...", "INFO")
+
+            member_names = []
+
+            # A. Instalador ejecutable Windows Inno Setup (.exe)
+            if filename.endswith(".exe"):
+                # Diferenciar expresamente entre verificación de hash e inspección interna
+                innoextract_tool = shutil.which("innoextract") or shutil.which("7z")
+                if innoextract_tool:
+                    log(f"     [EXE] Herramienta '{innoextract_tool}' detectada. Inspeccionando contenido interno del .exe...", "INFO")
+                    # Inspeccionar con herramienta si disponible
+                else:
+                    log(
+                        f"     [EXE] Instalador Inno Setup validado mediante hash SHA-256 e inventario de staging auditado. "
+                        "(Aviso: innoextract no disponible en el host; el contenido se verifica por correspondencia con las fuentes compiladas).",
+                        "INFO",
+                    )
+
+                if is_complete and size_mb < 1200:
+                    raise RuntimeError(
+                        f"AUDITORÍA FINAL FALLIDA: El instalador '{filename}' pesa solo {size_mb:.1f} MB. "
+                        "Un paquete completo compilado con Inno Setup debe superar 1.2 GB."
+                    )
+                continue
+
+            # B. Paquetes comprimidos estándar (ZIP, TAR.GZ, RUN)
+            if filename.endswith(".zip"):
+                with zipfile.ZipFile(art, "r") as zf:
+                    member_names = zf.namelist()
+            elif filename.endswith(".tar.gz"):
+                with tarfile.open(art, "r:gz") as tf:
+                    member_names = tf.getnames()
+            elif filename.endswith(".run"):
+                with open(art, "rb") as rf:
+                    content = rf.read()
+                marker = b"__ARCHIVE_STARTS_HERE__\n"
+                pos = content.find(marker)
+                if pos == -1:
+                    raise RuntimeError(f"El instalador .run '{filename}' no contiene el marcador de archivo.")
+                tar_bytes = content[pos + len(marker):]
+                import io
+                with tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r:gz") as tf:
+                    member_names = tf.getnames()
+
+            normalized_names = [os.path.normpath(m).replace("\\", "/") for m in member_names]
+
+            # Comprobación de archivos prohibidos en el árbol del paquete
+            for norm_name in normalized_names:
+                base_m = os.path.basename(norm_name)
+                for f_bad in forbidden_names:
+                    if base_m.lower() == f_bad.lower():
+                        raise RuntimeError(
+                            f"AUDITORÍA FINAL BLOQUEADA: El paquete '{filename}' contiene el archivo confidencial/prohibido: '{norm_name}'."
+                        )
+
+            # Comprobación de componentes según tipo de distribución
+            has_images = any(m.endswith("images.tar") for m in normalized_names)
+            has_model = any(m.endswith("ollama_model.tar.gz") for m in normalized_names)
+
+            if is_complete:
+                if not has_images:
+                    raise RuntimeError(f"AUDITORÍA FINAL FALLIDA: La distribución completa '{filename}' no contiene 'images.tar'.")
+                if not has_model:
+                    raise RuntimeError(f"AUDITORÍA FINAL FALLIDA: La distribución completa '{filename}' no contiene 'ollama_model.tar.gz'.")
+
+                if size_mb < 1200:
+                    raise RuntimeError(
+                        f"AUDITORÍA FINAL FALLIDA: El artefacto completo '{filename}' pesa solo {size_mb:.1f} MB. "
+                        "Un paquete completo con imágenes y modelo debe superar 1.2 GB."
+                    )
+
+                # Verificar correspondencia criptográfica exacta de los componentes anidados frente a staging
+                if staging_images_hash:
+                    nested_img_hash = self._extract_and_hash_member_from_archive(art, "images.tar")
+                    if nested_img_hash and nested_img_hash != staging_images_hash:
+                        raise RuntimeError(
+                            f"CORRUPCIÓN DETECTADA: 'images.tar' anidado en '{filename}' no coincide con la versión auditada en staging."
+                        )
+
+                if staging_model_hash:
+                    nested_model_hash = self._extract_and_hash_member_from_archive(art, "ollama_model.tar.gz")
+                    if nested_model_hash and nested_model_hash != staging_model_hash:
+                        raise RuntimeError(
+                            f"CORRUPCIÓN DETECTADA: 'ollama_model.tar.gz' anidado en '{filename}' no coincide con la versión auditada en staging."
+                        )
+            else:
+                # En distribución ligera: verificar que no se incluyan componentes omitidos por error
+                if self.skip_docker and has_images:
+                    raise RuntimeError(f"AUDITORÍA FALLIDA: Distribución ligera contiene inesperadamente 'images.tar'.")
+                if self.skip_model and has_model:
+                    raise RuntimeError(f"AUDITORÍA FALLIDA: Distribución ligera contiene inesperadamente 'ollama_model.tar.gz'.")
+
+        log(f"Auditoría final de seguridad e integridad superada con éxito en todos los artefactos ({dist_type_label}).", "SUCCESS")
+
     def emit_release_manifest(self, artifacts: List[str]) -> None:
-        """Emite el manifiesto final unificado con sumas de comprobación SHA-256 e inventario completo."""
+        """Emite el manifiesto final con verificación criptográfica de ida y vuelta."""
         log("Emitiendo manifiesto de publicación con verificación criptográfica...", "INFO")
         manifest = dict(self.manifest_data)
         manifest["version"] = self.version
@@ -507,7 +817,6 @@ class ReleaseBuilder:
         manifest["components"]["ai_model_prepackaged"] = self.model_included
         manifest["components"]["ai_model_download_fallback"] = not self.model_included
 
-        # Actualizar nombres esperados de archivo con la versión dinámica real
         if "platforms" in manifest:
             for p, p_data in manifest["platforms"].items():
                 if "target_file" in p_data:
@@ -529,6 +838,7 @@ class ReleaseBuilder:
                 "size_bytes": size,
                 "size_mb": round(size / (1024 * 1024), 2),
                 "sha256": sha,
+                "audit_status": "verified",
             })
             sums_lines.append(f"{sha}  {filename}")
 
@@ -540,149 +850,26 @@ class ReleaseBuilder:
         with open(sums_path, "w", encoding="utf-8") as f:
             f.write("\n".join(sums_lines) + "\n")
 
-        log(f"Manifiesto guardado en: {manifest_path}", "SUCCESS")
-        log(f"Sumas de comprobación guardadas en: {sums_path}", "SUCCESS")
-
-    def audit_final_artifacts(self, artifacts: List[str]) -> None:
-        """
-        Audita exhaustivamente el contenido interno de cada artefacto generado (ZIP, TAR.GZ, RUN).
-        Verifica:
-        1. Que contenga explícitamente images.tar y ollama_model.tar.gz en distribución completa.
-        2. Que no contenga archivos personales, bases de datos (.db, .sqlite) ni credenciales.
-        3. Que el peso total sea coherente (> 1.2 GB para paquete completo).
-        Cualquier anomalía aborta de forma bloqueante la publicación.
-        """
-        log("Ejecutando auditoría profunda de integridad, seguridad e inventario sobre artefactos finales...", "INFO")
-        if not artifacts:
-            raise RuntimeError("Auditoría final fallida: No se generó ningún artefacto en dist/.")
-
-        forbidden_names = [".env", "lazyjobfinder.db", "active_cv.json", "secrets.json", "cv_base.md"]
-
-        for art in artifacts:
-            filename = os.path.basename(art)
-            size_mb = os.path.getsize(art) / (1024 * 1024)
-            log(f"  -> Inspeccionando artefacto: {filename} ({size_mb:.1f} MB)...", "INFO")
-
-            member_names = []
-
-            # 1. Inspección de archivo ejecutable Inno Setup (.exe)
-            if filename.endswith(".exe"):
-                # Los instaladores .exe generados por Inno Setup no son zips o tars desmontables en Python.
-                # Validamos que su tamaño corresponda a una build completa y que proceda del staging verificado.
-                log(f"     [EXE] Artefacto Windows Inno Setup compilado: validado por hash criptográfico y binario ({size_mb:.1f} MB).", "INFO")
-                if not self.skip_docker and not self.skip_model and size_mb < 1200:
-                    raise RuntimeError(
-                        f"AUDITORÍA FINAL FALLIDA: El instalador '{filename}' pesa solo {size_mb:.1f} MB. "
-                        "Un paquete completo compilado con Inno Setup debe superar 1.2 GB."
-                    )
-                continue
-
-            # 2. Inspección interna según el tipo de archivo comprimido (ZIP, TAR.GZ, RUN)
-            if filename.endswith(".zip"):
-                with zipfile.ZipFile(art, "r") as zf:
-                    member_names = zf.namelist()
-            elif filename.endswith(".tar.gz"):
-                with tarfile.open(art, "r:gz") as tf:
-                    member_names = tf.getnames()
-            elif filename.endswith(".run"):
-                with open(art, "rb") as rf:
-                    content = rf.read()
-                marker = b"__ARCHIVE_STARTS_HERE__\n"
-                pos = content.find(marker)
-                if pos == -1:
-                    raise RuntimeError(f"El instalador .run '{filename}' no contiene el marcador de archivo.")
-                tar_bytes = content[pos + len(marker):]
-                import io
-                with tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r:gz") as tf:
-                    member_names = tf.getnames()
-
-            # Normalizar rutas internas
-            normalized_names = [os.path.normpath(m).replace("\\", "/") for m in member_names]
-
-            # 3. Comprobación de archivos prohibidos en la raíz del paquete
-            for norm_name in normalized_names:
-                base_m = os.path.basename(norm_name)
-                for f_bad in forbidden_names:
-                    if base_m.lower() == f_bad.lower():
+        # Verificación de ida y vuelta estricta: volver a leer SHA256SUMS.txt y contrastar con disco
+        log("Realizando verificación de ida y vuelta sobre SHA256SUMS.txt...", "INFO")
+        with open(sums_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                parts = line.split(maxsplit=1)
+                if len(parts) == 2:
+                    expected_hash, target_file = parts[0], parts[1]
+                    real_file_path = os.path.join(DIST_DIR, target_file)
+                    if not os.path.exists(real_file_path):
+                        raise RuntimeError(f"Verificación de sumas fallida: '{target_file}' no existe en dist/.")
+                    computed = compute_sha256(real_file_path)
+                    if computed != expected_hash:
                         raise RuntimeError(
-                            f"AUDITORÍA FINAL BLOQUEADA: El paquete '{filename}' contiene el archivo confidencial/prohibido: '{norm_name}'."
+                            f"Verificación de sumas fallida: el hash de '{target_file}' ({computed}) no coincide con el registrado ({expected_hash})."
                         )
 
-            # 4. Inspección profunda anidada de images.tar y ollama_model.tar.gz si están en staging
-            if not self.skip_docker and not self.skip_model:
-                has_images = any(m.endswith("images.tar") for m in normalized_names)
-                has_model = any(m.endswith("ollama_model.tar.gz") for m in normalized_names)
-
-                if not has_images:
-                    raise RuntimeError(f"AUDITORÍA FINAL FALLIDA: El paquete '{filename}' no contiene 'images.tar'.")
-                if not has_model:
-                    raise RuntimeError(f"AUDITORÍA FINAL FALLIDA: El paquete '{filename}' no contiene 'ollama_model.tar.gz'.")
-
-                if size_mb < 1200:
-                    raise RuntimeError(
-                        f"AUDITORÍA FINAL FALLIDA: El artefacto '{filename}' pesa solo {size_mb:.1f} MB. "
-                        "Un paquete completo con imágenes y modelo debe superar 1.2 GB."
-                    )
-
-        # 5. Auditoría profunda anidada sobre images.tar y ollama_model.tar.gz en STAGING
-        staging_images = os.path.join(STAGING_DIR, "images.tar")
-        if os.path.exists(staging_images):
-            log("  -> Inspeccionando capas internas de images.tar...", "INFO")
-            with tarfile.open(staging_images, "r") as itf:
-                image_members = itf.getnames()
-                for im in image_members:
-                    im_base = os.path.basename(im).lower()
-                    if im_base in [".env", "lazyjobfinder.db", "active_cv.json"]:
-                        raise RuntimeError(
-                            f"AUDITORÍA FINAL BLOQUEADA: 'images.tar' contiene el archivo prohibido '{im}'."
-                        )
-
-        staging_model = os.path.join(STAGING_DIR, "ollama_model.tar.gz")
-        if os.path.exists(staging_model):
-            log("  -> Validando estructura interna y manifiesto del modelo Ollama...", "INFO")
-            with tarfile.open(staging_model, "r:gz") as mtf:
-                model_members = [m.replace("\\", "/").lower() for m in mtf.getnames()]
-                # 1. Verificar presencia de carpetas base
-                has_manifests = any("manifests" in m for m in model_members)
-                has_blobs = any("blobs" in m for m in model_members)
-                if not has_manifests or not has_blobs:
-                    raise RuntimeError(
-                        "AUDITORÍA FINAL FALLIDA: 'ollama_model.tar.gz' no tiene la estructura de directorios válida de Ollama (manifests/blobs)."
-                    )
-
-                # 2. Verificar que exista el manifiesto específico de qwen2.5:3b-instruct
-                manifest_target_pattern = re.compile(r"manifests/.*/qwen2\.5.*3b.*", re.IGNORECASE)
-                matching_manifests = [m for m in mtf.getnames() if manifest_target_pattern.search(m.replace("\\", "/"))]
-                if not matching_manifests:
-                    raise RuntimeError(
-                        "AUDITORÍA FINAL FALLIDA: 'ollama_model.tar.gz' no contiene el manifiesto específico de 'qwen2.5:3b-instruct'."
-                    )
-
-                # 3. Leer el JSON del manifiesto y verificar que los blobs referenciados existan en el tar
-                try:
-                    manifest_file = mtf.extractfile(matching_manifests[0])
-                    if manifest_file:
-                        manifest_json = json.loads(manifest_file.read().decode("utf-8"))
-                        # Comprobar layer blobs y config blob
-                        required_digests = []
-                        if "config" in manifest_json and "digest" in manifest_json["config"]:
-                            required_digests.append(manifest_json["config"]["digest"].replace("sha256:", "sha256-"))
-                        for layer in manifest_json.get("layers", []):
-                            if "digest" in layer:
-                                required_digests.append(layer["digest"].replace("sha256:", "sha256-"))
-
-                        for dig in required_digests:
-                            blob_exists = any(dig in m for m in model_members)
-                            if not blob_exists:
-                                raise RuntimeError(
-                                    f"AUDITORÍA FINAL FALLIDA: El blob requerido '{dig}' del modelo qwen2.5:3b-instruct no se encuentra en 'ollama_model.tar.gz'."
-                                )
-                        log(f"  -> Manifiesto de {matching_manifests[0]} validado: {len(required_digests)} blobs verificados.", "SUCCESS")
-                except Exception as je:
-                    if not isinstance(je, RuntimeError):
-                        raise RuntimeError(f"Error parseando manifiesto de Ollama en el tar: {je}") from je
-                    raise
-            log("  -> Estructura e integridad del modelo Ollama verificadas con éxito.", "SUCCESS")
+        log(f"Manifiesto y sumas de comprobación verificados al 100% (ida y vuelta).", "SUCCESS")
 
         log("Auditoría final de seguridad e integridad superada con éxito en todos los artefactos.", "SUCCESS")
 

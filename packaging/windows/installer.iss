@@ -82,6 +82,9 @@ var
   DockerResult: Integer;
 begin
   Result := True;
+  // Inicializar generador pseudoaleatorio con semilla temporal para evitar colisiones entre instalaciones
+  Randomize;
+
   if not Exec('cmd.exe', '/c docker --version', '', SW_HIDE, ewWaitUntilTerminated, DockerResult) or (DockerResult <> 0) then
   begin
     MsgBox('ERROR CRÍTICO: Docker Desktop no está instalado o no se encuentra en el PATH del sistema.' + #13#10 + #13#10 +
@@ -106,36 +109,52 @@ begin
     // 1. Inicializar .env con identificador único de proyecto COMPOSE_PROJECT_NAME
     if not FileExists(EnvPath) then
     begin
-      FileCopy(AppDir + '\.env.example', EnvPath, False);
+      if not FileExists(AppDir + '\.env.example') then
+      begin
+        RaiseException('Error crítico: no se encontró la plantilla requerida .env.example en ' + AppDir);
+      end;
+
+      if not FileCopy(AppDir + '\.env.example', EnvPath, False) then
+      begin
+        RaiseException('Error crítico: fallo al copiar .env.example a .env.');
+      end;
+
       RandSuffix := Random(899999) + 100000;
-      SaveStringToFile(EnvPath, #13#10 + '# Identificador único de proyecto Compose para aislamiento de instalación' + #13#10 +
-                       'COMPOSE_PROJECT_NAME=lazyjob_' + IntToStr(RandSuffix) + #13#10, True);
-    end;
-
-    // 2. Ejecutar docker load -i images.tar con comprobación estricta de código de salida
-    if FileExists(AppDir + '\images.tar') then
-    begin
-      CmdLoad := '/c cd /d "' + AppDir + '" && docker load -i "' + AppDir + '\images.tar"';
-      if not Exec('cmd.exe', CmdLoad, AppDir, SW_HIDE, ewWaitUntilTerminated, ResultCode) or (ResultCode <> 0) then
+      if not SaveStringToFile(EnvPath, #13#10 + '# Identificador único de proyecto Compose para aislamiento de instalación' + #13#10 +
+                              'COMPOSE_PROJECT_NAME=lazyjob_' + IntToStr(RandSuffix) + #13#10, True) then
       begin
-        MsgBox('ERROR CRÍTICO: Falló la importación de las imágenes de Docker (images.tar). ' +
-               'Código de salida: ' + IntToStr(ResultCode) + '.' + #13#10 +
-               'Asegúrate de que Docker Desktop esté iniciado y funcionando.', mbError, MB_OK);
-        RaiseException('Error al importar images.tar en Docker.');
+        RaiseException('Error crítico: fallo al escribir COMPOSE_PROJECT_NAME en .env.');
       end;
     end;
 
-    // 3. Restaurar modelo en el volumen persistente con comprobación estricta de código de salida
-    if FileExists(AppDir + '\ollama_model.tar.gz') then
+    // 2. Comprobar presencia de images.tar e importarlo con verificación estricta
+    if not FileExists(AppDir + '\images.tar') then
     begin
-      CmdRestore := '/c cd /d "' + AppDir + '" && docker compose up --no-start ollama && ' +
-                    'docker compose run --rm --entrypoint /bin/sh -v "' + AppDir + '":/backup ollama -c "tar xzf /backup/ollama_model.tar.gz -C /root/.ollama"';
-      if not Exec('cmd.exe', CmdRestore, AppDir, SW_HIDE, ewWaitUntilTerminated, ResultCode) or (ResultCode <> 0) then
-      begin
-        MsgBox('ERROR CRÍTICO: Falló la restauración del modelo de IA en el volumen de Ollama. ' +
-               'Código de salida: ' + IntToStr(ResultCode) + '.', mbError, MB_OK);
-        RaiseException('Error al restaurar ollama_model.tar.gz.');
-      end;
+      RaiseException('Error crítico: componente obligatorio images.tar no encontrado en la distribución completa.');
+    end;
+
+    CmdLoad := '/c cd /d "' + AppDir + '" && docker load -i "' + AppDir + '\images.tar"';
+    if not Exec('cmd.exe', CmdLoad, AppDir, SW_HIDE, ewWaitUntilTerminated, ResultCode) or (ResultCode <> 0) then
+    begin
+      MsgBox('ERROR CRÍTICO: Falló la importación de las imágenes de Docker (images.tar). ' +
+             'Código de salida: ' + IntToStr(ResultCode) + '.' + #13#10 +
+             'Asegúrate de que Docker Desktop esté iniciado y funcionando.', mbError, MB_OK);
+      RaiseException('Error al importar images.tar en Docker.');
+    end;
+
+    // 3. Comprobar presencia de ollama_model.tar.gz y restaurarlo en el volumen persistente
+    if not FileExists(AppDir + '\ollama_model.tar.gz') then
+    begin
+      RaiseException('Error crítico: componente obligatorio ollama_model.tar.gz no encontrado en la distribución completa.');
+    end;
+
+    CmdRestore := '/c cd /d "' + AppDir + '" && docker compose up --no-start ollama && ' +
+                  'docker compose run --rm --entrypoint /bin/sh -v "' + AppDir + '":/backup ollama -c "tar xzf /backup/ollama_model.tar.gz -C /root/.ollama"';
+    if not Exec('cmd.exe', CmdRestore, AppDir, SW_HIDE, ewWaitUntilTerminated, ResultCode) or (ResultCode <> 0) then
+    begin
+      MsgBox('ERROR CRÍTICO: Falló la restauración del modelo de IA en el volumen de Ollama. ' +
+             'Código de salida: ' + IntToStr(ResultCode) + '.', mbError, MB_OK);
+      RaiseException('Error al restaurar ollama_model.tar.gz.');
     end;
   end;
 end;

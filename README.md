@@ -138,7 +138,8 @@ python packaging/build_release.py
 ### Artefactos generados en `dist/`:
 - **Windows:** Instalador guiado Inno Setup (`.exe`) y paquete portable (`.zip`) con instalador autónomo `install.bat`.
 - **Linux:** Instalador ejecutable autoextraíble (`.run`) y tarball (`.tar.gz`) con instalador interactivo `installer.sh`.
-- **Seguridad:** Manifiesto unificado `release-manifest.json` y sumas de verificación `SHA256SUMS.txt`.
+- **Aislamiento Estricto por Proyecto:** Cada instalación genera y mantiene su propio identificador único `COMPOSE_PROJECT_NAME`, asegurando que redes, volúmenes y contenedores no interfieran entre instalaciones concurrentes.
+- **Auditoría Profunda de Seguridad:** Inspección recursiva de las capas internas de Docker (`layer.tar`), verificación exhaustiva de los blobs del modelo Ollama contra el manifiesto y validación criptográfica de ida y vuelta de `SHA256SUMS.txt`.
 - **Garantía Anti-Fuga:** Las imágenes se construyen desde un contexto aislado con plantillas limpias, impidiendo que tus credenciales o CV personales se empaqueten en la distribución.
 
 ---

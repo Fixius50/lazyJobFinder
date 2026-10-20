@@ -109,29 +109,43 @@ def _inspect_services() -> Dict[str, Dict[str, Any]]:
 def _find_compose_container(client, service_name: str, project_name: Optional[str] = None):
     """
     Localiza un contenedor de forma dinámica por la etiqueta de servicio de Docker Compose
-    (com.docker.compose.service) y opcionalmente por el proyecto (com.docker.compose.project).
-    Elimina cualquier dependencia de nombres fijos de contenedor.
+    (com.docker.compose.service) y por el proyecto (com.docker.compose.project).
+    Garantiza aislamiento estricto entre múltiples instalaciones concurrentes.
     """
     if not client:
         return None
     try:
         containers = client.containers.list(all=True)
+        # 1. Búsqueda estricta por etiquetas de Compose
         for c in containers:
             labels = c.labels or {}
             c_svc = labels.get("com.docker.compose.service", "")
             c_proj = labels.get("com.docker.compose.project", "")
 
-            # Si se especificó project_name, debe coincidir
-            if project_name and c_proj and c_proj != project_name:
-                continue
+            # Si se exige un project_name, la etiqueta de proyecto debe coincidir obligatoriamente
+            if project_name:
+                if c_proj != project_name:
+                    continue
+            elif c_proj:
+                # Si no se especificó proyecto pero el contenedor sí tiene etiqueta de proyecto,
+                # no asociarlo arbitrariamente si hay ambigüedad
+                pass
 
             if c_svc == service_name:
                 return c
 
-        # Fallback por coincidencia de nombre si no hay etiquetas compose
+        # 2. Fallback por nombre estrictamente acotado al proyecto
         for c in containers:
-            if service_name in c.name.lower():
-                return c
+            c_name = c.name.lower()
+            if project_name:
+                proj_prefix = project_name.lower()
+                # Debe comenzar por el prefijo del proyecto específico
+                if (c_name.startswith(f"{proj_prefix}_") or c_name.startswith(f"{proj_prefix}-")) and service_name in c_name:
+                    return c
+            else:
+                # Solo si no hay proyecto configurado
+                if c_name == service_name or c_name.startswith(f"{service_name}_"):
+                    return c
     except Exception as e:
         logger.debug("Error buscando contenedor para servicio '%s': %s", service_name, e)
     return None
@@ -145,7 +159,7 @@ def get_services_status() -> Dict[str, Any]:
     - arrancando
     - saludable
     - error
-    Utiliza resolución 100% dinámica por etiquetas de Compose.
+    Utiliza resolución 100% dinámica por etiquetas de Compose y aislamiento por proyecto.
     """
     client = _get_docker_client()
     services_status = {}
@@ -212,7 +226,7 @@ def get_services_status() -> Dict[str, Any]:
 @router.post("/action")
 def execute_service_action(req: ServiceActionRequest) -> Dict[str, Any]:
     """
-    Ejecuta una acción controlada de ciclo de vida sobre los servicios del proyecto.
+    Ejecuta una acción controlada de ciclo de vida sobre los servicios del proyecto con aislamiento por proyecto.
     Acciones permitidas: start, stop, restart.
     Servicios permitidos: all, ollama, lazyjobfinder.
     """
@@ -231,29 +245,29 @@ def execute_service_action(req: ServiceActionRequest) -> Dict[str, Any]:
             detail=f"Servicio '{service}' no permitido. Válidos: all, {list(ALLOWED_SERVICES)}",
         )
 
-    # Control de servicios:
     client = _get_docker_client()
     if not client:
-        # En modo distribuido (sin montaje de socket por seguridad y aislamiento):
         return {
             "success": False,
             "status": "unavailable",
             "message": (
-                f"La acción '{action}' sobre '{service}' no puede ejecutarse desde la interfaz web porque el contenedor no tiene acceso al socket de Docker (medida de seguridad y aislamiento). "
+                f"La acción '{action}' sobre '{service}' no puede ejecutarse desde la interfaz web porque el socket de Docker no está accesible. "
                 "Para iniciar, detener o reiniciar los servicios, utiliza los scripts locales de control (launch.bat / stop.bat en Windows o launch.sh / stop.sh en Linux)."
             ),
             "action": action,
             "service": service,
-            "error_code": "DAEMON_SOCKET_NOT_AVAILABLE",
+            "error_code": "DOCKER_UNAVAILABLE",
         }
 
-    # Distinción de ámbito según el servicio solicitado si el SDK está disponible (entorno de desarrollo):
+    current_project = os.getenv("COMPOSE_PROJECT_NAME")
+
+    # Si se solicita lazyjobfinder (la propia app)
     if service == "lazyjobfinder":
         if action == "stop":
             return {
                 "success": False,
                 "status": "rejected",
-                "message": "lazyJobFinder aloja la API web activa. Para apagar el contenedor app sin interrumpir abruptamente el servidor, utiliza los scripts locales.",
+                "message": "lazyJobFinder aloja la API web activa. Para apagar el contenedor app sin interrumpir abruptamente el servidor, utiliza los scripts locales launch/stop.",
                 "action": action,
                 "service": service,
             }
@@ -261,57 +275,69 @@ def execute_service_action(req: ServiceActionRequest) -> Dict[str, Any]:
             return {
                 "success": True,
                 "status": "noop",
-                "message": "El contenedor ya se encuentra en ejecución y operativo.",
+                "message": "El contenedor de la aplicación ya se encuentra en ejecución y operativo.",
                 "action": action,
                 "service": service,
             }
 
-    # Para "ollama" o "all", resolver dinámicamente el contenedor por etiqueta de Compose o prefijo
-    try:
-        target_container = None
-        containers = client.containers.list(all=True)
-        for c in containers:
-            labels = c.labels or {}
-            compose_service = labels.get("com.docker.compose.service", "")
-            if compose_service == "ollama" or "ollama" in c.name.lower():
-                target_container = c
-                break
+    # Determinar qué servicios deben ser procesados respetando estrictamente el proyecto actual
+    services_to_act = ["ollama"] if service in ("ollama", "all") else []
+    if service in ("lazyjobfinder", "all") and action == "restart":
+        services_to_act.append("lazyjobfinder")
 
+    results = []
+    db = get_db()
+
+    for svc in services_to_act:
+        target_container = _find_compose_container(client, svc, current_project)
         if not target_container:
-            return {
+            results.append({
+                "service": svc,
                 "success": False,
                 "status": "not_found",
-                "message": "No se encontró el contenedor de Ollama asociado a este proyecto Compose.",
-                "action": action,
-                "service": service,
-            }
+                "message": f"No se encontró el contenedor del servicio '{svc}' para el proyecto '{current_project or 'default'}'.",
+            })
+            continue
 
-        if action == "restart":
-            target_container.restart(timeout=10)
-        elif action == "stop":
-            target_container.stop(timeout=10)
-        elif action == "start":
-            target_container.start()
+        try:
+            if action == "restart":
+                target_container.restart(timeout=10)
+            elif action == "stop":
+                target_container.stop(timeout=10)
+            elif action == "start":
+                target_container.start()
 
-        msg = f"Servicio '{target_container.name}' ({action}) ejecutado correctamente."
-        db = get_db()
-        db.log_event("INFO", "docker", f"Acción '{action}' ejecutada sobre '{target_container.name}' vía Docker SDK.")
-        return {
-            "success": True,
-            "status": "executed",
-            "message": msg,
-            "action": action,
-            "service": service,
-        }
-    except Exception as ce:
-        logger.debug("Aviso al intentar controlar servicio vía Docker SDK: %s", ce)
-        return {
-            "success": False,
-            "status": "error",
-            "message": f"Fallo al ejecutar acción '{action}': {str(ce)}. Utiliza los scripts locales launch/stop.",
-            "action": action,
-            "service": service,
-        }
+            msg = f"Servicio '{target_container.name}' ({action}) ejecutado correctamente."
+            db.log_event("INFO", "docker", f"Acción '{action}' ejecutada sobre '{target_container.name}' (Proyecto: {current_project or 'n/a'}).")
+            results.append({
+                "service": svc,
+                "container_name": target_container.name,
+                "success": True,
+                "status": "executed",
+                "message": msg,
+            })
+        except Exception as ce:
+            logger.warning("Fallo al ejecutar '%s' sobre '%s': %s", action, target_container.name, ce)
+            results.append({
+                "service": svc,
+                "container_name": target_container.name,
+                "success": False,
+                "status": "error",
+                "message": f"Fallo al ejecutar '{action}' sobre '{target_container.name}': {str(ce)}",
+            })
+
+    all_success = len(results) > 0 and all(r["success"] for r in results)
+    primary_status = results[0]["status"] if results else "not_found"
+
+    return {
+        "success": all_success,
+        "status": primary_status if len(results) == 1 else ("executed" if all_success else "partial_error"),
+        "action": action,
+        "service": service,
+        "project": current_project,
+        "details": results,
+        "message": "; ".join(r["message"] for r in results) if results else "No se ejecutaron acciones.",
+    }
 
 
 @router.get("/logs")

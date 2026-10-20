@@ -63,12 +63,20 @@ mkdir -p "$APP_DIR"
 
 # 5. Copiar archivos de la distribución
 echo -e "${GREEN}[i] Copiando componentes del sistema...${NC}"
-cp -f "$SCRIPT_DIR/docker-compose.yml" "$INSTALL_DIR/"
-cp -f "$SCRIPT_DIR/launch.sh" "$INSTALL_DIR/"
-cp -f "$SCRIPT_DIR/stop.sh" "$INSTALL_DIR/"
+for req_file in docker-compose.yml launch.sh stop.sh; do
+    if [ ! -f "$SCRIPT_DIR/$req_file" ]; then
+        echo -e "${RED}[ERROR] Falta el archivo requerido de la distribución: $req_file${NC}"
+        exit 1
+    fi
+    cp -f "$SCRIPT_DIR/$req_file" "$INSTALL_DIR/"
+done
 chmod +x "$INSTALL_DIR/launch.sh" "$INSTALL_DIR/stop.sh"
 
 if [ ! -f "$INSTALL_DIR/.env" ]; then
+    if [ ! -f "$SCRIPT_DIR/.env.example" ]; then
+        echo -e "${RED}[ERROR] No se encontró '.env.example' en la distribución.${NC}"
+        exit 1
+    fi
     cp -f "$SCRIPT_DIR/.env.example" "$INSTALL_DIR/.env"
     RAND_SUFFIX="$(head /dev/urandom | tr -dc a-z0-9 | head -c 8 || echo $RANDOM$$)"
     echo "" >> "$INSTALL_DIR/.env"
@@ -76,35 +84,73 @@ if [ ! -f "$INSTALL_DIR/.env" ]; then
     echo "COMPOSE_PROJECT_NAME=lazyjob_${RAND_SUFFIX}" >> "$INSTALL_DIR/.env"
     echo -e "${GREEN}[OK] Archivo de entorno .env inicializado con proyecto único (lazyjob_${RAND_SUFFIX}).${NC}"
 else
+    # Validar que .env existente contenga COMPOSE_PROJECT_NAME
+    CURRENT_PROJ="$(grep -E '^COMPOSE_PROJECT_NAME=' "$INSTALL_DIR/.env" | cut -d '=' -f2- | tr -d ' "''' || true)"
+    if [ -z "$CURRENT_PROJ" ]; then
+        RAND_SUFFIX="$(head /dev/urandom | tr -dc a-z0-9 | head -c 8 || echo $RANDOM$$)"
+        echo "" >> "$INSTALL_DIR/.env"
+        echo "# Identificador único de instalación incorporado" >> "$INSTALL_DIR/.env"
+        echo "COMPOSE_PROJECT_NAME=lazyjob_${RAND_SUFFIX}" >> "$INSTALL_DIR/.env"
+    fi
     echo -e "${BLUE}[i] Archivo .env previo detectado en el destino. Conservando credenciales e identificador de proyecto.${NC}"
 fi
 
 # Copiar plantillas sin sobreescribir configuraciones existentes
 for f in settings.yaml profile.yaml shared_constants.json; do
-    if [ ! -f "$INSTALL_DIR/config/$f" ] && [ -f "$SCRIPT_DIR/config-templates/$f" ]; then
-        cp -f "$SCRIPT_DIR/config-templates/$f" "$INSTALL_DIR/config/$f"
+    if [ ! -f "$INSTALL_DIR/config/$f" ]; then
+        if [ -f "$SCRIPT_DIR/config-templates/$f" ]; then
+            cp -f "$SCRIPT_DIR/config-templates/$f" "$INSTALL_DIR/config/$f"
+        elif [ -f "$SCRIPT_DIR/config/$f" ]; then
+            cp -f "$SCRIPT_DIR/config/$f" "$INSTALL_DIR/config/$f"
+        fi
     fi
 done
 
-# 6. Importar imágenes si images.tar existe
+# 6. Comprobación de componentes de distribución completa
+IS_LIGHT=0
+if [ -f "$SCRIPT_DIR/.light_release" ]; then
+    IS_LIGHT=1
+fi
+
+if [ "$IS_LIGHT" -eq 0 ]; then
+    if [ ! -f "$SCRIPT_DIR/images.tar" ]; then
+        echo -e "${RED}[ERROR] Falta el componente obligatorio 'images.tar' en esta distribución completa.${NC}"
+        exit 1
+    fi
+    if [ ! -f "$SCRIPT_DIR/ollama_model.tar.gz" ]; then
+        echo -e "${RED}[ERROR] Falta el componente obligatorio 'ollama_model.tar.gz' en esta distribución completa.${NC}"
+        exit 1
+    fi
+fi
+
+# 6.1 Importar imágenes si images.tar existe
 if [ -f "$SCRIPT_DIR/images.tar" ]; then
     echo -e "${GREEN}[i] Importando imágenes de contenedores locales (lazyjobfinder y ollama)...${NC}"
     if ! docker load -i "$SCRIPT_DIR/images.tar"; then
         echo -e "${RED}[ERROR] Fallo al cargar las imágenes de images.tar.${NC}"
         exit 1
     fi
+    echo -e "${GREEN}[OK] Imágenes importadas correctamente.${NC}"
+else
+    echo -e "${BLUE}[i] Distribución ligera: omisión de importación de images.tar.${NC}"
 fi
 
-# 6.1 Restaurar modelo de IA en el volumen de Ollama si ollama_model.tar.gz existe
+# 6.2 Restaurar modelo de IA en el volumen de Ollama si ollama_model.tar.gz existe
 if [ -f "$SCRIPT_DIR/ollama_model.tar.gz" ]; then
-    echo -e "${GREEN}[i] Restaurando modelo de IA empaquetado en el volumen de Ollama...${NC}"
+    echo -e "${GREEN}[i] Preparando volumen persistente de Ollama...${NC}"
     cd "$INSTALL_DIR"
-    docker compose up --no-start ollama >/dev/null 2>&1 || true
+    if ! docker compose up --no-start ollama >/dev/null 2>&1; then
+        echo -e "${RED}[ERROR] Fallo al inicializar el contenedor/volumen de Ollama con docker compose.${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}[i] Restaurando modelo de IA empaquetado en el volumen de Ollama...${NC}"
     if ! docker compose run --rm --entrypoint /bin/sh -v "$SCRIPT_DIR":/backup ollama -c "tar xzf /backup/ollama_model.tar.gz -C /root/.ollama"; then
         echo -e "${RED}[ERROR] No se pudo restaurar el modelo de IA en el volumen de Ollama.${NC}"
         exit 1
     fi
     echo -e "${GREEN}[OK] Modelo IA precargado en el volumen local de Ollama.${NC}"
+else
+    echo -e "${BLUE}[i] Distribución ligera: omisión de precarga offline de modelo Ollama.${NC}"
 fi
 
 # 7. Crear enlace en PATH

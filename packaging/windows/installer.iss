@@ -68,23 +68,15 @@ Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Run]
-; 1. Cargar imágenes Docker en el motor local al terminar la instalación
-Filename: "cmd.exe"; Parameters: "/c cd /d ""{app}"" && docker load -i ""{app}\images.tar"""; StatusMsg: "Cargando imágenes de Docker y Ollama en el sistema local..."; Flags: runhidden waituntilterminated
-
-; 2. Restaurar modelo de IA en el volumen de Ollama (usando el contenedor de ollama cargado, sin depender de imágenes externas)
-Filename: "cmd.exe"; Parameters: "/c cd /d ""{app}"" && docker compose up --no-start ollama && docker compose run --rm --entrypoint /bin/sh -v ""{app}"":/backup ollama -c ""tar xzf /backup/ollama_model.tar.gz -C /root/.ollama"""; StatusMsg: "Restaurando modelo de IA empaquetado en el volumen de Ollama..."; Flags: runhidden waituntilterminated
-
-; 3. Opción para arrancar la aplicación inmediatamente tras la instalación
+; Opción para arrancar la aplicación inmediatamente tras la instalación
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: shellexec postinstall nowait skipifsilent
-
-
 
 [UninstallRun]
 ; Detener contenedores Docker antes de desinstalar
 Filename: "cmd.exe"; Parameters: "/c cd /d ""{app}"" && docker compose down"; Flags: runhidden waituntilterminated
 
 [Code]
-// Verificación previa de Docker Desktop instalado
+// Verificación obligatoria de Docker Desktop instalado para la distribución completa
 function InitializeSetup(): Boolean;
 var
   DockerResult: Integer;
@@ -92,28 +84,59 @@ begin
   Result := True;
   if not Exec('cmd.exe', '/c docker --version', '', SW_HIDE, ewWaitUntilTerminated, DockerResult) or (DockerResult <> 0) then
   begin
-    if MsgBox('Docker Desktop no parece estar instalado o no se encuentra en el PATH del sistema.' + #13#10 + #13#10 +
-              'lazyJobFinder requiere Docker Desktop para ejecutar la IA y la aplicación localmente.' + #13#10 + #13#10 +
-              '¿Deseas continuar con la instalación de todos modos?' + #13#10 +
-              '(Deberás instalar Docker Desktop antes de iniciar la aplicación)',
-              mbConfirmation, MB_YESNO) = IDNO then
-    begin
-      Result := False;
-    end;
+    MsgBox('ERROR CRÍTICO: Docker Desktop no está instalado o no se encuentra en el PATH del sistema.' + #13#10 + #13#10 +
+           'lazyJobFinder requiere Docker Desktop en ejecución para operar localmente y cargar las imágenes.' + #13#10 +
+           'Por favor, instala Docker Desktop antes de ejecutar este instalador.',
+           mbError, MB_OK);
+    Result := False;
   end;
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 var
-  EnvPath: string;
+  AppDir, EnvPath, CmdLoad, CmdRestore: string;
+  ResultCode: Integer;
+  RandSuffix: Integer;
 begin
   if CurStep = ssPostInstall then
   begin
-    // Si no existe .env, copiar desde .env.example
-    EnvPath := ExpandConstant('{app}\.env');
+    AppDir := ExpandConstant('{app}');
+    EnvPath := AppDir + '\.env';
+
+    // 1. Inicializar .env con identificador único de proyecto COMPOSE_PROJECT_NAME
     if not FileExists(EnvPath) then
     begin
-      FileCopy(ExpandConstant('{app}\.env.example'), EnvPath, False);
+      FileCopy(AppDir + '\.env.example', EnvPath, False);
+      RandSuffix := Random(899999) + 100000;
+      SaveStringToFile(EnvPath, #13#10 + '# Identificador único de proyecto Compose para aislamiento de instalación' + #13#10 +
+                       'COMPOSE_PROJECT_NAME=lazyjob_' + IntToStr(RandSuffix) + #13#10, True);
+    end;
+
+    // 2. Ejecutar docker load -i images.tar con comprobación estricta de código de salida
+    if FileExists(AppDir + '\images.tar') then
+    begin
+      CmdLoad := '/c cd /d "' + AppDir + '" && docker load -i "' + AppDir + '\images.tar"';
+      if not Exec('cmd.exe', CmdLoad, AppDir, SW_HIDE, ewWaitUntilTerminated, ResultCode) or (ResultCode <> 0) then
+      begin
+        MsgBox('ERROR CRÍTICO: Falló la importación de las imágenes de Docker (images.tar). ' +
+               'Código de salida: ' + IntToStr(ResultCode) + '.' + #13#10 +
+               'Asegúrate de que Docker Desktop esté iniciado y funcionando.', mbError, MB_OK);
+        RaiseException('Error al importar images.tar en Docker.');
+      end;
+    end;
+
+    // 3. Restaurar modelo en el volumen persistente con comprobación estricta de código de salida
+    if FileExists(AppDir + '\ollama_model.tar.gz') then
+    begin
+      CmdRestore := '/c cd /d "' + AppDir + '" && docker compose up --no-start ollama && ' +
+                    'docker compose run --rm --entrypoint /bin/sh -v "' + AppDir + '":/backup ollama -c "tar xzf /backup/ollama_model.tar.gz -C /root/.ollama"';
+      if not Exec('cmd.exe', CmdRestore, AppDir, SW_HIDE, ewWaitUntilTerminated, ResultCode) or (ResultCode <> 0) then
+      begin
+        MsgBox('ERROR CRÍTICO: Falló la restauración del modelo de IA en el volumen de Ollama. ' +
+               'Código de salida: ' + IntToStr(ResultCode) + '.', mbError, MB_OK);
+        RaiseException('Error al restaurar ollama_model.tar.gz.');
+      end;
     end;
   end;
 end;
+

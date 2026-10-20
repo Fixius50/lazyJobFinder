@@ -70,6 +70,11 @@ chmod +x "$INSTALL_DIR/launch.sh" "$INSTALL_DIR/stop.sh"
 
 if [ ! -f "$INSTALL_DIR/.env" ]; then
     cp -f "$SCRIPT_DIR/.env.example" "$INSTALL_DIR/.env"
+    RAND_SUFFIX="$(head /dev/urandom | tr -dc a-z0-9 | head -c 6 || echo $RANDOM)"
+    echo "" >> "$INSTALL_DIR/.env"
+    echo "# Identificador único de instalación para aislamiento de redes y volúmenes Docker" >> "$INSTALL_DIR/.env"
+    echo "COMPOSE_PROJECT_NAME=lazyjob_${RAND_SUFFIX}" >> "$INSTALL_DIR/.env"
+    echo -e "${GREEN}[OK] Archivo de entorno .env inicializado con proyecto único (lazyjob_${RAND_SUFFIX}).${NC}"
 fi
 
 # Copiar plantillas sin sobreescribir configuraciones existentes

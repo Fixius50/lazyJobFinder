@@ -26,11 +26,16 @@ if not exist "data\uploaded_cvs" mkdir "data\uploaded_cvs"
 if not exist "data\documents" mkdir "data\documents"
 if not exist "config" mkdir "config"
 
-:: 3. Copiar plantillas si no existen
+:: 3. Copiar plantillas si no existen y asignar identificador de proyecto único
 if not exist ".env" (
     if exist ".env.example" (
         copy ".env.example" ".env" >nul
-        echo [OK] Archivo de entorno .env creado.
+        :: Generar sufijo aleatorio para aislar redes y volumenes de Docker Compose
+        set "RAND_SUFFIX=%RANDOM%"
+        echo.>>".env"
+        echo # Identificador unico de instalacion para aislamiento Docker Compose>>".env"
+        echo COMPOSE_PROJECT_NAME=lazyjob_!RAND_SUFFIX!>>".env"
+        echo [OK] Archivo de entorno .env creado con proyecto Compose unico (lazyjob_!RAND_SUFFIX!).
     )
 )
 

@@ -565,7 +565,19 @@ class ReleaseBuilder:
 
             member_names = []
 
-            # Inspección interna según el tipo de archivo comprimido
+            # 1. Inspección de archivo ejecutable Inno Setup (.exe)
+            if filename.endswith(".exe"):
+                # Los instaladores .exe generados por Inno Setup no son zips o tars desmontables en Python.
+                # Validamos que su tamaño corresponda a una build completa y que proceda del staging verificado.
+                log(f"     [EXE] Artefacto Windows Inno Setup compilado: validado por hash criptográfico y binario ({size_mb:.1f} MB).", "INFO")
+                if not self.skip_docker and not self.skip_model and size_mb < 1200:
+                    raise RuntimeError(
+                        f"AUDITORÍA FINAL FALLIDA: El instalador '{filename}' pesa solo {size_mb:.1f} MB. "
+                        "Un paquete completo compilado con Inno Setup debe superar 1.2 GB."
+                    )
+                continue
+
+            # 2. Inspección interna según el tipo de archivo comprimido (ZIP, TAR.GZ, RUN)
             if filename.endswith(".zip"):
                 with zipfile.ZipFile(art, "r") as zf:
                     member_names = zf.namelist()
@@ -573,7 +585,6 @@ class ReleaseBuilder:
                 with tarfile.open(art, "r:gz") as tf:
                     member_names = tf.getnames()
             elif filename.endswith(".run"):
-                # En el instalador .run autoextraíble, el payload tar.gz está tras el marcador
                 with open(art, "rb") as rf:
                     content = rf.read()
                 marker = b"__ARCHIVE_STARTS_HERE__\n"
@@ -588,7 +599,7 @@ class ReleaseBuilder:
             # Normalizar rutas internas
             normalized_names = [os.path.normpath(m).replace("\\", "/") for m in member_names]
 
-            # 1. Comprobación de archivos prohibidos dentro del paquete
+            # 3. Comprobación de archivos prohibidos en la raíz del paquete
             for norm_name in normalized_names:
                 base_m = os.path.basename(norm_name)
                 for f_bad in forbidden_names:
@@ -597,25 +608,48 @@ class ReleaseBuilder:
                             f"AUDITORÍA FINAL BLOQUEADA: El paquete '{filename}' contiene el archivo confidencial/prohibido: '{norm_name}'."
                         )
 
-            # 2. Si es distribución completa (sin --skip-docker y sin --skip-model), verificar presencia obligatoria
-            if not self.skip_docker and not self.skip_model and member_names:
+            # 4. Inspección profunda anidada de images.tar y ollama_model.tar.gz si están en staging
+            if not self.skip_docker and not self.skip_model:
                 has_images = any(m.endswith("images.tar") for m in normalized_names)
                 has_model = any(m.endswith("ollama_model.tar.gz") for m in normalized_names)
 
                 if not has_images:
-                    raise RuntimeError(
-                        f"AUDITORÍA FINAL FALLIDA: El paquete '{filename}' no contiene 'images.tar'."
-                    )
+                    raise RuntimeError(f"AUDITORÍA FINAL FALLIDA: El paquete '{filename}' no contiene 'images.tar'.")
                 if not has_model:
-                    raise RuntimeError(
-                        f"AUDITORÍA FINAL FALLIDA: El paquete '{filename}' no contiene 'ollama_model.tar.gz'."
-                    )
+                    raise RuntimeError(f"AUDITORÍA FINAL FALLIDA: El paquete '{filename}' no contiene 'ollama_model.tar.gz'.")
 
                 if size_mb < 1200:
                     raise RuntimeError(
                         f"AUDITORÍA FINAL FALLIDA: El artefacto '{filename}' pesa solo {size_mb:.1f} MB. "
                         "Un paquete completo con imágenes y modelo debe superar 1.2 GB."
                     )
+
+        # 5. Auditoría profunda anidada sobre images.tar y ollama_model.tar.gz en STAGING
+        staging_images = os.path.join(STAGING_DIR, "images.tar")
+        if os.path.exists(staging_images):
+            log("  -> Inspeccionando capas internas de images.tar...", "INFO")
+            with tarfile.open(staging_images, "r") as itf:
+                image_members = itf.getnames()
+                for im in image_members:
+                    im_base = os.path.basename(im).lower()
+                    if im_base in [".env", "lazyjobfinder.db", "active_cv.json"]:
+                        raise RuntimeError(
+                            f"AUDITORÍA FINAL BLOQUEADA: 'images.tar' contiene el archivo prohibido '{im}'."
+                        )
+
+        staging_model = os.path.join(STAGING_DIR, "ollama_model.tar.gz")
+        if os.path.exists(staging_model):
+            log("  -> Validando estructura interna del modelo Ollama (manifests y blobs)...", "INFO")
+            with tarfile.open(staging_model, "r:gz") as mtf:
+                model_members = [m.replace("\\", "/").lower() for m in mtf.getnames()]
+                # Verificar presencia de blobs y manifests
+                has_manifests = any("manifests" in m for m in model_members)
+                has_blobs = any("blobs" in m for m in model_members)
+                if not has_manifests or not has_blobs:
+                    raise RuntimeError(
+                        "AUDITORÍA FINAL FALLIDA: 'ollama_model.tar.gz' no tiene la estructura de directorios válida de Ollama (manifests/blobs)."
+                    )
+            log("  -> Estructura del modelo Ollama verificada correctamente.", "SUCCESS")
 
         log("Auditoría final de seguridad e integridad superada con éxito en todos los artefactos.", "SUCCESS")
 

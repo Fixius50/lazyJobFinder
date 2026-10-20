@@ -203,14 +203,15 @@ def execute_service_action(req: ServiceActionRequest) -> Dict[str, Any]:
     if not client:
         # En modo distribuido (sin montaje de socket por seguridad y aislamiento):
         return {
-            "success": True,
+            "success": False,
+            "status": "unavailable",
             "message": (
-                f"La acción '{action}' sobre '{service}' no requiere interacción con el socket de Docker en este entorno. "
-                "Para detener o reiniciar servicios, utiliza los scripts de control incluidos (stop.bat / launch.bat o stop.sh / launch.sh)."
+                f"La acción '{action}' sobre '{service}' no puede ejecutarse desde la interfaz web porque el contenedor no tiene acceso al socket de Docker (medida de seguridad y aislamiento). "
+                "Para iniciar, detener o reiniciar los servicios, utiliza los scripts locales de control (launch.bat / stop.bat en Windows o launch.sh / stop.sh en Linux)."
             ),
             "action": action,
             "service": service,
-            "warning": "daemon_socket_not_mounted",
+            "error_code": "DAEMON_SOCKET_NOT_AVAILABLE",
         }
 
     # Distinción de ámbito según el servicio solicitado si el SDK está disponible (entorno de desarrollo):
@@ -218,48 +219,63 @@ def execute_service_action(req: ServiceActionRequest) -> Dict[str, Any]:
         if action == "stop":
             return {
                 "success": False,
-                "message": "lazyjob_app aloja la API web activa. Para apagar el contenedor app sin interrumpir abruptamente el servidor, utiliza los scripts locales.",
+                "status": "rejected",
+                "message": "lazyJobFinder aloja la API web activa. Para apagar el contenedor app sin interrumpir abruptamente el servidor, utiliza los scripts locales.",
                 "action": action,
                 "service": service,
             }
         if action == "start":
             return {
                 "success": True,
+                "status": "noop",
                 "message": "El contenedor ya se encuentra en ejecución y operativo.",
                 "action": action,
                 "service": service,
             }
 
-    # Para "ollama" o "all"
-    target_container = "lazyjob_ollama"
+    # Para "ollama" o "all", resolver dinámicamente el contenedor por etiqueta de Compose o prefijo
     try:
-        c = client.containers.get(target_container)
+        target_container = None
+        containers = client.containers.list(all=True)
+        for c in containers:
+            labels = c.labels or {}
+            compose_service = labels.get("com.docker.compose.service", "")
+            if compose_service == "ollama" or "ollama" in c.name.lower():
+                target_container = c
+                break
+
+        if not target_container:
+            return {
+                "success": False,
+                "status": "not_found",
+                "message": "No se encontró el contenedor de Ollama asociado a este proyecto Compose.",
+                "action": action,
+                "service": service,
+            }
+
         if action == "restart":
-            c.restart(timeout=10)
+            target_container.restart(timeout=10)
         elif action == "stop":
-            c.stop(timeout=10)
+            target_container.stop(timeout=10)
         elif action == "start":
-            c.start()
+            target_container.start()
 
-        msg = (
-            f"Servicio {target_container} ({action}) ejecutado correctamente."
-            if service == "ollama"
-            else f"Operación '{action}' completada sobre los servicios de fondo ({target_container})."
-        )
-
+        msg = f"Servicio '{target_container.name}' ({action}) ejecutado correctamente."
         db = get_db()
-        db.log_event("INFO", "docker", f"Acción '{action}' ejecutada sobre '{target_container}' vía Docker SDK.")
+        db.log_event("INFO", "docker", f"Acción '{action}' ejecutada sobre '{target_container.name}' vía Docker SDK.")
         return {
             "success": True,
+            "status": "executed",
             "message": msg,
             "action": action,
             "service": service,
         }
     except Exception as ce:
-        logger.debug("Aviso al intentar controlar %s vía Docker SDK: %s", target_container, ce)
+        logger.debug("Aviso al intentar controlar servicio vía Docker SDK: %s", ce)
         return {
-            "success": True,
-            "message": f"Servicio gestionado a través de Compose. Usa launch/stop scripts si necesitas reiniciarlo por completo.",
+            "success": False,
+            "status": "error",
+            "message": f"Fallo al ejecutar acción '{action}': {str(ce)}. Utiliza los scripts locales launch/stop.",
             "action": action,
             "service": service,
         }

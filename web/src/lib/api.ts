@@ -186,6 +186,16 @@ export const api = {
     min_score?: number;
     is_remote?: boolean;
     modality?: string;
+    modalities?: string[];
+    categories?: string[];
+    educations?: string[];
+    min_experience_years?: number;
+    min_salary?: number;
+    schedules?: string[];
+    contract_types?: string[];
+    geo_lat?: number;
+    geo_lon?: number;
+    geo_radius_km?: number;
     only_ui_saved?: boolean;
     page?: number;
     page_size?: number;
@@ -201,6 +211,37 @@ export const api = {
       searchParams.append("min_score", params.min_score.toString());
     if (params.is_remote !== undefined) searchParams.append("is_remote", params.is_remote ? "true" : "false");
     if (params.modality) searchParams.append("modality", params.modality);
+    if (params.modalities && params.modalities.length > 0) {
+      params.modalities.forEach((m) => searchParams.append("modalities", m));
+    }
+    if (params.categories && params.categories.length > 0) {
+      params.categories.forEach((c) => searchParams.append("categories", c));
+    }
+    if (params.educations && params.educations.length > 0) {
+      params.educations.forEach((e) => searchParams.append("educations", e));
+    }
+    if (params.min_experience_years !== undefined && params.min_experience_years > 0) {
+      searchParams.append("min_experience_years", params.min_experience_years.toString());
+    }
+    if (params.min_salary !== undefined && params.min_salary > 0) {
+      searchParams.append("min_salary", params.min_salary.toString());
+    }
+    if (params.schedules && params.schedules.length > 0) {
+      params.schedules.forEach((s) => searchParams.append("schedules", s));
+    }
+    if (params.contract_types && params.contract_types.length > 0) {
+      params.contract_types.forEach((ct) => searchParams.append("contract_types", ct));
+    }
+    if (
+      params.geo_radius_km !== undefined &&
+      params.geo_radius_km > 0 &&
+      params.geo_lat !== undefined &&
+      params.geo_lon !== undefined
+    ) {
+      searchParams.append("geo_lat", params.geo_lat.toString());
+      searchParams.append("geo_lon", params.geo_lon.toString());
+      searchParams.append("geo_radius_km", params.geo_radius_km.toString());
+    }
     if (params.only_ui_saved !== undefined)
       searchParams.append("only_ui_saved", params.only_ui_saved ? "true" : "false");
     if (params.page) searchParams.append("page", params.page.toString());
@@ -210,6 +251,7 @@ export const api = {
 
     return request<PaginatedJobsResponse>(`/jobs?${searchParams.toString()}`);
   },
+  getFilterFacets: () => request<FilterFacetsResponse>("/jobs/facets"),
   getJobDetail: (jobId: number) => request<JobDetail>(`/jobs/${jobId}`),
   updateJobStatus: (jobId: number, status: string) =>
     request<{ success: boolean; status: string }>(`/jobs/${jobId}/status`, {

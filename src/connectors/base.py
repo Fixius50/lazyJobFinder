@@ -14,7 +14,7 @@ class JobOffer:
     company: str
     job_url: str
     source: str
-    location: str = "España"
+    location: str = "Global / Remote"
     is_remote: bool = False
     description: str = ""
     salary_min: Optional[float] = None
@@ -30,7 +30,7 @@ class JobOffer:
             "company": self.company.strip() or "Empresa Confidencial",
             "job_url": self.job_url.strip(),
             "source": self.source.strip().lower(),
-            "location": self.location.strip() or "España",
+            "location": self.location.strip() or "Global / Remote",
             "is_remote": 1 if self.is_remote else 0,
             "description": self.description.strip(),
             "salary_min": self.salary_min,

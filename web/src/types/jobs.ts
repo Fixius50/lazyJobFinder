@@ -62,3 +62,25 @@ export interface JobFilterParams {
   sort_by?: string;
   sort_order?: string;
 }
+
+export interface FacetItem {
+  id: string;
+  label: string;
+  count: number;
+}
+
+export interface FilterFacetsResponse {
+  sources: FacetItem[];
+  modalities: FacetItem[];
+  categories: FacetItem[];
+  educations: FacetItem[];
+  schedules: FacetItem[];
+  contract_types: FacetItem[];
+  salary_stats: {
+    min: number;
+    max: number;
+    currency: string;
+  };
+  top_locations: { name: string; count: number }[];
+  total_jobs: number;
+}

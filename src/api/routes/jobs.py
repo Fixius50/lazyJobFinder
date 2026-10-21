@@ -33,14 +33,24 @@ def list_jobs(
     status: Optional[str] = Query(None, description="Filtrar por estado de candidatura"),
     min_score: Optional[int] = Query(None, ge=0, le=100, description="Puntuación mínima de afinidad"),
     is_remote: Optional[bool] = Query(None, description="Filtrar por trabajo remoto"),
-    modality: Optional[str] = Query(None, description="Filtrar por modalidad: presencial, teletrabajo o hibrido"),
+    modality: Optional[str] = Query(None, description="Filtrar por modalidad única: presencial, teletrabajo o hibrido"),
+    modalities: Optional[List[str]] = Query(None, description="Lista de modalidades seleccionadas por checkbox"),
+    categories: Optional[List[str]] = Query(None, description="Categorías profesionales seleccionadas"),
+    educations: Optional[List[str]] = Query(None, description="Formación mínima seleccionada"),
+    min_experience_years: Optional[int] = Query(None, ge=0, le=10, description="Nivel mínimo de experiencia del deslizante"),
+    min_salary: Optional[float] = Query(None, ge=0, description="Salario mínimo buscado del deslizante"),
+    schedules: Optional[List[str]] = Query(None, description="Tipos de jornada laboral seleccionados"),
+    contract_types: Optional[List[str]] = Query(None, description="Tipos de contrato de trabajo seleccionados"),
+    geo_lat: Optional[float] = Query(None, description="Latitud central para mapa y radio"),
+    geo_lon: Optional[float] = Query(None, description="Longitud central para mapa y radio"),
+    geo_radius_km: Optional[float] = Query(None, ge=0, le=1000, description="Radio de distancia en km desde el punto central"),
     only_ui_saved: bool = Query(True, description="Mostrar solo ofertas marcadas para interfaz"),
     page: int = Query(1, ge=1, description="Número de página"),
     page_size: int = Query(20, ge=5, le=100, description="Elementos por página"),
     sort_by: str = Query("created_at", pattern="^(created_at|score|company|title|date_posted)$"),
     sort_order: str = Query("desc", pattern="^(asc|desc)$"),
 ) -> Dict[str, Any]:
-    """Lista las ofertas de empleo de SQLite con soporte de filtros, paginación y ordenación."""
+    """Lista las ofertas de empleo de SQLite con soporte de filtros multicriterio avanzados, mapa y paginación."""
     db = get_db()
     return db.get_jobs_paginated(
         search=search,
@@ -50,12 +60,32 @@ def list_jobs(
         min_score=min_score,
         is_remote=is_remote,
         modality=modality,
+        modalities=modalities,
+        categories=categories,
+        educations=educations,
+        min_experience_years=min_experience_years,
+        min_salary=min_salary,
+        schedules=schedules,
+        contract_types=contract_types,
+        geo_lat=geo_lat,
+        geo_lon=geo_lon,
+        geo_radius_km=geo_radius_km,
         only_ui_saved=only_ui_saved,
         page=page,
         page_size=page_size,
         sort_by=sort_by,
         sort_order=sort_order,
     )
+
+
+@router.get("/facets")
+def get_job_filter_facets() -> Dict[str, Any]:
+    """
+    Devuelve dinámicamente las opciones y conteos reales de filtros (portales, modalidades,
+    categorías, formación, salarios, etc.) presentes en las ofertas extraídas de los portales.
+    """
+    db = get_db()
+    return db.get_filter_facets()
 
 
 @router.get("/{job_id}")

@@ -41,7 +41,7 @@ class JobSpyConnector(BaseConnector):
 
         offers: List[JobOffer] = []
         seen_urls = set()
-        primary_location = locations[0] if locations else "Spain"
+        primary_location = locations[0] if locations else "Remote"
 
         # AISLAMIENTO ESTRICTO POR PORTAL:
         # Cada portal se consulta por separado para aislar fallos de red o rate-limits
@@ -63,7 +63,19 @@ class JobSpyConnector(BaseConnector):
                         "hours_old": hours_old,
                     }
                     if site == "indeed":
-                        kwargs["country_indeed"] = "spain"
+                        loc_low = primary_location.lower()
+                        if any(k in loc_low for k in ("spain", "españa", "madrid", "barcelona", "valencia")):
+                            kwargs["country_indeed"] = "spain"
+                        elif any(k in loc_low for k in ("uk", "united kingdom", "london", "londres", "manchester")):
+                            kwargs["country_indeed"] = "uk"
+                        elif any(k in loc_low for k in ("germany", "deutschland", "berlin", "munich")):
+                            kwargs["country_indeed"] = "germany"
+                        elif any(k in loc_low for k in ("france", "paris")):
+                            kwargs["country_indeed"] = "france"
+                        elif any(k in loc_low for k in ("canada", "toronto", "vancouver")):
+                            kwargs["country_indeed"] = "canada"
+                        else:
+                            kwargs["country_indeed"] = "usa"
 
                     jobs_df = scrape_jobs(**kwargs)
 

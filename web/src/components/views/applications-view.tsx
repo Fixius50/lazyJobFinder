@@ -13,42 +13,80 @@ import { Button } from "@/components/ui/button";
 import { InfoTooltip } from "@/components/ui/info-tooltip";
 import { CvManager } from "@/components/views/cv-manager";
 import { JobCard } from "@/components/features/jobs/job-card";
-import { JobFilters } from "@/components/features/jobs/job-filters";
+import { JobFilters, EXPERIENCE_STEPS, SALARY_STEPS } from "@/components/features/jobs/job-filters";
 import { JobDetailDialog } from "@/components/features/jobs/job-detail-dialog";
 import { PurgeHistoryButton } from "@/components/features/maintenance/purge-history-card";
 import { ServiceToolbarActions } from "@/components/features/services/service-toolbar-actions";
-import { JobListItem, JobDetail, PaginatedJobsResponse, api } from "@/lib/api";
+import { JobListItem, JobDetail, PaginatedJobsResponse, FilterFacetsResponse, api } from "@/lib/api";
 
 export function ApplicationsView() {
   const [jobsData, setJobsData] = useState<PaginatedJobsResponse | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [showCvPanel, setShowCvPanel] = useState<boolean>(true);
+  const [facets, setFacets] = useState<FilterFacetsResponse | null>(null);
 
   // Filtros y Paginación
   const [searchTerm, setSearchTerm] = useState<string>("");
-  const [locationTerm, setLocationTerm] = useState<string>("");
   const [exclusionTerm, setExclusionTerm] = useState<string>("");
   const [selectedSource, setSelectedSource] = useState<string>("");
   const [selectedStatus, setSelectedStatus] = useState<string>("");
   const [minScore, setMinScore] = useState<number>(0);
-  const [selectedModality, setSelectedModality] = useState<string>("");
   const [currentPage, setCurrentPage] = useState<number>(1);
+
+  // Filtros Avanzados Geográficos y por Dimensiones
+  const [geoLat, setGeoLat] = useState<number>(40.4168);
+  const [geoLon, setGeoLon] = useState<number>(-3.7038);
+  const [geoRadiusKm, setGeoRadiusKm] = useState<number>(50);
+  const [locationName, setLocationName] = useState<string>("Cualquier lugar");
+  const [isAllLocations, setIsAllLocations] = useState<boolean>(true);
+
+  const [selectedModalities, setSelectedModalities] = useState<string[]>([]);
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
+  const [selectedEducations, setSelectedEducations] = useState<string[]>([]);
+  const [minExperienceStep, setMinExperienceStep] = useState<number>(0);
+  const [minSalaryStep, setMinSalaryStep] = useState<number>(0);
+  const [selectedSchedules, setSelectedSchedules] = useState<string[]>([]);
+  const [selectedContractTypes, setSelectedContractTypes] = useState<string[]>([]);
 
   // Modal de Detalle
   const [detailModalOpen, setDetailModalOpen] = useState<boolean>(false);
   const [selectedJobDetail, setSelectedJobDetail] = useState<JobDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState<boolean>(false);
 
+  const loadFacets = async () => {
+    try {
+      const data = await api.getFilterFacets();
+      setFacets(data);
+    } catch (e) {
+      console.warn("Fallo cargando facetas dinámicas:", e);
+    }
+  };
+
+  useEffect(() => {
+    loadFacets();
+  }, []);
+
   const fetchJobs = async () => {
     setLoading(true);
     try {
+      const expYears = minExperienceStep > 0 ? EXPERIENCE_STEPS[minExperienceStep]?.years : undefined;
+      const minSal = minSalaryStep > 0 ? SALARY_STEPS[minSalaryStep]?.value : undefined;
+
       const res = await api.listJobs({
         search: searchTerm || undefined,
-        location: locationTerm || undefined,
         source: selectedSource || undefined,
         status: selectedStatus || undefined,
         min_score: minScore > 0 ? minScore : undefined,
-        modality: selectedModality || undefined,
+        modalities: selectedModalities.length > 0 ? selectedModalities : undefined,
+        categories: selectedCategories.length > 0 ? selectedCategories : undefined,
+        educations: selectedEducations.length > 0 ? selectedEducations : undefined,
+        min_experience_years: expYears,
+        min_salary: minSal,
+        schedules: selectedSchedules.length > 0 ? selectedSchedules : undefined,
+        contract_types: selectedContractTypes.length > 0 ? selectedContractTypes : undefined,
+        geo_lat: !isAllLocations ? geoLat : undefined,
+        geo_lon: !isAllLocations ? geoLon : undefined,
+        geo_radius_km: !isAllLocations ? geoRadiusKm : undefined,
         page: currentPage,
         page_size: 20,
         sort_by: "created_at",
@@ -64,7 +102,23 @@ export function ApplicationsView() {
 
   useEffect(() => {
     fetchJobs();
-  }, [selectedSource, selectedStatus, minScore, selectedModality, locationTerm, currentPage]);
+  }, [
+    selectedSource,
+    selectedStatus,
+    minScore,
+    selectedModalities,
+    selectedCategories,
+    selectedEducations,
+    minExperienceStep,
+    minSalaryStep,
+    selectedSchedules,
+    selectedContractTypes,
+    isAllLocations,
+    geoLat,
+    geoLon,
+    geoRadiusKm,
+    currentPage,
+  ]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -74,24 +128,33 @@ export function ApplicationsView() {
 
   const handleResetFilters = () => {
     setSearchTerm("");
-    setLocationTerm("");
     setExclusionTerm("");
     setSelectedSource("");
     setSelectedStatus("");
-    setSelectedModality("");
     setMinScore(0);
+    setIsAllLocations(true);
+    setGeoLat(40.4168);
+    setGeoLon(-3.7038);
+    setGeoRadiusKm(50);
+    setLocationName("Madrid");
+    setSelectedModalities([]);
+    setSelectedCategories([]);
+    setSelectedEducations([]);
+    setMinExperienceStep(0);
+    setMinSalaryStep(0);
+    setSelectedSchedules([]);
+    setSelectedContractTypes([]);
     setCurrentPage(1);
   };
 
   const handleSaveCriteria = async () => {
     try {
       const terminos = searchTerm.split(",").map((t) => t.trim()).filter(Boolean);
-      const ubicaciones = locationTerm.split(",").map((u) => u.trim()).filter(Boolean);
       const exclusiones = exclusionTerm.split(",").map((e) => e.trim()).filter(Boolean);
 
       await api.updateSearchConfig({
         terminos: terminos.length > 0 ? terminos : ["Desarrollador Junior", "Full Stack"],
-        ubicaciones: ubicaciones.length > 0 ? ubicaciones : ["Spain", "Remoto"],
+        ubicaciones: !isAllLocations ? [locationName] : ["Spain", "Remoto"],
         filtros_exclusion: exclusiones,
         antiguedad_horas: 48,
         limite_por_fuente: 15,
@@ -147,7 +210,10 @@ export function ApplicationsView() {
           <Button
             size="sm"
             variant="outline"
-            onClick={fetchJobs}
+            onClick={() => {
+              fetchJobs();
+              loadFacets();
+            }}
             disabled={loading}
             className="flex items-center gap-1.5 h-8 text-xs"
           >
@@ -156,7 +222,12 @@ export function ApplicationsView() {
           </Button>
 
           {/* Botón de Purga / Vaciar Historial sin la tarjeta */}
-          <PurgeHistoryButton onHistoryCleared={fetchJobs} />
+          <PurgeHistoryButton
+            onHistoryCleared={() => {
+              fetchJobs();
+              loadFacets();
+            }}
+          />
 
           {/* Botón Ocultar / Mostrar Panel */}
           <Button
@@ -177,12 +248,65 @@ export function ApplicationsView() {
           <aside className="lg:col-span-4 xl:col-span-3 space-y-4">
             <CvManager onCvChanged={fetchJobs} />
             <JobFilters
+              facets={facets}
               searchTerm={searchTerm}
               onSearchTermChange={setSearchTerm}
-              locationTerm={locationTerm}
-              onLocationTermChange={setLocationTerm}
               exclusionTerm={exclusionTerm}
               onExclusionTermChange={setExclusionTerm}
+              geoLat={geoLat}
+              geoLon={geoLon}
+              geoRadiusKm={geoRadiusKm}
+              locationName={locationName}
+              isAllLocations={isAllLocations}
+              onGeoLocationChange={(lat, lon, name) => {
+                setGeoLat(lat);
+                setGeoLon(lon);
+                setLocationName(name);
+                setCurrentPage(1);
+              }}
+              onGeoRadiusChange={(radiusKm) => {
+                setGeoRadiusKm(radiusKm);
+                setCurrentPage(1);
+              }}
+              onToggleAllLocations={(all) => {
+                setIsAllLocations(all);
+                setCurrentPage(1);
+              }}
+              selectedModalities={selectedModalities}
+              onModalitiesChange={(mods) => {
+                setSelectedModalities(mods);
+                setCurrentPage(1);
+              }}
+              selectedCategories={selectedCategories}
+              onCategoriesChange={(cats) => {
+                setSelectedCategories(cats);
+                setCurrentPage(1);
+              }}
+              selectedEducations={selectedEducations}
+              onEducationsChange={(edus) => {
+                setSelectedEducations(edus);
+                setCurrentPage(1);
+              }}
+              minExperienceStep={minExperienceStep}
+              onMinExperienceStepChange={(step) => {
+                setMinExperienceStep(step);
+                setCurrentPage(1);
+              }}
+              minSalaryStep={minSalaryStep}
+              onMinSalaryStepChange={(step) => {
+                setMinSalaryStep(step);
+                setCurrentPage(1);
+              }}
+              selectedSchedules={selectedSchedules}
+              onSchedulesChange={(scheds) => {
+                setSelectedSchedules(scheds);
+                setCurrentPage(1);
+              }}
+              selectedContractTypes={selectedContractTypes}
+              onContractTypesChange={(cts) => {
+                setSelectedContractTypes(cts);
+                setCurrentPage(1);
+              }}
               selectedSource={selectedSource}
               onSourceChange={(source) => {
                 setSelectedSource(source);
@@ -191,11 +315,6 @@ export function ApplicationsView() {
               selectedStatus={selectedStatus}
               onStatusChange={(status) => {
                 setSelectedStatus(status);
-                setCurrentPage(1);
-              }}
-              selectedModality={selectedModality}
-              onModalityChange={(modality) => {
-                setSelectedModality(modality);
                 setCurrentPage(1);
               }}
               minScore={minScore}

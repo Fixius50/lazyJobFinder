@@ -169,35 +169,68 @@ class ScoringEngine:
         return True, "Apta para evaluación completa.", analysis_meta
 
     def _evaluate_with_rules_fallback(self, job: Dict[str, Any], meta: Dict[str, Any], cv_text: str = "") -> Dict[str, Any]:
-        """Cálculo estructurado por reglas locales neutral para cualquier profesión."""
-        text = f"{job.get('title', '')} {job.get('description', '')}".lower()
+        """Cálculo estructurado por reglas locales neutral para cualquier profesión y CV."""
+        job_title = (job.get("title") or "").lower()
+        job_desc = (job.get("description") or "").lower()
+        text = f"{job_title} {job_desc}"
         matched = []
         missing = []
 
         verifier = ProfileVerifier(self.profile, cv_text=cv_text)
         candidate_skills = list(verifier.allowed_skills)
 
-        # Si hay competencias definidas en el perfil o CV, contrastar contra la oferta
+        # Contrastar competencias del CV o perfil contra la oferta
         if candidate_skills:
             for skill in candidate_skills:
-                if len(skill) >= 3 and re.search(r"\b" + re.escape(skill) + r"\b", text):
+                skill_lower = skill.lower().strip()
+                if len(skill_lower) >= 3 and re.search(r"\b" + re.escape(skill_lower) + r"\b", text):
                     matched.append(skill.title())
         else:
-            # Si no hay perfil estructurado, buscar términos de búsqueda configurados
             terminos = self.settings.get("busqueda", {}).get("terminos", [])
             for term in terminos:
                 if term and re.search(r"\b" + re.escape(str(term).lower()) + r"\b", text):
                     matched.append(str(term).title())
 
-        base_score = 50 + (len(matched) * 10)
+        # Cálculo de afinidad proporcional real
+        matches_count = len(matched)
+        if matches_count == 0:
+            base_score = 25
+        elif matches_count == 1:
+            base_score = 45
+        elif matches_count == 2:
+            base_score = 65
+        elif matches_count == 3:
+            base_score = 80
+        else:
+            base_score = min(95, 80 + (matches_count - 3) * 5)
 
-        if meta.get("is_explicitly_junior"):
-            base_score += 15
-        elif meta.get("is_strictly_senior_title"):
-            base_score -= 25
+        # Bonificación si alguna habilidad o titulación coincide exactamente en el título del puesto
+        for m in matched:
+            if m.lower() in job_title:
+                base_score = min(98, base_score + 10)
+                break
 
-        final_score = max(20, min(95, base_score))
-        fit_level = "EXCELENTE" if final_score >= 80 else ("BUENO" if final_score >= 65 else "MODERADO")
+        if meta.get("is_explicitly_junior") and base_score >= 40:
+            base_score += 5
+        elif meta.get("is_strictly_senior_title") and matches_count < 3:
+            base_score = max(15, base_score - 25)
+
+        final_score = max(15, min(98, base_score))
+        if final_score >= 80:
+            fit_level = "EXCELENTE"
+        elif final_score >= 65:
+            fit_level = "BUENO"
+        elif final_score >= 45:
+            fit_level = "MODERADO"
+        else:
+            fit_level = "DESCARTADO"
+
+        reasoning = (
+            f"Afinidad estimada en {final_score}/100 según el CV activo. "
+            f"Se identificaron {matches_count} coincidencias directas: {', '.join(matched[:5])}."
+            if matches_count > 0
+            else f"Baja afinidad ({final_score}/100): El perfil de este CV no coincide con los requisitos demandados por esta vacante."
+        )
 
         return {
             "job_id": job["id"],
@@ -205,12 +238,9 @@ class ScoringEngine:
             "fit_level": fit_level,
             "matched_skills": verifier.validate_matched_skills(matched),
             "missing_skills": missing,
-            "strengths": [f"Coincidencias clave detectadas: {', '.join(matched)}."] if matched else ["Perfil potencialmente adaptable a la vacante."],
-            "gaps": [],
-            "reasoning": (
-                f"Evaluación por reglas locales (Ollama offline). Afinidad estimada en {final_score}/100 "
-                f"con {len(matched)} competencias o términos coincidentes."
-            ),
+            "strengths": [f"Coincidencias clave detectadas: {', '.join(matched)}."] if matched else ["Sin coincidencias técnicas directas con el CV."],
+            "gaps": ["No se encontraron competencias obligatorias suficientes."] if matches_count == 0 else [],
+            "reasoning": reasoning,
             "should_apply": final_score >= self.min_score,
         }
 
@@ -340,19 +370,63 @@ class ScoringEngine:
 
         return eval_result
 
-    def reevaluate_all_jobs(self, max_jobs: int = 150) -> int:
+    def reevaluate_all_jobs(self, max_jobs: int = 150, use_llm: bool = False) -> int:
         """
         Reevalúa las ofertas guardadas en la base de datos contra el CV actualmente activo.
         Actualiza puntuación ATS, competencias coincidentes, carencias y reasoning en tiempo real.
+        Ejecuta el cálculo algorítmico directo de alta velocidad para responder en milisegundos
+        sin congelar la API REST ni generar tiempos de espera en Ollama.
         """
         jobs = self.db.get_all_jobs_for_scoring(limit=max_jobs)
         if not jobs:
             return 0
 
+        from ..tailoring.cv_reader import get_active_cv_text_and_meta
+        cv_text, cv_meta = get_active_cv_text_and_meta()
+
+        has_cv = cv_meta.get("has_cv") and bool(cv_text.strip())
+
         evaluated_count = 0
         for job in jobs:
             try:
-                self.evaluate(job)
+                if not has_cv:
+                    no_cv_eval = {
+                        "job_id": job["id"],
+                        "score": 100,
+                        "fit_level": "BUENO",
+                        "matched_skills": [],
+                        "missing_skills": [],
+                        "strengths": ["Oferta registrada sin filtrado de CV."],
+                        "gaps": [],
+                        "reasoning": "Sin filtro de CV: No hay ningún currículum activo configurado.",
+                        "should_apply": True,
+                    }
+                    self.db.save_evaluation(no_cv_eval)
+                    self.db.update_job_status(job["id"], "evaluated")
+                else:
+                    passes, reason, meta = self.prefilter(job)
+                    if not passes:
+                        discarded_eval = {
+                            "job_id": job["id"],
+                            "score": 15,
+                            "fit_level": "DESCARTADO",
+                            "matched_skills": [],
+                            "missing_skills": [],
+                            "strengths": [],
+                            "gaps": [reason],
+                            "reasoning": f"Incompatibilidad en pre-filtro: {reason}",
+                            "should_apply": False,
+                        }
+                        self.db.save_evaluation(discarded_eval)
+                        self.db.update_job_status(job["id"], "discarded")
+                    else:
+                        if use_llm:
+                            self.evaluate(job)
+                        else:
+                            eval_res = self._evaluate_with_rules_fallback(job, meta, cv_text=cv_text)
+                            self.db.save_evaluation(eval_res)
+                            new_status = "evaluated" if eval_res["should_apply"] else "discarded"
+                            self.db.update_job_status(job["id"], new_status)
                 evaluated_count += 1
             except Exception as e:
                 logger.error("Error reevaluando oferta ID %s: %s", job.get("id"), e)

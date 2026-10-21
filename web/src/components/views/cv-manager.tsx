@@ -171,196 +171,79 @@ export function CvManager({ onCvChanged, className = "" }: CvManagerProps) {
       {/* Tarjeta Unificada de CV Activo y Subida en una sola fila */}
       <Card className="border bg-card/80 backdrop-blur-sm shadow-sm">
         <CardHeader className="pb-2 pt-3 px-3 sm:px-4 border-b border-border/40">
-          <div className="flex items-center justify-between gap-1">
-            <div className="flex items-center gap-1.5">
-              <FileCheck className="h-4 w-4 text-primary" />
-              <CardTitle className="text-xs sm:text-sm font-semibold">Currículum Activo</CardTitle>
-              <InfoTooltip content="Documento que evalúa la IA local frente a cada oferta para determinar la puntuación ATS y redactar documentos adaptados." />
-            </div>
-            <div className="flex items-center gap-1">
-              {activeCV && activeCV.type !== "none" ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => handlePreview(activeCV.filename)}
-                  className="h-6 w-6 p-0 text-primary hover:bg-primary/15 rounded"
-                  title="Ver texto extraído del currículum activo"
-                >
-                  <Eye className="h-3.5 w-3.5" />
-                </Button>
-              ) : (
-                <Badge variant="outline" className="text-[10px] py-0 text-muted-foreground">
-                  Sin CV
-                </Badge>
-              )}
-            </div>
+          <div className="flex items-center gap-1.5">
+            <FileCheck className="h-4 w-4 text-primary" />
+            <CardTitle className="text-xs sm:text-sm font-semibold">Currículum Activo</CardTitle>
+            <InfoTooltip content="Documento que evalúa la IA local frente a cada oferta para determinar la puntuación ATS y redactar documentos adaptados." />
           </div>
         </CardHeader>
 
-        <CardContent className="space-y-3 pt-3 px-3 sm:px-4">
-          {/* Ficha técnica compacta */}
-          <div className="bg-muted/40 p-2 rounded-lg text-xs space-y-1 font-mono border">
-            <div className="flex justify-between items-center gap-2">
-              <span className="text-muted-foreground shrink-0">Archivo Activo:</span>
-              <div className="flex items-center gap-1.5 min-w-0">
-                <span className="font-semibold text-foreground truncate max-w-[130px]" title={activeCV?.filename}>
-                  {activeCV?.filename || "Ninguno"}
-                </span>
-                {activeCV?.type !== "none" && activeCV?.filename && (
-                  <button
-                    type="button"
-                    onClick={() => handlePreview(activeCV.filename)}
-                    className="text-primary hover:text-primary/70 transition-colors p-0.5 rounded hover:bg-primary/10"
-                    title="Ver texto extraído de este currículum"
-                  >
-                    <Eye className="h-3.5 w-3.5" />
-                  </button>
-                )}
-              </div>
-            </div>
-            <div className="flex justify-between gap-2 text-[11px]">
-              <span className="text-muted-foreground shrink-0">Tamaño:</span>
-              <span>{activeCV?.size_bytes ? `${(activeCV.size_bytes / 1024).toFixed(1)} KB` : "0 KB"}</span>
-            </div>
-            {activeCV?.type === "none" && (
-              <div className="text-[10px] text-amber-500 font-sans pt-1">
-                No hay CV activo: se guardan todas las ofertas sin filtrado.
-              </div>
-            )}
-          </div>
+        <CardContent className="space-y-2.5 pt-3 px-3 sm:px-4">
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleFileUpload}
+            accept=".pdf,.md,.markdown,.txt"
+            className="hidden"
+            id="cv-file-upload-input"
+            disabled={isUploading}
+          />
 
-          {/* Fila del Selector de CV con Botón Subir CV a la derecha */}
-          <div className="space-y-1">
-            <div className="flex items-center justify-between">
-              <label className="text-[11px] font-medium text-muted-foreground">
-                Seleccionar CV Activo:
-              </label>
-              <span className="text-[10px] font-medium text-muted-foreground">
-                {customCvs.length === 0 ? "0 subidos" : `${customCvs.length} subido${customCvs.length > 1 ? "s" : ""}`}
-              </span>
-              <input
-                type="file"
-                ref={fileInputRef}
-                onChange={handleFileUpload}
-                accept=".pdf,.md,.markdown,.txt"
-                className="hidden"
-                id="cv-file-upload-input"
-                disabled={isUploading}
-              />
-            </div>
-
-            <div className="flex items-center gap-1.5">
-              <div className="flex-1 min-w-0">
-                <Select
-                  value={activeCV?.type === "none" || !activeCV ? "none" : activeCV?.filename}
-                  onChange={(e) => handleSelectCV(e.target.value)}
-                  className="text-xs w-full h-8 bg-background truncate"
-                >
-                  <option value="none">Sin CV (Sin filtrado de ofertas)</option>
-                  {customCvs.map((c) => (
-                    <option key={c.filename} value={c.filename}>
-                      {c.filename}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-
-              {/* Botón para subir CV ubicado a la derecha del selector */}
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={isUploading}
-                className="h-8 px-2.5 text-xs shrink-0 flex items-center gap-1 font-medium hover:border-primary/50 shadow-xs"
-                title="Subir nuevo currículum en PDF, Markdown o TXT"
+          {/* Fila única compacta: Desplegable + Ojo + Subir (solo icono) + Papelera */}
+          <div className="flex items-center gap-1.5">
+            <div className="flex-1 min-w-0">
+              <Select
+                value={activeCV?.type === "none" || !activeCV ? "none" : activeCV?.filename}
+                onChange={(e) => handleSelectCV(e.target.value)}
+                className="text-xs w-full h-8 bg-background truncate font-medium"
               >
-                <Upload className={`h-3.5 w-3.5 ${isUploading ? "animate-bounce text-primary" : "text-primary"}`} />
-                <span>Subir CV</span>
-              </Button>
-            </div>
-          </div>
-
-          {/* Listado de CVs personalizados detectados con botón de eliminar */}
-          <div className="space-y-1.5 pt-1 border-t border-border/40">
-            <div className="flex items-center justify-between text-[11px] font-medium text-muted-foreground">
-              <span>Currículums disponibles:</span>
-              <span className="text-[10px] font-mono">
-                {customCvs.length === 0 ? "0 archivos" : `${customCvs.length} archivos`}
-              </span>
+                <option value="none">Sin CV (Sin filtrado)</option>
+                {customCvs.map((c) => (
+                  <option key={c.filename} value={c.filename}>
+                    {c.filename} ({c.size_bytes ? `${(c.size_bytes / 1024).toFixed(0)} KB` : ""})
+                  </option>
+                ))}
+              </Select>
             </div>
 
-            {customCvs.length === 0 ? (
-              <div className="p-2.5 rounded-lg bg-muted/20 border border-dashed border-border/60 text-center text-[11px] text-muted-foreground">
-                No hay currículums subidos. Actualmente el sistema opera <strong>sin filtro de CV</strong> (todas las vacantes encontradas se conservan). Sube tu CV para activar la evaluación personalizada con IA.
-              </div>
-            ) : (
-              <div className="space-y-1.5 max-h-40 overflow-y-auto pr-0.5">
-                {customCvs.map((c) => {
-                  const isActive = activeCV?.filename === c.filename;
-                  const isDeleting = deletingFile === c.filename;
-                  return (
-                    <div
-                      key={c.filename}
-                      className={`flex items-center justify-between gap-1.5 p-1.5 rounded-lg border text-xs transition-colors ${
-                        isActive
-                          ? "bg-primary/10 border-primary/40 text-foreground"
-                          : "bg-muted/30 border-border/50 text-muted-foreground hover:bg-muted/50"
-                      }`}
-                    >
-                      <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                        <FileText className={`h-3.5 w-3.5 shrink-0 ${isActive ? "text-primary" : "text-muted-foreground"}`} />
-                        <span className="truncate text-[11px] font-medium" title={c.filename}>
-                          {c.filename}
-                        </span>
-                        <span className="text-[10px] text-muted-foreground font-mono shrink-0">
-                          ({(c.size_bytes / 1024).toFixed(0)} KB)
-                        </span>
-                      </div>
+            {/* Ojo: ver texto extraído del CV seleccionado */}
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => handlePreview(activeCV?.filename)}
+              disabled={!activeCV || activeCV.type === "none"}
+              className="h-8 w-8 p-0 shrink-0 text-primary hover:text-primary/80 hover:border-primary/50"
+              title={activeCV?.type !== "none" ? "Previsualizar texto extraído de este CV" : "Sin CV seleccionado"}
+            >
+              <Eye className="h-4 w-4" />
+            </Button>
 
-                      <div className="flex items-center gap-1 shrink-0">
-                        {isActive ? (
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => handlePreview(c.filename)}
-                            className="h-6 w-6 p-0 text-primary hover:bg-primary/20 rounded flex items-center justify-center"
-                            title="Ver texto extraído de este currículum"
-                          >
-                            <Eye className="h-3.5 w-3.5" />
-                          </Button>
-                        ) : (
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => handleSelectCV(c.filename)}
-                            className="h-5 px-1.5 text-[10px] text-primary hover:bg-primary/10"
-                            title="Seleccionar como CV activo para las evaluaciones"
-                          >
-                            Activar
-                          </Button>
-                        )}
+            {/* Subir CV: solo símbolo de subir */}
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isUploading}
+              className="h-8 w-8 p-0 shrink-0 text-primary hover:text-primary/80 hover:border-primary/50"
+              title="Subir nuevo currículum (PDF, Markdown o TXT)"
+            >
+              <Upload className={`h-4 w-4 ${isUploading ? "animate-bounce" : ""}`} />
+            </Button>
 
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => handleDeleteCV(c.filename)}
-                          disabled={isDeleting}
-                          className="h-5 w-5 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                          title={`Eliminar ${c.filename}`}
-                        >
-                          <Trash2 className={`h-3 w-3 ${isDeleting ? "animate-spin" : ""}`} />
-                        </Button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+            {/* Papelera: eliminar CV seleccionado */}
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => activeCV?.filename && handleDeleteCV(activeCV.filename)}
+              disabled={!activeCV || activeCV.type === "none" || deletingFile === activeCV?.filename}
+              className="h-8 w-8 p-0 shrink-0 text-muted-foreground hover:text-destructive hover:border-destructive/50"
+              title={activeCV?.type !== "none" ? `Eliminar "${activeCV?.filename}"` : "Ningún CV seleccionado"}
+            >
+              <Trash2 className={`h-4 w-4 ${deletingFile ? "animate-spin" : ""}`} />
+            </Button>
           </div>
 
           {/* Barra de Progreso Visual mientras se procesa la subida */}

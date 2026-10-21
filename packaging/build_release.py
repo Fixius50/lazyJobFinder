@@ -258,6 +258,7 @@ class ReleaseBuilder:
 
         log("Creando contexto de construcción Docker aislado (sin datos personales)...", "INFO")
         shutil.copy2(os.path.join(ROOT_DIR, "Dockerfile"), os.path.join(isolated_context, "Dockerfile"))
+        shutil.copy2(os.path.join(ROOT_DIR, "requirements.txt"), os.path.join(isolated_context, "requirements.txt"))
         shutil.copytree(
             os.path.join(ROOT_DIR, "src"),
             os.path.join(isolated_context, "src"),

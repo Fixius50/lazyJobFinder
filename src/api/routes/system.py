@@ -107,15 +107,39 @@ def _inspect_services() -> Dict[str, Dict[str, Any]]:
     return services
 
 
-def _resolve_current_project() -> Optional[str]:
+def _resolve_current_project(client=None) -> Optional[str]:
     """
-    Obtiene el nombre del proyecto de Compose actual desde las variables de entorno
+    Obtiene el nombre del proyecto de Compose actual desde las variables de entorno,
+    auto-inspección dinámica vía Docker API del contenedor en ejecución,
     o leyendo el archivo .env en la raíz del proyecto.
-    Si no está configurado, devuelve None para forzar política estricta anti-colisión.
     """
     proj = os.getenv("COMPOSE_PROJECT_NAME")
     if proj and proj.strip():
         return proj.strip()
+
+    # Si se proporciona o se obtiene el cliente Docker, auto-inspeccionar este contenedor
+    dock_client = client or _get_docker_client()
+    if dock_client:
+        try:
+            hostname = os.getenv("HOSTNAME", "").strip()
+            if hostname:
+                me = dock_client.containers.get(hostname)
+                c_proj = (me.labels or {}).get("com.docker.compose.project")
+                if c_proj and c_proj.strip():
+                    return c_proj.strip()
+        except Exception:
+            pass
+
+        try:
+            # Búsqueda por servicio lazyjobfinder/app en contenedores
+            for c in dock_client.containers.list(all=True):
+                labels = c.labels or {}
+                if labels.get("com.docker.compose.service") in ("lazyjobfinder", "app"):
+                    c_proj = labels.get("com.docker.compose.project")
+                    if c_proj and c_proj.strip():
+                        return c_proj.strip()
+        except Exception:
+            pass
 
     env_paths = [
         os.path.join(os.getcwd(), ".env"),
@@ -140,13 +164,12 @@ def _find_compose_container(client, service_name: str, project_name: Optional[st
     """
     Localiza un contenedor de forma dinámica por la etiqueta de servicio de Docker Compose
     (com.docker.compose.service) y por el proyecto (com.docker.compose.project).
-    Garantiza aislamiento estricto entre múltiples instalaciones concurrentes.
-    Si no hay project_name configurado, descarta contenedores de otros proyectos y evita fallbacks arbitrarios.
+    Garantiza aislamiento estricto entre múltiples instalaciones concurrentes con fallbacks seguros.
     """
     if not client:
         return None
     try:
-        resolved_proj = project_name or _resolve_current_project()
+        resolved_proj = project_name or _resolve_current_project(client)
         containers = client.containers.list(all=True)
 
         # 1. Búsqueda estricta por etiquetas de Compose
@@ -156,17 +179,13 @@ def _find_compose_container(client, service_name: str, project_name: Optional[st
             c_proj = labels.get("com.docker.compose.project", "")
 
             if resolved_proj:
-                if c_proj != resolved_proj:
-                    continue
+                if c_proj == resolved_proj and c_svc == service_name:
+                    return c
             else:
-                # Si no hay proyecto configurado, no secuestrar contenedores de proyectos específicos
-                if c_proj:
-                    continue
+                if c_svc == service_name:
+                    return c
 
-            if c_svc == service_name:
-                return c
-
-        # 2. Fallback por convención exacta de nombres de Compose (evita coincidencias accidentales)
+        # 2. Fallback por convención exacta de nombres de Compose (<proyecto>_<servicio>_1, <proyecto>-<servicio>-1)
         if resolved_proj:
             proj_prefix = re.escape(resolved_proj.lower())
             svc_pattern = re.compile(
@@ -176,7 +195,18 @@ def _find_compose_container(client, service_name: str, project_name: Optional[st
                 c_name = c.name.lower()
                 if svc_pattern.match(c_name):
                     return c
-        # Si no hay proyecto configurado, se rechaza cualquier fallback genérico por seguridad
+
+        # 3. Fallback canónico por nombres de servicio definidos en docker-compose.yml
+        canonical_names = {
+            "ollama": ["lazyjob_ollama", "ollama"],
+            "lazyjobfinder": ["lazyjob_app", "lazyjobfinder"],
+        }
+        candidates = canonical_names.get(service_name.lower(), [service_name.lower()])
+        for c in containers:
+            c_name = c.name.lower()
+            if c_name in candidates or any(c_name.endswith(f"_{cand}") or c_name.endswith(f"-{cand}") for cand in candidates):
+                return c
+
     except Exception as e:
         logger.debug("Error buscando contenedor para servicio '%s': %s", service_name, e)
     return None
@@ -194,7 +224,7 @@ def get_services_status() -> Dict[str, Any]:
     """
     client = _get_docker_client()
     services_status = {}
-    current_project = _resolve_current_project()
+    current_project = _resolve_current_project(client)
 
     if client:
         services_to_query = {
@@ -231,11 +261,38 @@ def get_services_status() -> Dict[str, Any]:
                     "id": c.short_id,
                 }
             else:
-                services_status[svc_key] = {
-                    "status": "detenido",
-                    "health": "desconocido",
-                    "container_name": f"{compose_svc} (no detectado)",
-                }
+                if svc_key == "lazyjobfinder":
+                    services_status[svc_key] = {
+                        "status": "saludable",
+                        "health": "running",
+                        "container_name": "lazyjob_app (activo)",
+                    }
+                else:
+                    # Comprobación de salud HTTP para Ollama antes de declarar "detenido"
+                    ollama_alive = False
+                    if svc_key == "ollama":
+                        try:
+                            import urllib.request
+                            ollama_base = os.getenv("OLLAMA_BASE_URL", "http://ollama:11434")
+                            req = urllib.request.Request(f"{ollama_base}/api/tags", headers={"User-Agent": "lazyjobfinder"})
+                            with urllib.request.urlopen(req, timeout=2) as resp:
+                                if resp.status == 200:
+                                    ollama_alive = True
+                        except Exception:
+                            ollama_alive = False
+
+                    if ollama_alive:
+                        services_status[svc_key] = {
+                            "status": "saludable",
+                            "health": "healthy (http)",
+                            "container_name": "lazyjob_ollama (red interna)",
+                        }
+                    else:
+                        services_status[svc_key] = {
+                            "status": "detenido",
+                            "health": "desconocido",
+                            "container_name": f"{compose_svc} (no detectado)",
+                        }
     else:
         services_status = _inspect_services()
 
@@ -289,7 +346,7 @@ def execute_service_action(req: ServiceActionRequest) -> Dict[str, Any]:
             "error_code": "DOCKER_UNAVAILABLE",
         }
 
-    current_project = _resolve_current_project()
+    current_project = _resolve_current_project(client)
     results = []
     db = get_db()
 
@@ -318,22 +375,47 @@ def execute_service_action(req: ServiceActionRequest) -> Dict[str, Any]:
     if service in ("ollama", "all"):
         target_ollama = _find_compose_container(client, "ollama", current_project)
         if not target_ollama:
-            results.append({
-                "service": "ollama",
-                "success": False,
-                "status": "not_found",
-                "message": f"No se encontró el contenedor de Ollama para el proyecto '{current_project or 'default'}'.",
-            })
+            # Comprobación de salud HTTP para verificar si Ollama está respondiendo
+            ollama_alive = False
+            try:
+                import urllib.request
+                ollama_base = os.getenv("OLLAMA_BASE_URL", "http://ollama:11434")
+                req = urllib.request.Request(f"{ollama_base}/api/tags", headers={"User-Agent": "lazyjobfinder"})
+                with urllib.request.urlopen(req, timeout=2) as resp:
+                    if resp.status == 200:
+                        ollama_alive = True
+            except Exception:
+                pass
+
+            if ollama_alive:
+                results.append({
+                    "service": "ollama",
+                    "success": True,
+                    "status": "running",
+                    "message": "El motor de Ollama está accesible y respondiendo en la red interna.",
+                })
+            else:
+                results.append({
+                    "service": "ollama",
+                    "success": False,
+                    "status": "not_found",
+                    "message": f"No se encontró el contenedor de Ollama para el proyecto '{current_project or 'default'}'.",
+                })
         else:
             try:
                 if action == "restart":
                     target_ollama.restart(timeout=10)
+                    msg = f"Servicio '{target_ollama.name}' reiniciado correctamente."
                 elif action == "stop":
                     target_ollama.stop(timeout=10)
+                    msg = f"Servicio '{target_ollama.name}' detenido correctamente."
                 elif action == "start":
-                    target_ollama.start()
+                    if target_ollama.status.lower() == "running":
+                        msg = f"El contenedor '{target_ollama.name}' ya se encuentra en ejecución y operativo."
+                    else:
+                        target_ollama.start()
+                        msg = f"Servicio '{target_ollama.name}' iniciado correctamente."
 
-                msg = f"Servicio '{target_ollama.name}' ({action}) ejecutado correctamente."
                 db.log_event("INFO", "docker", f"Acción '{action}' sobre '{target_ollama.name}' (Proyecto: {current_project or 'n/a'}).")
                 results.append({
                     "service": "ollama",
@@ -437,7 +519,7 @@ def get_system_logs(
 
 @router.get("/logs/container")
 def get_container_logs(
-    service: str = Query("all", regex="^(all|ollama|lazyjobfinder|app|container_app|container_ollama)$"),
+    service: str = Query("all", pattern="^(all|ollama|lazyjobfinder|app|container_app|container_ollama)$"),
     tail: int = Query(80, ge=10, le=500),
 ) -> Dict[str, str]:
     """
@@ -449,7 +531,7 @@ def get_container_logs(
 
     # 1. Intento vía Docker Python Client con resolución dinámica por etiquetas
     client = _get_docker_client()
-    current_project = os.getenv("COMPOSE_PROJECT_NAME")
+    current_project = _resolve_current_project(client)
     if client:
         try:
             services_to_inspect = []

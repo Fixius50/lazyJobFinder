@@ -25,6 +25,7 @@ evaluacion:
   umbral_minimo_puntuacion: 65
   generar_documentos: true
   idioma_documentos: es
+  concurrencia: 2
 notificaciones:
   guardar_en_interfaz: true
   enviar_telegram: true

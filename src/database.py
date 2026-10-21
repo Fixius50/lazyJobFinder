@@ -725,6 +725,19 @@ class Database:
                 results.append(item)
             return results
 
+    def get_unevaluated_jobs(self, limit: int = 100) -> List[Dict[str, Any]]:
+        """Recupera ofertas descubiertas pendientes de evaluación o sin registro de evaluación."""
+        with self._get_connection() as conn:
+            query = """
+                SELECT j.* FROM jobs j
+                LEFT JOIN evaluations e ON j.id = e.job_id
+                WHERE e.id IS NULL OR j.status = 'discovered'
+                ORDER BY j.created_at DESC
+                LIMIT ?
+            """
+            cursor = conn.execute(query, (limit,))
+            return [dict(row) for row in cursor.fetchall()]
+
     def log_event(self, level: str, source: str, message: str, details: Optional[str] = None) -> None:
         """Registra un evento o error del sistema de forma persistente."""
         try:

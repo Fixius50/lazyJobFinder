@@ -125,8 +125,16 @@ class JobPipelineRunner:
                 total_found = metrics["total_encontradas"]
                 new_count = metrics["nuevas_guardadas"]
 
-                if not new_jobs:
-                    logger.info("No se encontraron ofertas nuevas en este ciclo.")
+                # Combinar ofertas recién descubiertas con cualquier vacante pendiente de evaluación en BD
+                pending_jobs = await asyncio.to_thread(self.db.get_unevaluated_jobs, 100)
+                job_dict = {j["id"]: j for j in pending_jobs if j.get("id")}
+                for j in new_jobs:
+                    if j.get("id"):
+                        job_dict[j["id"]] = j
+                jobs_to_evaluate = list(job_dict.values())
+
+                if not jobs_to_evaluate:
+                    logger.info("No hay vacantes nuevas ni pendientes de evaluación en este ciclo.")
                     self.db.finish_pipeline_run(
                         run_id=run_id,
                         status="completed",
@@ -141,76 +149,90 @@ class JobPipelineRunner:
                         )
                     return
 
-                # 2. Evaluación con pre-filtro y Ollama
+                # 2. Evaluación paralela y delimitada con pre-filtro y Ollama
                 min_score = self.settings.get("evaluacion", {}).get("umbral_minimo_puntuacion", 65)
                 generate_docs = self.settings.get("evaluacion", {}).get("generar_documentos", True)
+                concurrency = int(self.settings.get("evaluacion", {}).get("concurrencia", 2))
+                semaphore = asyncio.Semaphore(concurrency)
 
-                for job in new_jobs:
-                    # Ceder brevemente el control al event loop para atender peticiones HTTP (healthcheck/UI)
-                    await asyncio.sleep(0.02)
-                    try:
-                        eval_res = await asyncio.to_thread(self.scoring_engine.evaluate, job)
-                        score = eval_res.get("score", 0)
-                        telegram_status = 0
+                async def _evaluate_and_process_job(job: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+                    async with semaphore:
+                        # Ceder brevemente el control al event loop para responder peticiones HTTP (healthcheck/UI)
+                        await asyncio.sleep(0.02)
+                        try:
+                            eval_res = await asyncio.to_thread(self.scoring_engine.evaluate, job)
+                            score = eval_res.get("score", 0)
+                            telegram_status = 0
 
-                        if score >= min_score and eval_res.get("should_apply"):
-                            doc_paths = None
-                            if generate_docs:
-                                from ..tailoring.cv_reader import get_active_cv_text_and_meta
-                                _, cv_meta = get_active_cv_text_and_meta()
+                            if score >= min_score and eval_res.get("should_apply"):
+                                doc_paths = None
+                                if generate_docs:
+                                    from ..tailoring.cv_reader import get_active_cv_text_and_meta
+                                    _, cv_meta = get_active_cv_text_and_meta()
 
-                                if cv_meta.get("has_cv"):
-                                    # 3. Adaptación honesta y validada de CV y Carta de Presentación
-                                    cv_md, diff_audit = await asyncio.to_thread(self.cv_tailorer.tailor, job, eval_res)
-                                    letter_md = await asyncio.to_thread(self.letter_generator.generate, job, eval_res)
+                                    # Si el usuario subió un CV o si tenemos el perfil cargado en profile.yaml
+                                    if cv_meta.get("has_cv") or bool(self.profile):
+                                        # 3. Adaptación honesta y validada de CV y Carta de Presentación
+                                        cv_md, diff_audit = await asyncio.to_thread(self.cv_tailorer.tailor, job, eval_res)
+                                        letter_md = await asyncio.to_thread(self.letter_generator.generate, job, eval_res)
 
-                                    # 4. Compilación PDF ATS-friendly con ReportLab
-                                    doc_paths = await asyncio.to_thread(
-                                        self.pdf_renderer.render_cv_and_letter,
-                                        job=job,
-                                        cv_md=cv_md,
-                                        diff_audit=diff_audit,
-                                        letter_md=letter_md,
-                                    )
+                                        # 4. Compilación PDF ATS-friendly con ReportLab
+                                        doc_paths = await asyncio.to_thread(
+                                            self.pdf_renderer.render_cv_and_letter,
+                                            job=job,
+                                            cv_md=cv_md,
+                                            diff_audit=diff_audit,
+                                            letter_md=letter_md,
+                                        )
 
-                                    # 5. Persistir rutas en base de datos
-                                    self.db.save_documents({
-                                        "job_id": job["id"],
-                                        "cv_pdf_path": doc_paths["cv_pdf_path"],
-                                        "cv_md_path": doc_paths["cv_md_path"],
-                                        "letter_pdf_path": doc_paths["letter_pdf_path"],
-                                        "letter_md_path": doc_paths["letter_md_path"],
-                                        "diff_summary": yaml.dump(diff_audit, allow_unicode=True),
-                                    })
+                                        # 5. Persistir rutas en base de datos
+                                        self.db.save_documents({
+                                            "job_id": job["id"],
+                                            "cv_pdf_path": doc_paths["cv_pdf_path"],
+                                            "cv_md_path": doc_paths["cv_md_path"],
+                                            "letter_pdf_path": doc_paths["letter_pdf_path"],
+                                            "letter_md_path": doc_paths["letter_md_path"],
+                                            "diff_summary": yaml.dump(diff_audit, allow_unicode=True),
+                                        })
 
-                            # 6. Notificar por Telegram solo si el canal está expresamente habilitado
-                            if send_tg_pref and self.telegram_bot.is_configured():
-                                try:
-                                    await self.telegram_bot.send_job_notification(
-                                        job=job,
-                                        eval_result=eval_res,
-                                        doc_paths=doc_paths,
-                                    )
-                                    telegram_status = 1
-                                except Exception as tg_err:
-                                    logger.error("Error enviando notificación Telegram para oferta ID %d: %s", job["id"], tg_err)
-                                    telegram_status = -1
+                                # 6. Notificar por Telegram solo si el canal está expresamente habilitado
+                                if send_tg_pref and self.telegram_bot.is_configured():
+                                    try:
+                                        await self.telegram_bot.send_job_notification(
+                                            job=job,
+                                            eval_result=eval_res,
+                                            doc_paths=doc_paths,
+                                        )
+                                        telegram_status = 1
+                                    except Exception as tg_err:
+                                        logger.error("Error enviando notificación Telegram para oferta ID %d: %s", job["id"], tg_err)
+                                        telegram_status = -1
+                                else:
+                                    telegram_status = 0
+
+                                # 7. Actualizar estados independientes por canal
+                                ui_saved_val = 1 if save_ui_pref else 0
+                                self.db.update_job_channel_status(
+                                    job_id=job["id"],
+                                    telegram_notified=telegram_status,
+                                    ui_saved=ui_saved_val,
+                                )
+                                self.db.update_job_status(job["id"], "notified" if telegram_status == 1 else "evaluated")
+                                return job
                             else:
-                                telegram_status = 0
+                                self.db.update_job_status(job["id"], "discarded")
+                                return None
 
-                            # 7. Actualizar estados independientes por canal
-                            ui_saved_val = 1 if save_ui_pref else 0
-                            self.db.update_job_channel_status(
-                                job_id=job["id"],
-                                telegram_notified=telegram_status,
-                                ui_saved=ui_saved_val,
-                            )
-                            self.db.update_job_status(job["id"], "notified" if telegram_status == 1 else "evaluated")
-                            relevant_matches.append(job)
+                        except Exception as eval_err:
+                            logger.error("Error evaluando oferta ID %d: %s", job.get("id"), eval_err)
+                            self.db.log_event("ERROR", "evaluator", f"Fallo evaluando oferta ID {job.get('id')}: {str(eval_err)}")
+                            return None
 
-                    except Exception as eval_err:
-                        logger.error("Error evaluando oferta ID %d: %s", job.get("id"), eval_err)
-                        self.db.log_event("ERROR", "evaluator", f"Fallo evaluando oferta ID {job.get('id')}: {str(eval_err)}")
+                eval_tasks = [_evaluate_and_process_job(job) for job in jobs_to_evaluate]
+                eval_results = await asyncio.gather(*eval_tasks, return_exceptions=True)
+                for res in eval_results:
+                    if isinstance(res, dict):
+                        relevant_matches.append(res)
 
                 elapsed = time.time() - start_time
                 self.db.finish_pipeline_run(

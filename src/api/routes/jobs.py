@@ -37,8 +37,8 @@ def list_jobs(
     only_ui_saved: bool = Query(True, description="Mostrar solo ofertas marcadas para interfaz"),
     page: int = Query(1, ge=1, description="Número de página"),
     page_size: int = Query(20, ge=5, le=100, description="Elementos por página"),
-    sort_by: str = Query("created_at", regex="^(created_at|score|company|title|date_posted)$"),
-    sort_order: str = Query("desc", regex="^(asc|desc)$"),
+    sort_by: str = Query("created_at", pattern="^(created_at|score|company|title|date_posted)$"),
+    sort_order: str = Query("desc", pattern="^(asc|desc)$"),
 ) -> Dict[str, Any]:
     """Lista las ofertas de empleo de SQLite con soporte de filtros, paginación y ordenación."""
     db = get_db()

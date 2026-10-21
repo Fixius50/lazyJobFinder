@@ -12,59 +12,26 @@ from unittest.mock import patch, MagicMock
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT_DIR, "packaging"))
 
+import build_release
 from build_release import ReleaseBuilder, compute_sha256
 
 def make_blob(content: bytes) -> tuple[str, bytes]:
     digest = hashlib.sha256(content).hexdigest()
     return digest, content
 
-class StreamRepeater(io.RawIOBase):
-    def __init__(self, total_size: int, pattern: bytes):
-        self.total = total_size
-        self.sent = 0
-        self.pattern = pattern
-        self.pattern_len = len(pattern)
-
-    def read(self, n=-1):
-        if self.sent >= self.total:
-            return b""
-        if n is None or n < 0:
-            to_read = self.total - self.sent
-        else:
-            to_read = min(n, self.total - self.sent)
-        
-        res = bytearray()
-        offset = self.sent % self.pattern_len
-        while len(res) < to_read:
-            chunk = self.pattern[offset : offset + (to_read - len(res))]
-            res.extend(chunk)
-            offset = 0
-        self.sent += len(res)
-        return bytes(res)
-
-    def readable(self):
-        return True
-
-def compute_stream_sha256(total_size: int, pattern: bytes) -> str:
-    h = hashlib.sha256()
-    s = StreamRepeater(total_size, pattern)
-    while chunk := s.read(64 * 1024):
-        h.update(chunk)
-    return h.hexdigest()
-
 class PackagingEdgeCasesTest(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp()
-        self.pattern_a = b"WeightBlobDataA1234567890"
-        self.large_size = 501 * 1024 * 1024
-        self.layer_d = compute_stream_sha256(self.large_size, self.pattern_a)
+        self.fast_weight_size = 256 # Fast lightweight size for unit tests
+        self.weight_content = b"WeightBlobDataA1234567890" * 10
+        self.layer_d, _ = make_blob(self.weight_content)
 
     def tearDown(self):
         import shutil
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
-    def _create_model_tar(self, tar_path, include_3b=True, include_latest=False, 
-                          latest_different=False):
+    def _create_fast_model_tar(self, tar_path, include_3b=True, include_latest=False, 
+                               latest_different=False):
         content_cfg = b'{"architecture": "qwen2"}'
         cfg_d, _ = make_blob(content_cfg)
 
@@ -104,19 +71,24 @@ class PackagingEdgeCasesTest(unittest.TestCase):
             ti_cfg.size = len(content_cfg)
             tf.addfile(ti_cfg, io.BytesIO(content_cfg))
 
-            # Add large weight blob (>500MB)
+            # Add weight blob (matched by min_weight_blob_size_bytes in unit test)
             ti_lyr = tarfile.TarInfo(f"blobs/sha256-{self.layer_d}")
-            ti_lyr.size = self.large_size
-            tf.addfile(ti_lyr, StreamRepeater(self.large_size, self.pattern_a))
+            ti_lyr.size = len(self.weight_content)
+            tf.addfile(ti_lyr, io.BytesIO(self.weight_content))
 
         return cfg_d, self.layer_d
+
+    def _configure_builder_for_unit_tests(self, builder: ReleaseBuilder) -> None:
+        builder.min_weight_blob_size_bytes = len(self.weight_content)
+        builder.min_complete_artifact_size_mb = 0.0
 
     def test_model_audit_only_3b_instruct(self):
         """Test that an archive with only 3b-instruct passes and sets _staging_model_digests."""
         tar_path = os.path.join(self.temp_dir, "model_3b.tar.gz")
-        cfg_d, layer_d = self._create_model_tar(tar_path, include_3b=True, include_latest=False)
+        cfg_d, layer_d = self._create_fast_model_tar(tar_path, include_3b=True, include_latest=False)
 
         builder = ReleaseBuilder()
+        self._configure_builder_for_unit_tests(builder)
         builder._audit_ollama_model_archive(tar_path)
         self.assertIsNotNone(builder._staging_model_digests)
         self.assertEqual(builder._staging_model_digests, [cfg_d, layer_d])
@@ -124,9 +96,10 @@ class PackagingEdgeCasesTest(unittest.TestCase):
     def test_model_audit_both_match(self):
         """Test that an archive with both 3b-instruct and latest matching passes."""
         tar_path = os.path.join(self.temp_dir, "model_both.tar.gz")
-        cfg_d, layer_d = self._create_model_tar(tar_path, include_3b=True, include_latest=True, latest_different=False)
+        cfg_d, layer_d = self._create_fast_model_tar(tar_path, include_3b=True, include_latest=True, latest_different=False)
 
         builder = ReleaseBuilder()
+        self._configure_builder_for_unit_tests(builder)
         builder._audit_ollama_model_archive(tar_path)
         self.assertIsNotNone(builder._staging_model_digests)
         self.assertEqual(builder._staging_model_digests, [cfg_d, layer_d])
@@ -134,9 +107,10 @@ class PackagingEdgeCasesTest(unittest.TestCase):
     def test_model_audit_both_conflict_rejected(self):
         """Test that an archive where 3b-instruct and latest differ is strictly rejected."""
         tar_path = os.path.join(self.temp_dir, "model_conflict.tar.gz")
-        self._create_model_tar(tar_path, include_3b=True, include_latest=True, latest_different=True)
+        self._create_fast_model_tar(tar_path, include_3b=True, include_latest=True, latest_different=True)
 
         builder = ReleaseBuilder()
+        self._configure_builder_for_unit_tests(builder)
         with self.assertRaises(RuntimeError) as cm:
             builder._audit_ollama_model_archive(tar_path)
         self.assertIn("Conflicto entre manifiestos", str(cm.exception))
@@ -144,9 +118,10 @@ class PackagingEdgeCasesTest(unittest.TestCase):
     def test_model_audit_only_latest_without_reference_rejected(self):
         """Test that an archive containing ONLY latest is rejected if there is no prior independent reference."""
         tar_path = os.path.join(self.temp_dir, "model_only_latest.tar.gz")
-        self._create_model_tar(tar_path, include_3b=False, include_latest=True)
+        self._create_fast_model_tar(tar_path, include_3b=False, include_latest=True)
 
         builder = ReleaseBuilder()
+        self._configure_builder_for_unit_tests(builder)
         with self.assertRaises(RuntimeError) as cm:
             builder._audit_ollama_model_archive(tar_path)
         self.assertIn("No se puede aceptar la etiqueta 'latest' sin una referencia independiente previa", str(cm.exception))
@@ -154,9 +129,10 @@ class PackagingEdgeCasesTest(unittest.TestCase):
     def test_model_audit_only_latest_with_matching_reference_accepted(self):
         """Test that an archive with ONLY latest is accepted if its digests match _staging_model_digests."""
         tar_path = os.path.join(self.temp_dir, "model_only_latest_ref.tar.gz")
-        cfg_d, layer_d = self._create_model_tar(tar_path, include_3b=False, include_latest=True)
+        cfg_d, layer_d = self._create_fast_model_tar(tar_path, include_3b=False, include_latest=True)
 
         builder = ReleaseBuilder()
+        self._configure_builder_for_unit_tests(builder)
         builder._staging_model_digests = [cfg_d, layer_d]
         builder._audit_ollama_model_archive(tar_path)
         self.assertEqual(builder._staging_model_digests, [cfg_d, layer_d])
@@ -164,9 +140,10 @@ class PackagingEdgeCasesTest(unittest.TestCase):
     def test_model_audit_only_latest_with_mismatched_reference_rejected(self):
         """Test that an archive with ONLY latest is rejected if digests do not match _staging_model_digests."""
         tar_path = os.path.join(self.temp_dir, "model_only_latest_mismatch.tar.gz")
-        cfg_d, layer_d = self._create_model_tar(tar_path, include_3b=False, include_latest=True)
+        cfg_d, layer_d = self._create_fast_model_tar(tar_path, include_3b=False, include_latest=True)
 
         builder = ReleaseBuilder()
+        self._configure_builder_for_unit_tests(builder)
         builder._staging_model_digests = ["deadbeef" * 8, layer_d]
         with self.assertRaises(RuntimeError) as cm:
             builder._audit_ollama_model_archive(tar_path)
@@ -199,39 +176,81 @@ class PackagingEdgeCasesTest(unittest.TestCase):
             builder._audit_docker_layers(empty_layers_tar)
         self.assertIn("no define ninguna capa obligatoria", str(cm.exception))
 
-    def test_distribution_modes_and_manifests(self):
+    def test_distribution_modes_emit_real_manifest(self):
         """
-        Test that ReleaseBuilder correctly classifies all 4 distribution modes:
-        1. complete (model_included=True, skip_docker=False)
-        2. lightweight_no_model (model_included=False, skip_docker=False)
-        3. lightweight_no_docker (model_included=True, skip_docker=True)
-        4. lightweight_minimal (model_included=False, skip_docker=True)
+        Invokes emit_release_manifest() directly and validates the actual generated release-manifest.json
+        for all 4 combinations:
+        1. Sin opciones --skip-* -> 'complete'
+        2. --skip-model -> 'lightweight_no_model'
+        3. --skip-docker -> 'lightweight_no_docker'
+        4. --skip-docker --skip-model -> 'lightweight_minimal'
         """
         modes = [
-            (True, False, False, "complete"),
-            (False, False, True, "lightweight_no_model"),
-            (True, True, False, "lightweight_no_docker"),
-            (False, True, True, "lightweight_minimal"),
+            (True, False, False, "complete", True),
+            (False, False, True, "lightweight_no_model", False),
+            (True, True, False, "lightweight_no_docker", True),
+            (False, True, True, "lightweight_minimal", False),
         ]
 
-        for model_inc, skip_doc, skip_mod, expected_type in modes:
-            builder = ReleaseBuilder(skip_docker=skip_doc, skip_model=skip_mod)
-            builder.model_included = model_inc
+        old_dist = build_release.DIST_DIR
+        test_dist = os.path.join(self.temp_dir, "test_dist_manifests")
+        os.makedirs(test_dist, exist_ok=True)
+        build_release.DIST_DIR = test_dist
 
-            dummy_art = os.path.join(self.temp_dir, f"test_{expected_type}.zip")
-            with open(dummy_art, "wb") as f:
-                f.write(b"PK\x05\x06" + b"\x00" * 18)
+        try:
+            for model_inc, skip_doc, skip_mod, expected_type, expected_prepack in modes:
+                builder = ReleaseBuilder(skip_docker=skip_doc, skip_model=skip_mod)
+                builder.model_included = model_inc
 
-            if builder.model_included and not builder.skip_docker:
-                derived_type = "complete"
-            elif not builder.skip_docker and not builder.model_included:
-                derived_type = "lightweight_no_model"
-            elif builder.skip_docker and builder.model_included:
-                derived_type = "lightweight_no_docker"
-            else:
-                derived_type = "lightweight_minimal"
+                # Create dummy valid artifact in test_dist
+                art_name = f"lazyJobFinder-1.0.0-windows-x64-{expected_type}.zip"
+                art_path = os.path.join(test_dist, art_name)
+                with open(art_path, "wb") as f:
+                    f.write(b"PK\x05\x06" + b"\x00" * 18)
 
-            self.assertEqual(derived_type, expected_type, f"Failed for mode {expected_type}")
+                audit_map = {art_name: "verified_test"}
+                # Invoke the REAL method that writes release-manifest.json
+                builder.emit_release_manifest([art_path], audit_map)
+
+                manifest_file = os.path.join(test_dist, "release-manifest.json")
+                self.assertTrue(os.path.exists(manifest_file), "release-manifest.json must be created")
+
+                with open(manifest_file, "r", encoding="utf-8") as f:
+                    real_manifest = json.load(f)
+
+                self.assertEqual(
+                    real_manifest.get("distribution_type"),
+                    expected_type,
+                    f"Expected distribution_type '{expected_type}' in real manifest, got '{real_manifest.get('distribution_type')}'"
+                )
+                self.assertEqual(
+                    real_manifest["components"].get("ai_model_prepackaged"),
+                    expected_prepack,
+                    f"Expected ai_model_prepackaged={expected_prepack} for mode '{expected_type}'"
+                )
+        finally:
+            build_release.DIST_DIR = old_dist
+
+    def test_export_ollama_model_failure_is_blocking(self):
+        """
+        Test that failure to capture the canonical reference manifest from the container
+        strictly aborts export_ollama_model with RuntimeError.
+        """
+        builder = ReleaseBuilder()
+        with patch("subprocess.run") as mock_run:
+            def mock_sub_run(cmd, *args, **kwargs):
+                cmd_str = " ".join(cmd) if isinstance(cmd, list) else str(cmd)
+                if "cat" in cmd_str and "manifests" in cmd_str:
+                    return MagicMock(returncode=1, stderr="No such file\n", stdout="")
+                if "ollama" in cmd_str and "list" in cmd_str:
+                    return MagicMock(returncode=0, stdout="qwen2.5:3b-instruct\n")
+                return MagicMock(returncode=0, stderr="", stdout="")
+
+            mock_run.side_effect = mock_sub_run
+
+            with self.assertRaises(RuntimeError) as cm:
+                builder.export_ollama_model()
+            self.assertIn("No se pudo leer el manifiesto canónico", str(cm.exception))
 
     def test_skip_docker_preserves_model_export(self):
         """
@@ -250,7 +269,6 @@ class PackagingEdgeCasesTest(unittest.TestCase):
 
             builder.run()
             mock_build_img.assert_called_once()
-            # export_ollama_model MUST be called even if skip_docker is True
             mock_export_mod.assert_called_once()
 
     def test_artifacts_audit_lightweight_requires_marker(self):
@@ -261,7 +279,6 @@ class PackagingEdgeCasesTest(unittest.TestCase):
             zf.writestr("docker-compose.yml", "services: {}")
             zf.writestr("launch.bat", "echo hi")
 
-        import build_release
         old_staging = build_release.STAGING_DIR
         test_staging = os.path.join(self.temp_dir, "mock_staging")
         os.makedirs(test_staging, exist_ok=True)
@@ -277,8 +294,8 @@ class PackagingEdgeCasesTest(unittest.TestCase):
         """Test that a complete distribution artifact containing .light_release is rejected."""
         builder = ReleaseBuilder(skip_docker=False, skip_model=False)
         builder.model_included = True
+        self._configure_builder_for_unit_tests(builder)
 
-        import build_release
         old_staging = build_release.STAGING_DIR
         test_staging = os.path.join(self.temp_dir, "mock_staging_comp")
         os.makedirs(test_staging, exist_ok=True)
@@ -303,7 +320,7 @@ class PackagingEdgeCasesTest(unittest.TestCase):
                 tf.addfile(ti_j, io.BytesIO(m_json))
 
             staging_mod = os.path.join(test_staging, "ollama_model.tar.gz")
-            self._create_model_tar(staging_mod, include_3b=True, include_latest=False)
+            self._create_fast_model_tar(staging_mod, include_3b=True, include_latest=False)
 
             art_zip = os.path.join(self.temp_dir, "lazyJobFinder-1.0.0-windows-x64.zip")
             with zipfile.ZipFile(art_zip, "w") as zf:

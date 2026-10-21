@@ -73,6 +73,8 @@ class ReleaseBuilder:
         self.build_frontend = build_frontend
         self.model_included = False
         self._staging_model_digests: Optional[List[str]] = None
+        self.min_weight_blob_size_bytes: int = 500 * 1024 * 1024
+        self.min_complete_artifact_size_mb: float = 1200.0
         self.manifest_data = self._load_base_manifest()
 
     def _load_base_manifest(self) -> Dict:
@@ -374,20 +376,26 @@ class ReleaseBuilder:
                 "cat", "/root/.ollama/models/manifests/registry.ollama.ai/library/qwen2.5/3b-instruct",
             ]
             mf_res = subprocess.run(read_mf_cmd, capture_output=True, text=True)
-            if mf_res.returncode == 0 and mf_res.stdout:
-                try:
-                    mf_data = json.loads(mf_res.stdout)
-                    ref_digests = []
-                    if "config" in mf_data and "digest" in mf_data["config"]:
-                        ref_digests.append(mf_data["config"]["digest"].replace("sha256:", "").replace("sha256-", "").strip().lower())
-                    for lyr in mf_data.get("layers", []):
-                        if "digest" in lyr:
-                            ref_digests.append(lyr["digest"].replace("sha256:", "").replace("sha256-", "").strip().lower())
-                    if ref_digests:
-                        self._staging_model_digests = ref_digests
-                        log(f"Referencia independiente de 'qwen2.5:3b-instruct' capturada del contenedor ({len(ref_digests)} digests).", "SUCCESS")
-                except Exception as exc:
-                    log(f"Aviso al parsear manifiesto de referencia desde el contenedor: {exc}", "WARN")
+            if mf_res.returncode != 0 or not mf_res.stdout:
+                raise RuntimeError(
+                    f"Fallo crítico: No se pudo leer el manifiesto canónico de 'qwen2.5:3b-instruct' del contenedor: {mf_res.stderr.strip()}"
+                )
+            try:
+                mf_data = json.loads(mf_res.stdout)
+                ref_digests = []
+                if "config" in mf_data and "digest" in mf_data["config"]:
+                    ref_digests.append(mf_data["config"]["digest"].replace("sha256:", "").replace("sha256-", "").strip().lower())
+                for lyr in mf_data.get("layers", []):
+                    if "digest" in lyr:
+                        ref_digests.append(lyr["digest"].replace("sha256:", "").replace("sha256-", "").strip().lower())
+                if not ref_digests:
+                    raise RuntimeError("El manifiesto de qwen2.5:3b-instruct en el contenedor no contiene capas ni digests válidos.")
+                self._staging_model_digests = ref_digests
+                log(f"Referencia independiente de 'qwen2.5:3b-instruct' capturada del contenedor ({len(ref_digests)} digests).", "SUCCESS")
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Fallo crítico al validar el manifiesto independiente de 'qwen2.5:3b-instruct' desde el contenedor: {exc}"
+                )
 
             # 5. Detener el contenedor de servicio para volcar los datos a salvo
             subprocess.run(["docker", "stop", "-t", "5", container_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -880,12 +888,13 @@ class ReleaseBuilder:
                         f"SHA-256 calculado ({computed_blob_sha}) != digest esperado ({clean_digest})."
                     )
 
-                if blob_match.size > 500 * 1024 * 1024:
+                if blob_match.size >= self.min_weight_blob_size_bytes:
                     has_large_weight_blob = True
 
             if not has_large_weight_blob:
+                min_mb = max(1, self.min_weight_blob_size_bytes // (1024 * 1024))
                 raise RuntimeError(
-                    "AUDITORÍA DE MODELO FALLIDA: 'ollama_model.tar.gz' no contiene el blob principal de pesos neuronales (> 500 MB)."
+                    f"AUDITORÍA DE MODELO FALLIDA: 'ollama_model.tar.gz' no contiene el blob principal de pesos neuronales (>= {min_mb} MB)."
                 )
 
             log(f"  -> Manifiesto '{exact_manifest_path}' y {len(required_digests)} blobs verificados criptográficamente (SHA-256 coincidentes).", "SUCCESS")
@@ -993,10 +1002,10 @@ class ReleaseBuilder:
                     )
                     artifact_audit_status[filename] = "unverified_contents_hash_only"
 
-                if is_complete and size_mb < 1200:
+                if is_complete and size_mb < self.min_complete_artifact_size_mb:
                     raise RuntimeError(
                         f"AUDITORÍA FINAL FALLIDA: El instalador '{filename}' pesa solo {size_mb:.1f} MB. "
-                        "Un paquete completo compilado con Inno Setup debe superar 1.2 GB."
+                        f"Un paquete completo compilado con Inno Setup debe superar {self.min_complete_artifact_size_mb:.1f} MB."
                     )
                 continue
 
@@ -1046,10 +1055,10 @@ class ReleaseBuilder:
                 if has_light:
                     raise RuntimeError(f"AUDITORÍA FINAL FALLIDA: La distribución completa '{filename}' contiene inesperadamente '.light_release'.")
 
-                if size_mb < 1200:
+                if size_mb < self.min_complete_artifact_size_mb:
                     raise RuntimeError(
                         f"AUDITORÍA FINAL FALLIDA: El artefacto completo '{filename}' pesa solo {size_mb:.1f} MB. "
-                        "Un paquete completo con imágenes y modelo debe superar 1.2 GB."
+                        f"Un paquete completo con imágenes y modelo debe superar {self.min_complete_artifact_size_mb:.1f} MB."
                     )
 
                 # Exigir de forma obligatoria que los componentes anidados existan y coincidan exactamente

@@ -894,13 +894,18 @@ class Database:
         from .storage import read_active_cv_pointer
         target_cv = cv_filename
         if target_cv is None:
-            target_cv = read_active_cv_pointer()
+            pointer = read_active_cv_pointer()
+            if isinstance(pointer, dict):
+                target_cv = pointer.get("selected_filename", "")
+            else:
+                target_cv = str(pointer or "")
 
-        if target_cv in ("none", "Ninguno", "") or not target_cv:
+        clean_target_cv = str(target_cv or "").strip()
+        if clean_target_cv in ("none", "Ninguno", "") or not clean_target_cv:
             where_clauses.append("1=0")
         else:
             where_clauses.append("(j.cv_filename = ? OR j.cv_filename IS NULL)")
-            params.append(str(target_cv).strip())
+            params.append(clean_target_cv)
 
         if only_ui_saved:
             where_clauses.append("j.ui_saved = 1")
@@ -1270,7 +1275,11 @@ class Database:
         from .storage import read_active_cv_pointer
         target_cv = cv_filename
         if target_cv is None:
-            target_cv = read_active_cv_pointer()
+            pointer = read_active_cv_pointer()
+            if isinstance(pointer, dict):
+                target_cv = pointer.get("selected_filename", "")
+            else:
+                target_cv = str(pointer or "")
 
         with self._get_connection() as conn:
             has_evals = conn.execute("SELECT 1 FROM evaluations LIMIT 1").fetchone() is not None
@@ -1281,10 +1290,11 @@ class Database:
                 base_from = "jobs j"
                 base_where = "j.ui_saved = 1 AND j.status != 'discarded'"
 
-            if target_cv in ("none", "Ninguno", "") or not target_cv:
+            clean_target_cv = str(target_cv or "").strip()
+            if clean_target_cv in ("none", "Ninguno", "") or not clean_target_cv:
                 base_where += " AND 1=0"
             else:
-                escaped_cv = str(target_cv).strip().replace("'", "''")
+                escaped_cv = clean_target_cv.replace("'", "''")
                 base_where += f" AND (j.cv_filename = '{escaped_cv}' OR j.cv_filename IS NULL)"
 
             constants = _load_shared_constants()

@@ -242,14 +242,14 @@ async def upload_cv_file(file: UploadFile = File(...)) -> Dict[str, Any]:
 
     # Disparar automáticamente la búsqueda de empleo en los portales con los nuevos términos
     try:
-        from ...scheduler.runner import get_runner
+        from ..deps import get_runner
         import asyncio
         runner = get_runner()
         if not runner.is_running():
             asyncio.create_task(runner.run_pipeline(is_manual=True, trigger_label="cv_upload"))
             print(f"\n[CV Auto-Discovery] Iniciando escaneo en portales para '{safe_filename}' con términos {profile_info.get('search_terms')}...", flush=True)
     except Exception as run_err:
-        logger.debug("No se pudo iniciar auto-discovery: %s", run_err)
+        logger.error("No se pudo iniciar auto-discovery: %s", run_err)
 
     return {
         "success": True,

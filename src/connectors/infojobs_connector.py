@@ -110,6 +110,10 @@ class InfoJobsConnector(BaseConnector):
                     if "salaryMax" in item and isinstance(item["salaryMax"], dict):
                         salary_max = item["salaryMax"].get("value")
 
+                    contract_type = item.get("contractType", {}).get("value") if isinstance(item.get("contractType"), dict) else None
+                    schedule = item.get("workDay", {}).get("value") if isinstance(item.get("workDay"), dict) else None
+                    education_level = item.get("study", {}).get("value") if isinstance(item.get("study"), dict) else None
+
                     offer = JobOffer(
                         title=title,
                         company=company,
@@ -122,6 +126,9 @@ class InfoJobsConnector(BaseConnector):
                         salary_max=float(salary_max) if salary_max else None,
                         salary_currency="EUR",
                         date_posted=item.get("published", ""),
+                        contract_type=contract_type,
+                        schedule=schedule,
+                        education_level=education_level,
                         raw_data=item,
                     )
 

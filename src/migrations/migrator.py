@@ -78,8 +78,8 @@ class DatabaseMigrator:
         current_version = self.get_user_version()
         logger.info("Versión de esquema SQLite detectada: v%d", current_version)
 
-        # Si ya está en la versión deseada (v3), no hay cambios pendientes
-        if current_version >= 3:
+        # Si ya está en la versión deseada (v4), no hay cambios pendientes
+        if current_version >= 4:
             return applied
 
         # 1. Crear respaldo recuperable antes de cualquier modificación
@@ -161,10 +161,49 @@ class DatabaseMigrator:
 
                 applied.append("v3_notification_channels")
                 logger.info("Migración v3 completada y confirmada (COMMIT) con éxito.")
+                current_version = 3
 
             except Exception as e:
                 conn.rollback()
                 logger.critical("Error crítico en migración v3: %s. Ejecutado ROLLBACK.", e, exc_info=True)
+                if backup_file and os.path.exists(backup_file):
+                    logger.warning("Restaurando base de datos desde respaldo previo: %s", backup_file)
+                    conn.close()
+                    shutil.copy2(backup_file, self.db_path)
+                raise e
+            finally:
+                conn.close()
+
+        # 4. Migración v3 -> v4: Campos reales de portales (tipo de contrato, jornada laboral, formación mínima)
+        if current_version < 4:
+            conn = self._get_connection()
+            try:
+                conn.execute("BEGIN IMMEDIATE;")
+                existing_cols = self.get_existing_columns("jobs", conn=conn)
+
+                if "contract_type" not in existing_cols:
+                    logger.info("Migración v4: Añadiendo columna 'contract_type' a 'jobs'...")
+                    conn.execute("ALTER TABLE jobs ADD COLUMN contract_type TEXT;")
+
+                if "schedule" not in existing_cols:
+                    logger.info("Migración v4: Añadiendo columna 'schedule' a 'jobs'...")
+                    conn.execute("ALTER TABLE jobs ADD COLUMN schedule TEXT;")
+
+                if "education_level" not in existing_cols:
+                    logger.info("Migración v4: Añadiendo columna 'education_level' a 'jobs'...")
+                    conn.execute("ALTER TABLE jobs ADD COLUMN education_level TEXT;")
+
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_contract_schedule ON jobs(contract_type, schedule);")
+                conn.execute("PRAGMA user_version = 4;")
+                conn.commit()
+
+                applied.append("v4_portal_facets")
+                logger.info("Migración v4 completada y confirmada (COMMIT) con éxito.")
+                current_version = 4
+
+            except Exception as e:
+                conn.rollback()
+                logger.critical("Error crítico en migración v4: %s. Ejecutado ROLLBACK.", e, exc_info=True)
                 if backup_file and os.path.exists(backup_file):
                     logger.warning("Restaurando base de datos desde respaldo previo: %s", backup_file)
                     conn.close()

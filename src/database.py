@@ -449,6 +449,40 @@ class Database:
         desc_hash = compute_description_hash(description)
         canonical_url = canonicalize_url(raw_url)
 
+        contract_type = job_data.get("contract_type")
+        schedule = job_data.get("schedule")
+        education_level = job_data.get("education_level")
+
+        # Fallback de normalización desde el texto del portal si no vino estructurado
+        if not contract_type and description:
+            dl = description.lower()
+            if "indefinid" in dl:
+                contract_type = "Indefinido"
+            elif "temporal" in dl or "duración determinada" in dl:
+                contract_type = "Temporal"
+            elif "práctica" in dl or "practica" in dl or "beca" in dl:
+                contract_type = "Prácticas / Beca"
+            elif "freelance" in dl or "autónom" in dl or "autonom" in dl:
+                contract_type = "Autónomo / Freelance"
+
+        if not schedule and description:
+            dl = description.lower()
+            if "completa" in dl or "full-time" in dl or "full time" in dl:
+                schedule = "Jornada Completa"
+            elif "parcial" in dl or "media jornada" in dl or "part-time" in dl:
+                schedule = "Media Jornada"
+            elif "flexible" in dl:
+                schedule = "Horario Flexible"
+
+        if not education_level and description:
+            dl = description.lower()
+            if any(k in dl for k in ["grado", "ingenier", "universit", "licenciat"]):
+                education_level = "Grado / Universidad"
+            elif any(k in dl for k in ["fp", "ciclo formativo", "módulo", "formación profesional"]):
+                education_level = "FP / Ciclo Formativo"
+            elif any(k in dl for k in ["master", "máster", "postgrado"]):
+                education_level = "Máster / Postgrado"
+
         with self._get_connection() as conn:
             # 1. Comprobar si ya existe por URL exacta
             cursor = conn.execute(
@@ -466,10 +500,13 @@ class Database:
                         UPDATE jobs SET 
                             description = ?,
                             description_hash = ?,
+                            contract_type = COALESCE(?, contract_type),
+                            schedule = COALESCE(?, schedule),
+                            education_level = COALESCE(?, education_level),
                             updated_at = datetime('now', 'localtime')
                         WHERE id = ?
                         """,
-                        (description, desc_hash, existing_id),
+                        (description, desc_hash, contract_type, schedule, education_level, existing_id),
                     )
                     logger.info("Descripción actualizada para oferta existente ID %d (%s).", existing_id, title)
                     return existing_id, "description_updated"
@@ -506,15 +543,16 @@ class Database:
                             url_hash, content_fingerprint, description_hash, canonical_url,
                             title, company, location, is_remote, source, description,
                             salary_min, salary_max, salary_currency, date_posted, status,
-                            duplicate_of_id, similarity_score
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'duplicate', ?, ?)
+                            duplicate_of_id, similarity_score, contract_type, schedule, education_level
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'duplicate', ?, ?, ?, ?, ?)
                         """,
                         (
                             url_hash, content_fingerprint, desc_hash, canonical_url,
                             title, company, location, 1 if job_data.get("is_remote") else 0,
                             source, description, job_data.get("salary_min"),
                             job_data.get("salary_max"), job_data.get("salary_currency", "EUR"),
-                            job_data.get("date_posted", ""), cross_dup_id, fuzzy_sim
+                            job_data.get("date_posted", ""), cross_dup_id, fuzzy_sim,
+                            contract_type, schedule, education_level
                         ),
                     )
                     dup_row_id = cursor.lastrowid
@@ -548,8 +586,9 @@ class Database:
                     INSERT INTO jobs (
                         url_hash, content_fingerprint, description_hash, canonical_url,
                         title, company, location, is_remote, source, description,
-                        salary_min, salary_max, salary_currency, date_posted, status
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        salary_min, salary_max, salary_currency, date_posted, status,
+                        contract_type, schedule, education_level
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         url_hash,
@@ -567,6 +606,9 @@ class Database:
                         job_data.get("salary_currency", "EUR"),
                         job_data.get("date_posted", ""),
                         job_data.get("status", "discovered"),
+                        contract_type,
+                        schedule,
+                        education_level,
                     ),
                 )
                 return cursor.lastrowid, "inserted"
@@ -903,13 +945,13 @@ class Database:
                 params.extend([f"%{cat}%", f"%{cat}%", f"%{cat}%"])
             where_clauses.append(f"({' OR '.join(cat_clauses)})")
 
-        # 3. Filtro de Formación mínima (Checkboxes) - Dinámico según descripciones de ofertas
+        # 3. Filtro de Formación mínima (Checkboxes) - Columna real y descripción
         active_edus = [e.lower().strip() for e in (educations or []) if e and e.lower().strip() not in ("sin_especificar", "todas")]
         if active_edus:
             edu_clauses = []
             for edu in active_edus:
-                edu_clauses.append("LOWER(j.description) LIKE ?")
-                params.append(f"%{edu}%")
+                edu_clauses.append("(LOWER(j.education_level) LIKE ? OR LOWER(j.description) LIKE ?)")
+                params.extend([f"%{edu}%", f"%{edu}%"])
             where_clauses.append(f"({' OR '.join(edu_clauses)})")
 
         # 4. Filtro de Experiencia (Deslizante / Slider)
@@ -931,22 +973,22 @@ class Database:
             where_clauses.append("(j.salary_max >= ? OR j.salary_min >= ?)")
             params.extend([min_salary, min_salary])
 
-        # 6. Filtro de Jornada laboral (Checkboxes) - Dinámico según descripciones de ofertas
+        # 6. Filtro de Jornada laboral (Checkboxes) - Columna real y descripción
         active_scheds = [s.lower().strip() for s in (schedules or []) if s and s.lower().strip() not in ("sin_especificar", "todas")]
         if active_scheds:
             sched_clauses = []
             for sc in active_scheds:
-                sched_clauses.append("LOWER(j.description) LIKE ?")
-                params.append(f"%{sc}%")
+                sched_clauses.append("(LOWER(j.schedule) LIKE ? OR LOWER(j.description) LIKE ?)")
+                params.extend([f"%{sc}%", f"%{sc}%"])
             where_clauses.append(f"({' OR '.join(sched_clauses)})")
 
-        # 7. Filtro de Tipo de contrato (Checkboxes) - Dinámico según descripciones de ofertas
+        # 7. Filtro de Tipo de contrato (Checkboxes) - Columna real y descripción
         active_contracts = [c.lower().strip() for c in (contract_types or []) if c and c.lower().strip() not in ("sin_especificar", "todas")]
         if active_contracts:
             contract_clauses = []
             for ct in active_contracts:
-                contract_clauses.append("LOWER(j.description) LIKE ?")
-                params.append(f"%{ct}%")
+                contract_clauses.append("(LOWER(j.contract_type) LIKE ? OR LOWER(j.description) LIKE ?)")
+                params.extend([f"%{ct}%", f"%{ct}%"])
             where_clauses.append(f"({' OR '.join(contract_clauses)})")
 
         # 8. Filtro Geográfico y de Área recibido desde el mapa del Frontend
@@ -1271,10 +1313,23 @@ class Database:
                 for name, count in skill_counter.most_common(25)
             ]
 
-            # 4. Formaciones, jornadas y tipos de contrato: sin listas hardcodeadas; solo lo que exista estructurado en el back
-            educations = []
-            schedules = []
-            contract_types = []
+            # 4. Formaciones mínimas extraídas directamente de las ofertas registradas
+            edu_rows = conn.execute(
+                f"SELECT j.education_level, COUNT(*) as c FROM {base_from} WHERE {base_where} AND j.education_level IS NOT NULL AND j.education_level != '' GROUP BY j.education_level ORDER BY c DESC"
+            ).fetchall()
+            educations = [{"id": r["education_level"].lower(), "label": r["education_level"], "count": r["c"]} for r in edu_rows]
+
+            # 5. Jornada laboral extraída directamente de las ofertas registradas
+            sch_rows = conn.execute(
+                f"SELECT j.schedule, COUNT(*) as c FROM {base_from} WHERE {base_where} AND j.schedule IS NOT NULL AND j.schedule != '' GROUP BY j.schedule ORDER BY c DESC"
+            ).fetchall()
+            schedules = [{"id": r["schedule"].lower(), "label": r["schedule"], "count": r["c"]} for r in sch_rows]
+
+            # 6. Tipos de contrato extraídos directamente de las ofertas registradas
+            ct_rows = conn.execute(
+                f"SELECT j.contract_type, COUNT(*) as c FROM {base_from} WHERE {base_where} AND j.contract_type IS NOT NULL AND j.contract_type != '' GROUP BY j.contract_type ORDER BY c DESC"
+            ).fetchall()
+            contract_types = [{"id": r["contract_type"].lower(), "label": r["contract_type"], "count": r["c"]} for r in ct_rows]
 
             # 7. Estadísticas salariales reales de ofertas visibles
             sal_row = conn.execute(

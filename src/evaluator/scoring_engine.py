@@ -176,7 +176,7 @@ class ScoringEngine:
         matched = []
         missing = []
 
-        verifier = ProfileVerifier(self.profile, cv_text=cv_text)
+        verifier = ProfileVerifier(self.profile if not cv_text else {}, cv_text=cv_text)
         candidate_skills = list(verifier.allowed_skills)
 
         # Contrastar competencias del CV o perfil contra la oferta
@@ -190,6 +190,13 @@ class ScoringEngine:
             for term in terminos:
                 if term and re.search(r"\b" + re.escape(str(term).lower()) + r"\b", text):
                     matched.append(str(term).title())
+
+        # Deduplicar preservando orden
+        dedup_matched = []
+        for m in matched:
+            if m not in dedup_matched:
+                dedup_matched.append(m)
+        matched = dedup_matched
 
         # Cálculo de afinidad proporcional real
         matches_count = len(matched)
@@ -289,7 +296,7 @@ class ScoringEngine:
             self.db.update_job_status(job["id"], "discarded")
             return discarded_eval
 
-        verifier = ProfileVerifier(self.profile, cv_text=cv_text)
+        verifier = ProfileVerifier(self.profile if not cv_text else {}, cv_text=cv_text)
 
         system_prompt = (
             "Eres un evaluador y seleccionador profesional de empleo independiente y riguroso. "
@@ -324,6 +331,7 @@ class ScoringEngine:
         )
 
         try:
+            print(f"\n[IA / Ollama] Evaluando oferta #{job['id']}: '{job.get('title')}' ({job.get('company')}) con modelo '{self.ollama.default_model}'...", flush=True)
             # Salidas estructuradas nativas de Ollama restringidas por gramática llama.cpp
             schema_json = JobEvaluationSchema.model_json_schema()
             raw_response = self.ollama.generate(
@@ -355,6 +363,7 @@ class ScoringEngine:
                 "reasoning": validated.reasoning.strip(),
                 "should_apply": bool(validated.should_apply and score >= self.min_score),
             }
+            print(f"[IA / Ollama] -> Resultado: {score}/100 ({validated.fit_level}) | Coincidencias: {', '.join(verified_matched) if verified_matched else 'Ninguna'}", flush=True)
         except Exception as e:
             logger.warning(
                 "Fallo o respuesta inválida en Ollama para oferta ID %d (%s), usando reglas locales: %s",
@@ -385,6 +394,10 @@ class ScoringEngine:
         cv_text, cv_meta = get_active_cv_text_and_meta()
 
         has_cv = cv_meta.get("has_cv") and bool(cv_text.strip())
+
+        print(f"\n" + "=" * 65, flush=True)
+        print(f"[CV / IA] >>> Procesando {len(jobs)} ofertas contra el CV activo '{cv_meta.get('filename')}' ({len(cv_text)} caracteres)...", flush=True)
+        print("=" * 65, flush=True)
 
         evaluated_count = 0
         for job in jobs:
@@ -419,6 +432,7 @@ class ScoringEngine:
                         }
                         self.db.save_evaluation(discarded_eval)
                         self.db.update_job_status(job["id"], "discarded")
+                        print(f"[CV / IA] ({evaluated_count + 1}/{len(jobs)}) '{job.get('title')}' -> DESCARTADA ({reason})", flush=True)
                     else:
                         if use_llm:
                             self.evaluate(job)
@@ -427,7 +441,11 @@ class ScoringEngine:
                             self.db.save_evaluation(eval_res)
                             new_status = "evaluated" if eval_res["should_apply"] else "discarded"
                             self.db.update_job_status(job["id"], new_status)
+                            skills_str = ", ".join(eval_res.get("matched_skills", [])) or "Ninguna"
+                            print(f"[CV / IA] ({evaluated_count + 1}/{len(jobs)}) '{job.get('title')}' -> {eval_res.get('fit_level')} ({eval_res.get('score')}%) | Skills: {skills_str}", flush=True)
                 evaluated_count += 1
             except Exception as e:
                 logger.error("Error reevaluando oferta ID %s: %s", job.get("id"), e)
+
+        print(f"[CV / IA] >>> Finalizada evaluación y adaptación de {evaluated_count} ofertas.", flush=True)
         return evaluated_count

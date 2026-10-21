@@ -213,7 +213,34 @@ class TecnoempleoConnector(BaseConnector):
 
                         desc_elem = card.find("span", class_=lambda cl: cl and "hidden-md-down" in cl)
                         desc = desc_elem.text.strip() if desc_elem else " ".join(span_texts[:3])
-                        clean_desc = clean_html(desc)
+                        # Extraer tipo de contrato, jornada y formación de las etiquetas del card
+                        contract_type = None
+                        schedule = None
+                        education_level = None
+                        for st in span_texts:
+                            stl = st.lower()
+                            if "indefinid" in stl:
+                                contract_type = "Indefinido"
+                            elif "temporal" in stl:
+                                contract_type = "Temporal"
+                            elif "práctica" in stl or "practica" in stl or "beca" in stl:
+                                contract_type = "Prácticas / Beca"
+                            elif "freelance" in stl or "autónom" in stl:
+                                contract_type = "Autónomo / Freelance"
+
+                            if "completa" in stl or "full-time" in stl:
+                                schedule = "Jornada Completa"
+                            elif "parcial" in stl or "media jornada" in stl or "part-time" in stl:
+                                schedule = "Media Jornada"
+                            elif "flexible" in stl:
+                                schedule = "Horario Flexible"
+
+                            if any(k in stl for k in ["grado", "ingenier", "universit"]):
+                                education_level = "Grado / Universidad"
+                            elif any(k in stl for k in ["fp", "ciclo", "módulo", "formación profesional"]):
+                                education_level = "FP / Ciclo Formativo"
+                            elif any(k in stl for k in ["master", "máster", "postgrado"]):
+                                education_level = "Máster / Postgrado"
 
                         offer = JobOffer(
                             title=title,
@@ -224,6 +251,9 @@ class TecnoempleoConnector(BaseConnector):
                             is_remote=is_remote,
                             description=clean_desc or f"Oferta de {title} en {company} ({loc})",
                             date_posted=pub_date,
+                            contract_type=contract_type,
+                            schedule=schedule,
+                            education_level=education_level,
                             raw_data={"source": "html_scraper"},
                         )
 

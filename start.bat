@@ -207,8 +207,12 @@ echo.
 echo --^> Abriendo el panel de administracion en tu navegador...
 start http://localhost:8000
 echo.
-echo Para detener los servicios y salir, pulsa cualquier tecla en esta ventana...
-pause >nul
+echo =====================================================================
+echo   Mostrando actividad de la IA y el backend en tiempo real:
+echo   (Pulsa Ctrl+C para salir y detener los servicios)
+echo =====================================================================
+echo.
+docker compose logs -f lazyjob_app
 goto :STOP_AND_EXIT
 
 :: -----------------------------------------------------------------------------

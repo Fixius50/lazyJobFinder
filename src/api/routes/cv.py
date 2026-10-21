@@ -228,6 +228,7 @@ def _reevaluate_jobs_with_active_cv(db: Any) -> int:
     try:
         from ...evaluator.scoring_engine import ScoringEngine
         import yaml
+        import threading
         settings_path = os.path.join(BASE_DIR, "config", "settings.yaml")
         profile_path = os.path.join(BASE_DIR, "config", "profile.yaml")
         settings = {}
@@ -235,7 +236,25 @@ def _reevaluate_jobs_with_active_cv(db: Any) -> int:
             with open(settings_path, "r", encoding="utf-8") as f:
                 settings = yaml.safe_load(f) or {}
         engine = ScoringEngine(db, profile_path, settings)
-        return engine.reevaluate_all_jobs(max_jobs=150)
+        count = engine.reevaluate_all_jobs(max_jobs=150)
+
+        # Si Ollama está disponible, procesar con IA en segundo plano mostrando progreso en la terminal
+        def _bg_ollama_evaluation():
+            try:
+                health = engine.ollama.check_health()
+                if not health.get("online"):
+                    print("[IA / Ollama] Ollama no está online; se mantiene la evaluación algorítmica rápida.", flush=True)
+                    return
+                print(f"[IA / Ollama] >>> Iniciando reevaluación profunda con IA ({engine.ollama.default_model})...", flush=True)
+                promising_jobs = db.get_jobs_paginated(page_size=20)["items"]
+                for pj in promising_jobs:
+                    engine.evaluate(pj)
+                print(f"[IA / Ollama] >>> Reevaluación profunda con IA completada para {len(promising_jobs)} ofertas.", flush=True)
+            except Exception as ex:
+                logger.debug("Error en bg ollama evaluation: %s", ex)
+
+        threading.Thread(target=_bg_ollama_evaluation, daemon=True).start()
+        return count
     except Exception as e:
         logger.warning("Fallo al reevaluar ofertas con el CV activo: %s", e)
         return 0

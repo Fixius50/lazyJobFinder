@@ -21,6 +21,9 @@ class JobOffer:
     salary_max: Optional[float] = None
     salary_currency: str = "EUR"
     date_posted: Optional[str] = None
+    contract_type: Optional[str] = None
+    schedule: Optional[str] = None
+    education_level: Optional[str] = None
     raw_data: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -37,6 +40,9 @@ class JobOffer:
             "salary_max": self.salary_max,
             "salary_currency": self.salary_currency,
             "date_posted": self.date_posted or datetime.now().strftime("%Y-%m-%d"),
+            "contract_type": self.contract_type.strip() if self.contract_type else None,
+            "schedule": self.schedule.strip() if self.schedule else None,
+            "education_level": self.education_level.strip() if self.education_level else None,
         }
 
 

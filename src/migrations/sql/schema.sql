@@ -25,7 +25,10 @@ CREATE TABLE IF NOT EXISTS jobs (
     similarity_score REAL,
     alternate_sources TEXT DEFAULT '[]',
     telegram_notified INTEGER DEFAULT 0,
-    ui_saved INTEGER DEFAULT 1
+    ui_saved INTEGER DEFAULT 1,
+    contract_type TEXT,
+    schedule TEXT,
+    education_level TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_jobs_url_hash ON jobs(url_hash);

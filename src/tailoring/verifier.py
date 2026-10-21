@@ -25,6 +25,13 @@ class ProfileVerifier:
         self.has_commercial_employment = bool(profile.get("experiencia_laboral", [])) or "experiencia" in self.cv_text_lower
 
     def _extract_allowed_skills(self) -> Set[str]:
+        # Si se aporta un texto de CV activo (cualquier archivo cargado o seleccionado),
+        # las competencias DEBEN provenir 100% exclusivamente del CV aportado.
+        # NUNCA inyectar competencias técnicas de profile.yaml (evita mezclar perfiles IT con no IT).
+        if self.cv_text and self.cv_text.strip():
+            return self._extract_skills_from_cv_text()
+
+        # Solo si no hay CV cargado o está vacío, recurrir a las competencias de profile.yaml
         skills = set()
         competencias = self.profile.get("competencias_tecnicas", {})
         if isinstance(competencias, dict):
@@ -49,69 +56,130 @@ class ProfileVerifier:
             if isinstance(h, str):
                 skills.add(h.lower().strip())
 
-        # Extraer competencias, herramientas y habilidades directamente del texto del CV activo
-        if self.cv_text:
-            lines = self.cv_text.splitlines()
-            in_skills_section = False
-            for line in lines:
-                clean_line = line.strip()
-                if not clean_line:
-                    continue
-                # Detección de encabezados de sección de habilidades en cualquier profesión
-                if re.match(r"^(#+|[A-ZÁÉÍÓÚ\s]{3,}:?|\*\*).*(habilidad|competencia|conocimiento|skill|tecnolog|herramienta|aptitud|tools|idioma|destreza|contenido|módulo|curso|formación)", clean_line, re.IGNORECASE):
-                    in_skills_section = True
-                    continue
-                elif re.match(r"^(#+|[A-ZÁÉÍÓÚ\s]{3,}:?|\*\*).*(experiencia|educaci|contacto|sobre m|perfil|proyectos|trayectoria|intereses)", clean_line, re.IGNORECASE):
-                    in_skills_section = False
-
-                if in_skills_section:
-                    parts = re.split(r"[,;•|·\*\-\–/\t]|\s{2,}", clean_line)
-                    for p in parts:
-                        cand = p.strip().lower()
-                        cand = re.sub(r"^(nivel|conocimientos en|experiencia en|avanzado|medio|básico|alto|dominio de)\s+", "", cand).strip()
-                        if 2 <= len(cand) <= 35 and not cand.isdigit():
-                            skills.add(cand)
-                else:
-                    # Viñetas con términos concisos
-                    if clean_line.startswith(("-", "*", "•")):
-                        item = clean_line.lstrip("-*• ").strip().lower()
-                        if 2 <= len(item) <= 30 and not any(v in item for v in ["responsable", "desarrollé", "trabajé", "durante", "gestioné", "lideré"]):
-                            skills.add(item)
-                    elif ":" in clean_line:
-                        parts = clean_line.split(":")
-                        if len(parts) == 2 and 3 <= len(parts[1].strip()) <= 35:
-                            skills.add(parts[1].strip().lower())
-
-            # Si no se detectaron viñetas estructuradas, extraer términos y frases sustantivas clave
-            if len(skills) < 3:
-                key_phrases = re.findall(r"[A-Za-zÁÉÍÓÚáéíóúñÑ0-9\+\#\.\-]{3,}(?:\s+[A-Za-zÁÉÍÓÚáéíóúñÑ0-9\+\#\.\-]{3,}){0,2}", self.cv_text)
-                ignore = {"para", "como", "sobre", "este", "esta", "estos", "estas", "todos", "todas", "desde", "hasta", "entre", "según", "segun", "conforme", "artículo", "servicio", "prevención", "evaluación", "siguientes", "contenidos", "certifica", "conforme", "superado", "éxito", "mancomunado", "grupo"}
-                for phrase in key_phrases:
-                    cand = phrase.strip().lower()
-                    if 3 <= len(cand) <= 35 and cand not in ignore and not cand.isdigit():
-                        skills.add(cand)
-
         return {s for s in skills if s}
+
+    def _extract_skills_from_cv_text(self) -> Set[str]:
+        """Extrae competencias, herramientas, maquinaria y aptitudes exclusivamente del CV activo de forma universal."""
+        skills = set()
+        lines = self.cv_text.splitlines()
+
+        stop_lines_pattern = re.compile(
+            r"(\bduración\s+del\s+curso\b|\bfecha\s*:|\bfirma\b|\bfdo\s*:|\bconforme\s+ha\s+cursado\b|"
+            r"\bcamino\s+del|\bcalle\b|\bavenida\b|\b\d{5}\b|\bdni\b|\bnie\b|\bnif\b|\badecco\b|"
+            r"\bmancomunado\b|\bdomicilio\b|\btel[eé]fono\b|\bemail\b|\bcorreo\b|\bhttp\b|\bwww\b)",
+            re.IGNORECASE,
+        )
+
+        stop_words = {
+            "el", "la", "los", "las", "un", "una", "unos", "unas", "del", "al", "con", "sin", "por", "para",
+            "como", "sobre", "entre", "desde", "hasta", "según", "segun", "conforme", "artículo", "articulo",
+            "ley", "decreto", "servicio", "prevención", "evaluación", "evaluacion", "siguientes", "contenidos",
+            "certifica", "certificado", "superado", "éxito", "exito", "mancomunado", "grupo", "adecco",
+            "alumno", "roberto", "monedero", "alonso", "programa", "formación", "formacion", "curso",
+            "genérico", "generico", "lugares", "equipos", "trabajo", "trabajos", "psicosociales", "físicos",
+            "fisicos", "químicos", "quimicos", "biológicos", "biologicos", "pvd", "especialidad", "riesgos",
+            "laborales", "madrid", "pozuelo", "alarcon", "alarcón", "barcelona", "valencia", "sevilla", "bilbao",
+            "málaga", "zaragoza", "españa", "spain", "camino", "cerro", "gamos", "dni", "nie", "horas", "min",
+            "minutos", "diciembre", "enero", "consta", "nivel", "medio", "básico", "alto", "avanzado", "profesional",
+            "candidato", "titular", "año", "años", "experiencia", "conocimientos", "habilidades", "competencias"
+        }
+
+        in_skills_section = False
+        has_explicit_sections = bool(
+            re.search(
+                r"(contenido|módulo|modulo|curso|formación|formacion|habilidad|competencia|conocimiento|skill|herramienta|aptitud|destreza|funciones|tareas)",
+                self.cv_text,
+                re.IGNORECASE,
+            )
+        )
+
+        for line in lines:
+            clean_line = line.strip()
+            if not clean_line or stop_lines_pattern.search(clean_line):
+                in_skills_section = False
+                continue
+
+            # Detección de encabezado de sección relevante
+            if re.search(r"(contenidos|módulos|competencias|habilidades|skills|conocimientos|herramientas|funciones|formación)\s*:?$", clean_line, re.IGNORECASE):
+                in_skills_section = True
+                continue
+
+            is_bullet = clean_line.startswith(("-", "*", "•", "·", "1.", "2.", "3.", "4.", "5."))
+            if has_explicit_sections and not in_skills_section and not is_bullet:
+                continue
+
+            clean_content = re.sub(r"^[\-\*•·0-9\.\s]+", "", clean_line)
+            chunks = re.split(r"[,;•|·\*\–/\t]|\s{2,}", clean_content)
+            for chunk in chunks:
+                sub_chunks = re.split(r"(?<=[a-zñáéíóú0-9])\s+(?=[A-ZÁÉÍÓÚ][a-zñáéíóú])", chunk)
+                for sc in sub_chunks:
+                    cand = sc.strip().lower()
+                    cand = re.sub(r"^(nivel|conocimientos en|experiencia en|avanzado|medio|básico|alto|dominio de|especialidad)\s+", "", cand).strip()
+                    cand = re.sub(r"[\(\)\[\]\{\}\"\']", "", cand).strip(" -.,;:•|·/*")
+                    if not cand or len(cand) < 3 or stop_lines_pattern.search(cand):
+                        continue
+
+                    if ":" in cand:
+                        parts = [p.strip() for p in cand.split(":") if p.strip()]
+                        for p in parts:
+                            p_clean = re.sub(r"[\(\)\[\]\{\}\"\']", "", p).strip(" -.,;:•|·/*")
+                            if p_clean not in stop_words and len(p_clean) >= 3 and not stop_lines_pattern.search(p_clean):
+                                skills.add(p_clean)
+                    else:
+                        if cand not in stop_words and not stop_lines_pattern.search(cand):
+                            skills.add(cand)
+
+        # Expansión de sinónimos y términos técnicos de diferentes oficios (logística, almacén, sanidad, administración, etc.)
+        expanded = set(skills)
+        for s in list(skills):
+            if "carretillaselevadoras" in s or "carretilla" in s:
+                expanded.add("carretillas elevadoras")
+                expanded.add("carretilla")
+                expanded.add("carretillero")
+            if "traspaletamanual" in s or "traspaleta" in s:
+                expanded.add("traspaleta manual")
+                expanded.add("traspaleta eléctrica")
+                expanded.add("traspaleta")
+            if "manipulación de objetos" in s or "manipulación de cargas" in s:
+                expanded.add("manipulación de cargas")
+                expanded.add("manipulacion de cargas")
+            if "protección individual" in s or "epi" in s:
+                expanded.add("epi")
+                expanded.add("epis")
+            if "logística" in s or "logistica" in s:
+                expanded.add("almacén")
+                expanded.add("almacen")
+                expanded.add("logística")
+            if "prevención de riesgos" in s or "riesgos laborales" in s:
+                expanded.add("prevención de riesgos laborales")
+                expanded.add("prl")
+
+        return {
+            s for s in expanded
+            if s not in stop_words and len(s) >= 3 and not s.isdigit()
+        }
 
     def _extract_allowed_institutions(self) -> Set[str]:
         inst = set()
-        for f in self.profile.get("formacion", []):
-            if isinstance(f, dict) and f.get("institucion"):
-                inst.add(f.get("institucion").lower().strip())
+        if not self.cv_text:
+            for f in self.profile.get("formacion", []):
+                if isinstance(f, dict) and f.get("institucion"):
+                    inst.add(f.get("institucion").lower().strip())
         return inst
 
     def _extract_allowed_degrees(self) -> Set[str]:
         degs = set()
-        for f in self.profile.get("formacion", []):
-            if isinstance(f, dict) and f.get("titulo"):
-                degs.add(f.get("titulo").lower().strip())
-        candidato = self.profile.get("candidato", {})
-        if candidato.get("titulo_profesional"):
-            degs.add(candidato.get("titulo_profesional").lower().strip())
+        if not self.cv_text:
+            for f in self.profile.get("formacion", []):
+                if isinstance(f, dict) and f.get("titulo"):
+                    degs.add(f.get("titulo").lower().strip())
+            candidato = self.profile.get("candidato", {})
+            if candidato.get("titulo_profesional"):
+                degs.add(candidato.get("titulo_profesional").lower().strip())
 
         if self.cv_text:
             degree_matches = re.findall(
-                r"(?:grado|máster|master|ingenier[íi]a|licenciatura|fp|ciclo formativo|técnico superior|bachillerato|diplomatura)\s+(?:en\s+)?[a-zA-ZáéíóúÁÉÍÓÚñÑ\s]{3,40}",
+                r"(?:grado|máster|master|ingenier[íi]a|licenciatura|fp|ciclo formativo|técnico superior|bachillerato|diplomatura|curso|certificaci[óo]n|programa de formación)\s+(?:en\s+)?[a-zA-ZáéíóúÁÉÍÓÚñÑ\s]{3,40}",
                 self.cv_text,
                 re.IGNORECASE,
             )
@@ -282,15 +350,21 @@ class ProfileVerifier:
     def validate_matched_skills(self, claimed_skills: List[str]) -> List[str]:
         """Filtra y devuelve las habilidades verificables en el perfil del usuario o en su CV activo."""
         verified = []
+        noise = {
+            "madrid", "barcelona", "valencia", "sevilla", "bilbao", "málaga", "zaragoza", "adecco", "dni", "nie",
+            "alumno", "fecha", "servicio", "prevención", "empresa", "candidato", "profesional", "duración", "horas"
+        }
         for skill in claimed_skills:
             clean = skill.strip()
             if not clean:
                 continue
             clean_lower = clean.lower()
-            # 1. Comprobar contra competencias del perfil
+            if clean_lower in noise or len(clean_lower) < 3:
+                continue
+            # 1. Comprobar contra competencias autorizadas del perfil o CV activo
             if clean_lower in self.allowed_skills:
                 verified.append(clean)
-            # 2. Comprobar si figura textualmente en el CV activo
+            # 2. Comprobar si figura textualmente en el CV activo (evitando palabras vacías)
             elif self.cv_text_lower and clean_lower in self.cv_text_lower:
                 verified.append(clean)
             # 3. Si no hay perfil ni CV cargado, aceptar las detectadas objetivamente por el motor

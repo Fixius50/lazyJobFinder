@@ -102,6 +102,24 @@ class JobSpyConnector(BaseConnector):
                             except Exception:
                                 pass
 
+                            raw_job_type = str(row.get("job_type") or "").strip()
+                            if raw_job_type.lower() == "nan":
+                                raw_job_type = ""
+                            contract_type = None
+                            schedule = None
+                            if raw_job_type:
+                                jt_lower = raw_job_type.lower()
+                                if "fulltime" in jt_lower or "full_time" in jt_lower:
+                                    schedule = "Jornada Completa"
+                                elif "parttime" in jt_lower or "part_time" in jt_lower:
+                                    schedule = "Media Jornada"
+                                if "contract" in jt_lower:
+                                    contract_type = "Contrato Temporal"
+                                elif "internship" in jt_lower:
+                                    contract_type = "Prácticas / Beca"
+                                elif "fulltime" in jt_lower or "permanent" in jt_lower:
+                                    contract_type = "Indefinido"
+
                             offer = JobOffer(
                                 title=title,
                                 company=company,
@@ -114,7 +132,9 @@ class JobSpyConnector(BaseConnector):
                                 salary_max=salary_max,
                                 salary_currency=str(row.get("currency") or "EUR"),
                                 date_posted=date_posted,
-                                raw_data={"portal": site},
+                                contract_type=contract_type,
+                                schedule=schedule,
+                                raw_data={"portal": site, "job_type": raw_job_type},
                             )
 
                             offers.append(offer)

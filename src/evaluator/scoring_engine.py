@@ -262,20 +262,20 @@ class ScoringEngine:
         cv_text, cv_meta = get_active_cv_text_and_meta()
 
         if not cv_meta.get("has_cv") or not cv_text.strip():
-            logger.info("Oferta ID %d aceptada directamente: no hay CV activo configurado (sin filtrado)", job["id"])
+            logger.info("Oferta ID %d sin evaluar: no hay CV activo configurado", job["id"])
             no_cv_eval = {
                 "job_id": job["id"],
-                "score": 100,
-                "fit_level": "BUENO",
+                "score": 0,
+                "fit_level": "SIN_EVALUAR",
                 "matched_skills": [],
                 "missing_skills": [],
-                "strengths": ["Oferta registrada sin filtrado de CV."],
-                "gaps": [],
-                "reasoning": "Sin filtro de CV: No hay ningún currículum activo configurado. La vacante se acepta y conserva directamente.",
-                "should_apply": True,
+                "strengths": [],
+                "gaps": ["No hay currículum activo configurado."],
+                "reasoning": "Sin evaluar: Se requiere un currículum activo para calcular la afinidad y puntuación ATS.",
+                "should_apply": False,
             }
             self.db.save_evaluation(no_cv_eval)
-            self.db.update_job_status(job["id"], "evaluated")
+            self.db.update_job_status(job["id"], "discovered")
             return no_cv_eval
 
         passes, reason, meta = self.prefilter(job)
@@ -405,17 +405,17 @@ class ScoringEngine:
                 if not has_cv:
                     no_cv_eval = {
                         "job_id": job["id"],
-                        "score": 100,
-                        "fit_level": "BUENO",
+                        "score": 0,
+                        "fit_level": "SIN_EVALUAR",
                         "matched_skills": [],
                         "missing_skills": [],
-                        "strengths": ["Oferta registrada sin filtrado de CV."],
-                        "gaps": [],
-                        "reasoning": "Sin filtro de CV: No hay ningún currículum activo configurado.",
-                        "should_apply": True,
+                        "strengths": [],
+                        "gaps": ["No hay currículum activo configurado."],
+                        "reasoning": "Sin evaluar: Se requiere un currículum activo para calcular la afinidad y puntuación ATS.",
+                        "should_apply": False,
                     }
                     self.db.save_evaluation(no_cv_eval)
-                    self.db.update_job_status(job["id"], "evaluated")
+                    self.db.update_job_status(job["id"], "discovered")
                 else:
                     passes, reason, meta = self.prefilter(job)
                     if not passes:

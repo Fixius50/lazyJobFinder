@@ -52,8 +52,22 @@ def list_jobs(
     sort_order: str = Query("desc", pattern="^(asc|desc)$"),
 ) -> Dict[str, Any]:
     """Lista las ofertas de empleo de SQLite con soporte de filtros multicriterio avanzados, mapa y paginación."""
+    from ...tailoring.cv_reader import get_active_cv_text_and_meta
+    cv_text, cv_meta = get_active_cv_text_and_meta()
+    has_active_cv = bool(cv_meta.get("has_cv") and cv_text.strip())
+
+    if not has_active_cv:
+        return {
+            "items": [],
+            "total": 0,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": 1,
+            "has_cv": False,
+        }
+
     db = get_db()
-    return db.get_jobs_paginated(
+    result = db.get_jobs_paginated(
         search=search,
         exclude=exclude,
         location=location,
@@ -78,6 +92,8 @@ def list_jobs(
         sort_by=sort_by,
         sort_order=sort_order,
     )
+    result["has_cv"] = True
+    return result
 
 
 @router.get("/facets")
@@ -86,6 +102,24 @@ def get_job_filter_facets() -> Dict[str, Any]:
     Devuelve dinámicamente las opciones y conteos reales de filtros (portales, modalidades,
     categorías, formación, salarios, etc.) presentes en las ofertas extraídas de los portales.
     """
+    from ...tailoring.cv_reader import get_active_cv_text_and_meta
+    cv_text, cv_meta = get_active_cv_text_and_meta()
+    has_active_cv = bool(cv_meta.get("has_cv") and cv_text.strip())
+
+    if not has_active_cv:
+        return {
+            "total_jobs": 0,
+            "sources": [],
+            "modalities": [],
+            "categories": [],
+            "educations": [],
+            "schedules": [],
+            "contract_types": [],
+            "max_experience_years": 0,
+            "max_salary": 0,
+            "has_cv": False,
+        }
+
     db = get_db()
     return db.get_filter_facets()
 

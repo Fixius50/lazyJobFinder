@@ -50,6 +50,8 @@ export function ApplicationsView() {
   const [selectedJobDetail, setSelectedJobDetail] = useState<JobDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState<boolean>(false);
 
+  const [hasActiveCv, setHasActiveCv] = useState<boolean>(false);
+
   const loadFacets = async () => {
     try {
       const data = await api.getFilterFacets();
@@ -61,6 +63,9 @@ export function ApplicationsView() {
 
   useEffect(() => {
     loadFacets();
+    api.getActiveCV().then((cv) => {
+      setHasActiveCv(Boolean(cv && cv.type !== "none" && cv.filename && cv.filename !== "Ninguno"));
+    }).catch(() => setHasActiveCv(false));
   }, []);
 
   const fetchJobs = async () => {
@@ -89,6 +94,9 @@ export function ApplicationsView() {
         sort_order: "desc",
       });
       setJobsData(res);
+      if (res.has_cv !== undefined) {
+        setHasActiveCv(res.has_cv);
+      }
     } catch (err: any) {
       console.error("[ApplicationsView] Error obteniendo ofertas:", err);
     } finally {
@@ -189,11 +197,25 @@ export function ApplicationsView() {
 
   return (
     <div className="space-y-4 sm:space-y-6 w-full">
-      {/* Encabezado fluido con Servicios, Actualizar, Purgar y Ocultar Panel */}
-      <div className="flex flex-col 2xl:flex-row 2xl:items-center justify-between gap-3 pb-3 border-b">
-        <div className="flex items-center gap-1.5 shrink-0">
-          <h2 className="text-lg sm:text-xl font-bold tracking-tight">Candidaturas y Ofertas</h2>
-          <InfoTooltip content="Registro consolidado en SQLite con puntuaciones de afinidad IA y documentos ATS generados." />
+      {/* Encabezado fluido con Título + CV en una sola línea | Acciones globales */}
+      <div className="flex flex-col 2xl:flex-row 2xl:items-center justify-between gap-3 pb-3 border-b border-border/50">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-1.5 shrink-0">
+            <h2 className="text-lg sm:text-xl font-bold tracking-tight">Candidaturas y Ofertas</h2>
+            <InfoTooltip content="Registro consolidado en SQLite con puntuaciones de afinidad IA y documentos ATS generados." />
+          </div>
+
+          <div className="h-5 w-px bg-border/60 mx-1 hidden sm:block" />
+
+          {/* Bloque en una sola línea del CV Activo: Currículum Activo, ?, Desplegable, Ojo, Subir, Borrar */}
+          <CvManager
+            onCvChanged={(activeInfo) => {
+              const hasCv = Boolean(activeInfo && activeInfo.type !== "none" && activeInfo.filename && activeInfo.filename !== "Ninguno");
+              setHasActiveCv(hasCv);
+              loadFacets();
+              fetchJobs();
+            }}
+          />
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -225,29 +247,25 @@ export function ApplicationsView() {
             }}
           />
 
-          {/* Botón Ocultar / Mostrar Panel */}
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => setShowCvPanel(!showCvPanel)}
-            className="flex items-center gap-1.5 h-8 text-xs"
-          >
-            <FileCheck className="h-3.5 w-3.5 text-primary" />
-            {showCvPanel ? "Ocultar Panel Lateral" : "Mostrar Panel Lateral"}
-          </Button>
+          {/* Botón Ocultar / Mostrar Filtros (solo visible cuando hay un CV activo) */}
+          {hasActiveCv && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setShowCvPanel(!showCvPanel)}
+              className="flex items-center gap-1.5 h-8 text-xs"
+            >
+              <FileCheck className="h-3.5 w-3.5 text-primary" />
+              {showCvPanel ? "Ocultar Filtros" : "Mostrar Filtros"}
+            </Button>
+          )}
         </div>
       </div>
 
-      {/* Estructura en Dos Columnas: Panel Lateral Izquierdo (CV + Filtros) | Listado a la Derecha */}
+      {/* Estructura: Filtros laterales (solo si hay CV activo y no están ocultos) | Listado a la Derecha */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6 items-start">
-        {showCvPanel && (
+        {hasActiveCv && showCvPanel && (
           <aside className="lg:col-span-4 xl:col-span-3 space-y-4">
-            <CvManager
-              onCvChanged={() => {
-                loadFacets();
-                fetchJobs();
-              }}
-            />
             <JobFilters
               facets={facets}
               searchTerm={searchTerm}
@@ -321,8 +339,8 @@ export function ApplicationsView() {
           </aside>
         )}
 
-        <section className={`${showCvPanel ? "lg:col-span-8 xl:col-span-9" : "lg:col-span-12"} space-y-4`}>
-          {/* Listado de Ofertas en cuadrícula de 4 tarjetas por fila */}
+        <section className={`${hasActiveCv && showCvPanel ? "lg:col-span-8 xl:col-span-9" : "lg:col-span-12"} space-y-4`}>
+          {/* Listado de Ofertas en cuadrícula */}
           <div className="space-y-3">
             {loading ? (
               <div className="flex flex-col items-center justify-center py-16 text-muted-foreground space-y-2">
@@ -330,12 +348,18 @@ export function ApplicationsView() {
                 <p className="text-xs">Consultando candidaturas en base de datos local...</p>
               </div>
             ) : !jobsData || jobsData.items.length === 0 ? (
-              <Card className="border-dashed">
-                <CardContent className="flex flex-col items-center justify-center py-16 text-center text-muted-foreground space-y-2">
-                  <Briefcase className="h-8 w-8 text-muted-foreground/60" />
-                  <p className="text-sm font-medium text-foreground">No se encontraron candidaturas</p>
-                  <p className="text-xs max-w-sm">
-                    No hay ofertas que coincidan con los filtros aplicados o aún no has lanzado una búsqueda.
+              <Card className="border-dashed bg-card/40">
+                <CardContent className="flex flex-col items-center justify-center py-16 text-center text-muted-foreground space-y-3">
+                  <Briefcase className="h-10 w-10 text-muted-foreground/50" />
+                  <p className="text-sm font-semibold text-foreground">
+                    {!hasActiveCv
+                      ? "Sin currículum activo seleccionado"
+                      : "No se encontraron candidaturas"}
+                  </p>
+                  <p className="text-xs max-w-md text-muted-foreground">
+                    {!hasActiveCv
+                      ? "Selecciona o sube un currículum en la barra superior para contrastarlo con las vacantes disponibles y visualizar únicamente las ofertas compatibles."
+                      : "No hay ofertas que coincidan con los filtros aplicados o aún no has lanzado una búsqueda."}
                   </p>
                 </CardContent>
               </Card>

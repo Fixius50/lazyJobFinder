@@ -31,6 +31,7 @@ export interface PaginatedJobsResponse {
   page: number;
   page_size: number;
   total_pages: number;
+  has_cv?: boolean;
 }
 
 export interface JobDetail extends JobListItem {

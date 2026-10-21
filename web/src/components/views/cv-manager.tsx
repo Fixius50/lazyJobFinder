@@ -6,14 +6,11 @@ import {
   CheckCircle2,
   AlertCircle,
   FileCheck,
-  FileText,
   Eye,
   RefreshCw,
   Trash2,
 } from "lucide-react";
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Select } from "@/components/ui/select";
 import { Dialog } from "@/components/ui/dialog";
 import { InfoTooltip } from "@/components/ui/info-tooltip";
@@ -21,7 +18,7 @@ import { CvProgressBar } from "@/components/features/cv/cv-progress-bar";
 import { ActiveCVInfo, api } from "@/lib/api";
 
 interface CvManagerProps {
-  onCvChanged?: () => void;
+  onCvChanged?: (activeCv: ActiveCVInfo | null) => void;
   className?: string;
 }
 
@@ -38,7 +35,7 @@ export function CvManager({ onCvChanged, className = "" }: CvManagerProps) {
   const [cvPreviewLoading, setCvPreviewLoading] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const loadData = async () => {
+  const loadData = async (notify: boolean = true) => {
     try {
       const [cv, list] = await Promise.all([
         api.getActiveCV(),
@@ -46,15 +43,20 @@ export function CvManager({ onCvChanged, className = "" }: CvManagerProps) {
       ]);
       setActiveCV(cv);
       setCvList(list);
+      if (notify && onCvChanged) {
+        onCvChanged(cv);
+      }
+      return cv;
     } catch (e: any) {
       console.error("[CvManager] Error cargando datos de CV:", e);
+      return null;
     } finally {
       setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    loadData();
+    loadData(true);
   }, []);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -66,7 +68,6 @@ export function CvManager({ onCvChanged, className = "" }: CvManagerProps) {
     setUploadStage("Leyendo archivo local...");
     setUploadMessage(null);
 
-    // Simulación progresiva de etapas mientras el servidor analiza y extrae texto con PyPDF / Markdown
     const progressInterval = setInterval(() => {
       setUploadProgress((prev) => {
         if (prev < 40) {
@@ -95,8 +96,7 @@ export function CvManager({ onCvChanged, className = "" }: CvManagerProps) {
         text: `CV "${res.filename}" activado (${ext})${countMsg}.`,
         error: false,
       });
-      await loadData();
-      if (onCvChanged) onCvChanged();
+      await loadData(true);
     } catch (err: any) {
       clearInterval(progressInterval);
       setUploadProgress(0);
@@ -120,8 +120,7 @@ export function CvManager({ onCvChanged, className = "" }: CvManagerProps) {
         text: `CV activo: "${filename}"${countMsg}.`,
         error: false,
       });
-      await loadData();
-      if (onCvChanged) onCvChanged();
+      await loadData(true);
     } catch (err: any) {
       console.error("[CvManager] Error seleccionando CV:", err);
       alert(`Error seleccionando CV: ${err.message}`);
@@ -155,8 +154,7 @@ export function CvManager({ onCvChanged, className = "" }: CvManagerProps) {
         text: res.message || `CV "${filename}" eliminado correctamente.`,
         error: false,
       });
-      await loadData();
-      if (onCvChanged) onCvChanged();
+      await loadData(true);
     } catch (err: any) {
       alert(`Error al eliminar CV: ${err.message}`);
     } finally {
@@ -167,111 +165,115 @@ export function CvManager({ onCvChanged, className = "" }: CvManagerProps) {
   const customCvs = cvList.filter((c) => !c.is_default);
 
   return (
-    <div className={`space-y-4 ${className}`}>
-      {/* Tarjeta Unificada de CV Activo y Subida en una sola fila */}
-      <Card className="border bg-card/80 backdrop-blur-sm shadow-sm">
-        <CardHeader className="pb-2 pt-3 px-3 sm:px-4 border-b border-border/40">
-          <div className="flex items-center gap-1.5">
-            <FileCheck className="h-4 w-4 text-primary" />
-            <CardTitle className="text-xs sm:text-sm font-semibold">Currículum Activo</CardTitle>
-            <InfoTooltip content="Documento que evalúa la IA local frente a cada oferta para determinar la puntuación ATS y redactar documentos adaptados." />
+    <div className={`relative inline-flex flex-col ${className}`}>
+      {/* Barra en una sola línea: Currículum Activo, ?, Desplegable, Ojo, Subir, Borrar */}
+      <div className="flex items-center gap-1.5 bg-card/80 border border-border/60 rounded-lg px-2.5 py-1 backdrop-blur-sm shadow-xs">
+        {/* Título y tooltip */}
+        <div className="flex items-center gap-1 mr-1">
+          <FileCheck className="h-4 w-4 text-primary shrink-0" />
+          <span className="text-xs font-semibold whitespace-nowrap hidden sm:inline">Currículum Activo</span>
+          <span className="text-xs font-semibold whitespace-nowrap sm:hidden">CV</span>
+          <InfoTooltip content="Documento que evalúa la IA local frente a cada oferta para determinar la puntuación ATS y redactar documentos adaptados." />
+        </div>
+
+        <input
+          type="file"
+          ref={fileInputRef}
+          onChange={handleFileUpload}
+          accept=".pdf,.md,.markdown,.txt"
+          className="hidden"
+          id="cv-file-upload-input"
+          disabled={isUploading}
+        />
+
+        {/* Desplegable de selección */}
+        <div className="w-36 sm:w-48 md:w-56 lg:w-64">
+          <Select
+            value={activeCV?.type === "none" || !activeCV ? "none" : activeCV?.filename}
+            onChange={(e) => handleSelectCV(e.target.value)}
+            className="text-xs w-full h-8 bg-background/90 font-medium truncate"
+          >
+            <option value="none">Sin CV (Sin filtrado)</option>
+            {customCvs.map((c) => (
+              <option key={c.filename} value={c.filename}>
+                {c.filename} ({c.size_bytes ? `${(c.size_bytes / 1024).toFixed(0)} KB` : ""})
+              </option>
+            ))}
+          </Select>
+        </div>
+
+        {/* Ojo: ver texto extraído del CV seleccionado */}
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={() => handlePreview(activeCV?.filename)}
+          disabled={!activeCV || activeCV.type === "none"}
+          className="h-8 w-8 p-0 shrink-0 text-primary hover:text-primary/80 hover:border-primary/50"
+          title={activeCV?.type !== "none" ? "Previsualizar texto extraído de este CV" : "Sin CV seleccionado"}
+        >
+          <Eye className="h-4 w-4" />
+        </Button>
+
+        {/* Subir CV: solo icono */}
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={isUploading}
+          className="h-8 w-8 p-0 shrink-0 text-primary hover:text-primary/80 hover:border-primary/50"
+          title="Subir nuevo currículum (PDF, Markdown o TXT)"
+        >
+          <Upload className={`h-4 w-4 ${isUploading ? "animate-bounce text-amber-400" : ""}`} />
+        </Button>
+
+        {/* Papelera: eliminar CV seleccionado */}
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={() => activeCV?.filename && handleDeleteCV(activeCV.filename)}
+          disabled={!activeCV || activeCV.type === "none" || deletingFile === activeCV?.filename}
+          className="h-8 w-8 p-0 shrink-0 text-muted-foreground hover:text-destructive hover:border-destructive/50"
+          title={activeCV?.type !== "none" ? `Eliminar "${activeCV?.filename}"` : "Ningún CV seleccionado"}
+        >
+          <Trash2 className={`h-4 w-4 ${deletingFile ? "animate-spin text-destructive" : ""}`} />
+        </Button>
+      </div>
+
+      {/* Barra de Progreso Visual flotante mientras se sube */}
+      {isUploading && (
+        <div className="absolute top-full left-0 right-0 mt-1 z-30 bg-background/95 p-2 rounded-md border shadow-md">
+          <CvProgressBar stage={uploadStage} progress={uploadProgress} />
+        </div>
+      )}
+
+      {/* Mensaje de confirmación o alerta tras subir o eliminar */}
+      {uploadMessage && !isUploading && (
+        <div
+          className={`absolute top-full left-0 right-0 mt-1 z-30 p-1.5 px-2.5 rounded-md text-[11px] flex items-center justify-between gap-1.5 shadow-md ${
+            uploadMessage.error
+              ? "bg-destructive/15 text-destructive border border-destructive/20"
+              : "bg-emerald-500/15 text-emerald-400 border border-emerald-500/20"
+          }`}
+        >
+          <div className="flex items-center gap-1.5 truncate">
+            {uploadMessage.error ? (
+              <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+            ) : (
+              <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+            )}
+            <span className="truncate">{uploadMessage.text}</span>
           </div>
-        </CardHeader>
-
-        <CardContent className="space-y-2.5 pt-3 px-3 sm:px-4">
-          <input
-            type="file"
-            ref={fileInputRef}
-            onChange={handleFileUpload}
-            accept=".pdf,.md,.markdown,.txt"
-            className="hidden"
-            id="cv-file-upload-input"
-            disabled={isUploading}
-          />
-
-          {/* Fila única compacta: Desplegable + Ojo + Subir (solo icono) + Papelera */}
-          <div className="flex items-center gap-1.5">
-            <div className="flex-1 min-w-0">
-              <Select
-                value={activeCV?.type === "none" || !activeCV ? "none" : activeCV?.filename}
-                onChange={(e) => handleSelectCV(e.target.value)}
-                className="text-xs w-full h-8 bg-background truncate font-medium"
-              >
-                <option value="none">Sin CV (Sin filtrado)</option>
-                {customCvs.map((c) => (
-                  <option key={c.filename} value={c.filename}>
-                    {c.filename} ({c.size_bytes ? `${(c.size_bytes / 1024).toFixed(0)} KB` : ""})
-                  </option>
-                ))}
-              </Select>
-            </div>
-
-            {/* Ojo: ver texto extraído del CV seleccionado */}
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => handlePreview(activeCV?.filename)}
-              disabled={!activeCV || activeCV.type === "none"}
-              className="h-8 w-8 p-0 shrink-0 text-primary hover:text-primary/80 hover:border-primary/50"
-              title={activeCV?.type !== "none" ? "Previsualizar texto extraído de este CV" : "Sin CV seleccionado"}
-            >
-              <Eye className="h-4 w-4" />
-            </Button>
-
-            {/* Subir CV: solo símbolo de subir */}
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={isUploading}
-              className="h-8 w-8 p-0 shrink-0 text-primary hover:text-primary/80 hover:border-primary/50"
-              title="Subir nuevo currículum (PDF, Markdown o TXT)"
-            >
-              <Upload className={`h-4 w-4 ${isUploading ? "animate-bounce" : ""}`} />
-            </Button>
-
-            {/* Papelera: eliminar CV seleccionado */}
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => activeCV?.filename && handleDeleteCV(activeCV.filename)}
-              disabled={!activeCV || activeCV.type === "none" || deletingFile === activeCV?.filename}
-              className="h-8 w-8 p-0 shrink-0 text-muted-foreground hover:text-destructive hover:border-destructive/50"
-              title={activeCV?.type !== "none" ? `Eliminar "${activeCV?.filename}"` : "Ningún CV seleccionado"}
-            >
-              <Trash2 className={`h-4 w-4 ${deletingFile ? "animate-spin" : ""}`} />
-            </Button>
-          </div>
-
-          {/* Barra de Progreso Visual mientras se procesa la subida */}
-          {isUploading && (
-            <div className="pt-1">
-              <CvProgressBar stage={uploadStage} progress={uploadProgress} />
-            </div>
-          )}
-
-          {/* Mensaje de confirmación o alerta tras subir o eliminar */}
-          {uploadMessage && (
-            <div
-              className={`p-2 rounded text-[11px] flex items-center gap-1.5 ${
-                uploadMessage.error
-                  ? "bg-destructive/15 text-destructive border border-destructive/20"
-                  : "bg-emerald-500/15 text-emerald-400 border border-emerald-500/20"
-              }`}
-            >
-              {uploadMessage.error ? (
-                <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-              ) : (
-                <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
-              )}
-              <span className="truncate">{uploadMessage.text}</span>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+          <button
+            onClick={() => setUploadMessage(null)}
+            className="text-muted-foreground hover:text-foreground text-xs font-bold ml-2 shrink-0"
+          >
+            ×
+          </button>
+        </div>
+      )}
 
       {/* Modal de Previsualización de Texto Extraído */}
       <Dialog

@@ -414,9 +414,10 @@ class ReleaseBuilder:
                 "tar czf /backup/ollama_model.tar.gz -C /source_ollama .",
             ]
             exp_ret = subprocess.call(export_cmd)
-            if exp_ret != 0 or not os.path.exists(model_tar) or os.path.getsize(model_tar) < 500 * 1024 * 1024:
+            if exp_ret != 0 or not os.path.exists(model_tar) or os.path.getsize(model_tar) < self.min_weight_blob_size_bytes:
+                min_mb = max(1, self.min_weight_blob_size_bytes // (1024 * 1024))
                 raise RuntimeError(
-                    "Fallo al comprimir ollama_model.tar.gz o el tamaño del modelo es sospechosamente pequeño."
+                    f"Fallo al comprimir ollama_model.tar.gz o el tamaño del modelo es sospechosamente pequeño (< {min_mb} MB)."
                 )
 
             self.model_included = True

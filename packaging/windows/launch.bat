@@ -111,6 +111,9 @@ if "!NEED_LOAD!"=="1" (
             exit /b 1
         )
         echo [OK] Imagenes importadas con exito.
+    ) else if exist ".light_release" (
+        echo [i] Distribucion ligera detectada: 'images.tar' omitido intencionalmente.
+        echo [i] Docker Compose resolvera o descargara las imagenes declaradas...
     ) else (
         echo [ERROR] No se encontraron las imagenes requeridas en Docker ni existe 'images.tar'.
         echo         Revisa la instalacion o ejecuta install.bat.

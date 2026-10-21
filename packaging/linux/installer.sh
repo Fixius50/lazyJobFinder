@@ -70,6 +70,9 @@ for req_file in docker-compose.yml launch.sh stop.sh; do
     fi
     cp -f "$SCRIPT_DIR/$req_file" "$INSTALL_DIR/"
 done
+if [ -f "$SCRIPT_DIR/.light_release" ]; then
+    cp -f "$SCRIPT_DIR/.light_release" "$INSTALL_DIR/"
+fi
 chmod +x "$INSTALL_DIR/launch.sh" "$INSTALL_DIR/stop.sh"
 
 if [ ! -f "$INSTALL_DIR/.env" ]; then

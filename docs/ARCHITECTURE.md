@@ -157,5 +157,5 @@ Antes de invocar el modelo de lenguaje en CPU:
 
 ### J. Contrato de Datos Compartido y Esquema SQL Unificado
 - **`config/shared_constants.json`**: Fuente única de verdad para estados, portales, acciones y límites.
-- Vinculaciones generadas en [`src/shared_constants.py`](file:///c:/Users/rober/Desktop/Proyectos%20propios/lazyJobFinder/src/shared_constants.py) y [`web/src/lib/constants.ts`](file:///c:/Users/rober/Desktop/Proyectos%20propios/lazyJobFinder/web/src/lib/constants.ts).
-- Esquema relacional canónico consolidado en [`src/migrations/sql/schema.sql`](file:///c:/Users/rober/Desktop/Proyectos%20propios/lazyJobFinder/src/migrations/sql/schema.sql).
+- Vinculaciones generadas en [`src/shared_constants.py`](../src/shared_constants.py) y [`web/src/lib/constants.ts`](../web/src/lib/constants.ts).
+- Esquema relacional canónico consolidado en [`src/migrations/sql/schema.sql`](../src/migrations/sql/schema.sql).

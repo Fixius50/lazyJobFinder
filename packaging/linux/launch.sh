@@ -58,6 +58,9 @@ if ! docker compose images -q 2>/dev/null | grep -q .; then
             exit 1
         fi
         echo "[OK] Imágenes importadas correctamente."
+    elif [ -f ".light_release" ]; then
+        echo "[i] Distribución ligera detectada: 'images.tar' omitido intencionalmente."
+        echo "[i] Docker Compose resolverá o descargará las imágenes declaradas..."
     else
         echo "[ERROR] No se encontraron imágenes en Docker ni existe 'images.tar' para importarlas."
         echo "Asegúrate de ejecutar el instalador (./installer.sh) antes de lanzar el sistema."

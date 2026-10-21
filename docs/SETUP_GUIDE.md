@@ -14,7 +14,7 @@ Esta guía explica paso a paso cómo poner en marcha **lazyJobFinder** en tu equ
 
 ## ⚡ Método Rápido Automatizado: Lanzador `start.bat` (Recomendado en Windows)
 
-Si estás en Windows, puedes iniciar todo el sistema con un solo comando o haciendo doble clic sobre [`start.bat`](file:///c:/Users/rober/Desktop/Proyectos%20propios/lazyJobFinder/start.bat):
+Si estás en Windows, puedes iniciar todo el sistema con un solo comando o haciendo doble clic sobre [`start.bat`](../start.bat):
 
 ```cmd
 .\start.bat

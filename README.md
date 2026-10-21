@@ -37,7 +37,7 @@
 
 ## 🚀 Inicio Rápido en Windows (`start.bat`)
 
-El proyecto incluye un lanzador simplificado [`start.bat`](file:///c:/Users/rober/Desktop/Proyectos%20propios/lazyJobFinder/start.bat) que automatiza todo:
+El proyecto incluye un lanzador simplificado [`start.bat`](./start.bat) que automatiza todo:
 
 Haz doble clic en `start.bat` o ejecútalo en la terminal:
 
@@ -95,7 +95,7 @@ xdg-open http://localhost:8000 || open http://localhost:8000
 lazyJobFinder se adapta a cualquier profesional en dos sencillos pasos:
 
 ### 1. Términos de Búsqueda
-En la pestaña **Ajustes** del panel web (o editando [`config/settings.yaml`](file:///c:/Users/rober/Desktop/Proyectos%20propios/lazyJobFinder/config/settings.yaml)), indica los puestos y ubicaciones que te interesan:
+En la pestaña **Ajustes** del panel web (o editando [`config/settings.yaml`](./config/settings.yaml)), indica los puestos y ubicaciones que te interesan:
 ```yaml
 busqueda:
   terminos:

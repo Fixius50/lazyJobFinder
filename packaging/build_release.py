@@ -614,14 +614,11 @@ class ReleaseBuilder:
                 except Exception as exc:
                     raise RuntimeError(f"AUDITORÍA DE CAPAS DOCKER FALLIDA: 'manifest.json' corrupto o inválido: {exc}")
 
-            # Si no hay manifest.json o no especificaba capas, identificar miembros de capas por convención Docker
-            if not expected_layers:
-                for name, m in members_by_name.items():
-                    if name.endswith("layer.tar") or (name.startswith("blobs/sha256/") and m.size > 0):
-                        expected_layers.append(name)
+            if not manifest_member:
+                raise RuntimeError("AUDITORÍA DE CAPAS DOCKER FALLIDA: 'images.tar' no contiene el archivo canónico 'manifest.json' de Docker save.")
 
             if not expected_layers:
-                raise RuntimeError("AUDITORÍA DE CAPAS DOCKER FALLIDA: No se encontraron capas de imágenes en 'images.tar'.")
+                raise RuntimeError("AUDITORÍA DE CAPAS DOCKER FALLIDA: 'manifest.json' en 'images.tar' no define ninguna capa obligatoria ('Layers').")
 
             # 2. Inspeccionar obligatoriamente cada capa (sin omitir fallos de lectura)
             for layer_name in expected_layers:
@@ -708,78 +705,131 @@ class ReleaseBuilder:
                     "AUDITORÍA DE MODELO FALLIDA: 'ollama_model.tar.gz' no contiene las carpetas estándar 'manifests' y 'blobs'."
                 )
 
-            # Localizar la ruta canónica exacta del modelo qwen2.5:3b-instruct
-            # Cumple estrictamente el formato canónico de Ollama: manifests/registry.ollama.ai/library/qwen2.5/(3b-instruct|latest)
-            manifest_regex = re.compile(
-                r"^(?:root/\.ollama/models/)?manifests/registry\.ollama\.ai/library/qwen2\.5/(?:3b-instruct|latest)$"
+            # 1. Localizar los manifiestos exactos '3b-instruct' y 'latest'
+            regex_3b = re.compile(
+                r"^(?:root/\.ollama/models/)?manifests/registry\.ollama\.ai/library/qwen2\.5/(?:3b-instruct|3b)$"
             )
-            exact_manifest_path = None
+            regex_latest = re.compile(
+                r"^(?:root/\.ollama/models/)?manifests/registry\.ollama\.ai/library/qwen2\.5/latest$"
+            )
+
+            path_3b = None
+            path_latest = None
             for name in member_names:
                 clean_name = name.lstrip("./")
-                if manifest_regex.match(clean_name):
-                    exact_manifest_path = name
-                    break
+                if regex_3b.match(clean_name):
+                    path_3b = name
+                elif regex_latest.match(clean_name):
+                    path_latest = name
 
-            if not exact_manifest_path:
+            if not path_3b and not path_latest:
                 raise RuntimeError(
-                    "AUDITORÍA DE MODELO FALLIDA: No se encontró el manifiesto con la ruta canónica y etiqueta exacta "
-                    "'manifests/registry.ollama.ai/library/qwen2.5/3b-instruct' en 'ollama_model.tar.gz'. "
-                    "Se rechazan coincidencias aproximadas o ambiguas."
+                    "AUDITORÍA DE MODELO FALLIDA: No se encontró el manifiesto para 'qwen2.5:3b-instruct' en 'ollama_model.tar.gz'. "
+                    "Se rechazan etiquetas y modelos no autorizados."
                 )
 
-            manifest_file = mtf.extractfile(exact_manifest_path)
-            if not manifest_file:
-                raise RuntimeError(f"No se pudo leer el archivo de manifiesto: {exact_manifest_path}")
+            # Función auxiliar para extraer y validar formalmente un manifiesto
+            def _parse_and_validate_manifest(path: str) -> Tuple[Dict[str, Any], List[str]]:
+                f = mtf.extractfile(path)
+                if not f:
+                    raise RuntimeError(f"No se pudo leer el archivo de manifiesto: {path}")
+                try:
+                    data = json.loads(f.read().decode("utf-8"))
+                except Exception as exc:
+                    raise RuntimeError(f"AUDITORÍA DE MODELO FALLIDA: Manifiesto '{path}' no es JSON válido: {exc}")
 
-            try:
-                manifest_json = json.loads(manifest_file.read().decode("utf-8"))
-            except Exception as e:
-                raise RuntimeError(f"AUDITORÍA DE MODELO FALLIDA: El archivo de manifiesto no es JSON válido: {e}")
+                if not isinstance(data, dict):
+                    raise RuntimeError(f"AUDITORÍA DE MODELO FALLIDA: Manifiesto '{path}' no contiene un objeto JSON.")
+                if str(data.get("schemaVersion")) not in ("2", "2.0"):
+                    raise RuntimeError(f"AUDITORÍA DE MODELO FALLIDA: schemaVersion inválido en '{path}'.")
+                if not data.get("mediaType"):
+                    raise RuntimeError(f"AUDITORÍA DE MODELO FALLIDA: Falta 'mediaType' en '{path}'.")
 
-            # Validación estricta del esquema del manifiesto
-            if not isinstance(manifest_json, dict):
-                raise RuntimeError("AUDITORÍA DE MODELO FALLIDA: El manifiesto no contiene un objeto JSON válido.")
-            if str(manifest_json.get("schemaVersion")) not in ("2", "2.0"):
-                raise RuntimeError(f"AUDITORÍA DE MODELO FALLIDA: schemaVersion inválido ({manifest_json.get('schemaVersion')}).")
-            if not manifest_json.get("mediaType"):
-                raise RuntimeError("AUDITORÍA DE MODELO FALLIDA: Falta 'mediaType' en el manifiesto.")
-
-            required_digests = []
-            if "config" in manifest_json and "digest" in manifest_json["config"]:
-                clean_cfg = manifest_json["config"]["digest"].replace("sha256:", "").replace("sha256-", "").strip().lower()
-                if re.match(r"^[a-f0-9]{64}$", clean_cfg):
-                    required_digests.append(clean_cfg)
-                else:
-                    raise RuntimeError(f"AUDITORÍA DE MODELO FALLIDA: Digest de configuración inválido: {clean_cfg}")
-
-            layers = manifest_json.get("layers", [])
-            if not layers or not isinstance(layers, list):
-                raise RuntimeError("AUDITORÍA DE MODELO FALLIDA: El manifiesto no contiene lista de capas 'layers'.")
-
-            for layer in layers:
-                if "digest" in layer:
-                    clean_lyr = layer["digest"].replace("sha256:", "").replace("sha256-", "").strip().lower()
-                    if re.match(r"^[a-f0-9]{64}$", clean_lyr):
-                        required_digests.append(clean_lyr)
+                digests = []
+                if "config" in data and "digest" in data["config"]:
+                    cfg_d = data["config"]["digest"].replace("sha256:", "").replace("sha256-", "").strip().lower()
+                    if re.match(r"^[a-f0-9]{64}$", cfg_d):
+                        digests.append(cfg_d)
                     else:
-                        raise RuntimeError(f"AUDITORÍA DE MODELO FALLIDA: Digest de capa inválido: {clean_lyr}")
+                        raise RuntimeError(f"Digest de configuración inválido en '{path}': {cfg_d}")
 
-            if not required_digests:
-                raise RuntimeError(
-                    f"AUDITORÍA DE MODELO FALLIDA: El manifiesto '{exact_manifest_path}' no contiene capas ni digests válidos."
-                )
+                lyrs = data.get("layers", [])
+                if not lyrs or not isinstance(lyrs, list):
+                    raise RuntimeError(f"AUDITORÍA DE MODELO FALLIDA: '{path}' no contiene lista de capas 'layers'.")
 
+                for lyr in lyrs:
+                    if "digest" in lyr:
+                        lyr_d = lyr["digest"].replace("sha256:", "").replace("sha256-", "").strip().lower()
+                        if re.match(r"^[a-f0-9]{64}$", lyr_d):
+                            digests.append(lyr_d)
+                        else:
+                            raise RuntimeError(f"Digest de capa inválido en '{path}': {lyr_d}")
+
+                if not digests:
+                    raise RuntimeError(f"AUDITORÍA DE MODELO FALLIDA: Manifiesto '{path}' no contiene capas ni digests válidos.")
+                return data, digests
+
+            # Caso 1: Si existen ambos manifiestos ('3b-instruct' y 'latest'), exigir identidad estricta de digests
+            if path_3b and path_latest:
+                json_3b, digests_3b = _parse_and_validate_manifest(path_3b)
+                json_latest, digests_latest = _parse_and_validate_manifest(path_latest)
+                if digests_3b != digests_latest:
+                    raise RuntimeError(
+                        f"AUDITORÍA DE MODELO FALLIDA: Conflicto entre manifiestos '{path_3b}' y '{path_latest}'. "
+                        "La etiqueta 'latest' no apunta al mismo modelo exacto que '3b-instruct'."
+                    )
+                exact_manifest_path = path_3b
+                required_digests = digests_3b
+            # Caso 2: Si solo existe '3b-instruct', es el modelo canónico exacto solicitado
+            elif path_3b:
+                json_3b, required_digests = _parse_and_validate_manifest(path_3b)
+                exact_manifest_path = path_3b
+            # Caso 3: Si solo existe 'latest', validar contra los digests canónicos de staging previamente auditados
+            else:
+                json_latest, digests_latest = _parse_and_validate_manifest(path_latest)
+                if hasattr(self, "_staging_model_digests") and self._staging_model_digests:
+                    if digests_latest != self._staging_model_digests:
+                        raise RuntimeError(
+                            f"AUDITORÍA DE MODELO FALLIDA: El manifiesto '{path_latest}' no coincide con los digests de referencia de 'qwen2.5:3b-instruct'."
+                        )
+                exact_manifest_path = path_latest
+                required_digests = digests_latest
+
+            # Conservar referencia para validaciones cruzadas entre staging y artefactos finales
+            if not hasattr(self, "_staging_model_digests") or not self._staging_model_digests:
+                self._staging_model_digests = required_digests
+
+            # 2. Resolución canónica exacta de blobs (sin coincidencias parciales ambiguas)
             has_large_weight_blob = False
             for clean_digest in required_digests:
+                exact_candidates = [
+                    f"blobs/sha256-{clean_digest}",
+                    f"blobs/sha256:{clean_digest}",
+                    f"root/.ollama/models/blobs/sha256-{clean_digest}",
+                    f"root/.ollama/models/blobs/sha256:{clean_digest}",
+                ]
                 blob_match = None
-                for bname in member_names:
-                    if bname.startswith("blobs/") and clean_digest in bname:
-                        blob_match = model_members[bname]
+                for cand in exact_candidates:
+                    if cand in model_members:
+                        blob_match = model_members[cand]
+                        break
+                    cand_dot = f"./{cand}"
+                    if cand_dot in model_members:
+                        blob_match = model_members[cand_dot]
                         break
 
                 if not blob_match:
+                    # Comprobación de coincidencia exacta por nombre de archivo dentro del directorio 'blobs'
+                    for bname, m in model_members.items():
+                        parts = bname.lstrip("./").split("/")
+                        if len(parts) >= 2 and parts[-2] == "blobs":
+                            if parts[-1] in (f"sha256-{clean_digest}", f"sha256:{clean_digest}", clean_digest):
+                                blob_match = m
+                                break
+
+                if not blob_match:
                     raise RuntimeError(
-                        f"AUDITORÍA DE MODELO FALLIDA: El blob requerido '{clean_digest}' no se encuentra físicamente en 'ollama_model.tar.gz'."
+                        f"AUDITORÍA DE MODELO FALLIDA: El blob requerido '{clean_digest}' no se encuentra en la ruta canónica en 'ollama_model.tar.gz'."
                     )
                 if blob_match.size == 0:
                     raise RuntimeError(

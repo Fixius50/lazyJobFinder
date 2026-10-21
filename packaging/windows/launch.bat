@@ -25,14 +25,25 @@ if not exist ".env" (
         exit /b 1
     )
 ) else (
-    :: Verificar que .env contenga COMPOSE_PROJECT_NAME no vacio
-    findstr /r /c:"^COMPOSE_PROJECT_NAME=" ".env" >nul 2>&1
-    if !ERRORLEVEL! neq 0 (
+    :: Verificar que .env contenga COMPOSE_PROJECT_NAME con valor no vacio
+    set "CURRENT_CPN="
+    for /f "usebackq tokens=1,* delims==" %%A in (".env") do (
+        set "KEY=%%A"
+        set "VAL=%%B"
+        if /i "!KEY!"=="COMPOSE_PROJECT_NAME" (
+            set "CURRENT_CPN=!VAL!"
+        )
+    )
+    if defined CURRENT_CPN (
+        set "CURRENT_CPN=!CURRENT_CPN:"=!"
+        for /f "tokens=*" %%T in ("!CURRENT_CPN!") do set "CURRENT_CPN=%%T"
+    )
+    if not defined CURRENT_CPN (
         set "RAND_SUFFIX=%RANDOM%%TIME:~6,2%"
         echo.>>".env"
         echo # Identificador unico de instalacion para aislamiento Docker Compose>>".env"
         echo COMPOSE_PROJECT_NAME=lazyjob_!RAND_SUFFIX!>>".env"
-        echo [i] Variable COMPOSE_PROJECT_NAME incorporada a .env existente.
+        echo [i] Identificador COMPOSE_PROJECT_NAME asignado a .env (lazyjob_!RAND_SUFFIX!).
     )
 )
 

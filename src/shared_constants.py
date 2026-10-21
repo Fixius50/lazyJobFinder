@@ -4,8 +4,9 @@ import json
 import os
 from typing import Any, Dict, List, Set
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CONSTANTS_FILE = os.path.join(BASE_DIR, "config", "shared_constants.json")
+from .storage import CONSTANTS_FILE, PROJECT_ROOT
+
+BASE_DIR = PROJECT_ROOT
 
 
 def _load_constants() -> Dict[str, Any]:

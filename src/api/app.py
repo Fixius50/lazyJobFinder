@@ -50,9 +50,10 @@ def api_health():
 # Servir el frontend compilado (Next.js export) en el mismo puerto 8000 unificado
 import os
 from fastapi.staticfiles import StaticFiles
+from ..storage import WEB_OUT_DIR
 
 web_out_candidates = [
-    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "web", "out")),
+    WEB_OUT_DIR,
     "/app/web/out",
 ]
 for candidate in web_out_candidates:

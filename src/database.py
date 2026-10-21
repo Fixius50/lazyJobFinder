@@ -20,11 +20,7 @@ except ImportError:
 
 logger = logging.getLogger("lazyJobFinder.database")
 
-DEFAULT_DB_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "data",
-    "lazyjobfinder.db",
-)
+from .storage import DB_PATH as DEFAULT_DB_PATH
 
 
 def canonicalize_url(raw_url: str) -> str:

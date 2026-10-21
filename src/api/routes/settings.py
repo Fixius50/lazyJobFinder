@@ -11,56 +11,17 @@ from ..deps import get_db, get_runner
 logger = logging.getLogger("lazyJobFinder.api.settings")
 router = APIRouter(prefix="/settings", tags=["Configuración y Canales"])
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-SETTINGS_FILE = os.path.join(BASE_DIR, "config", "settings.yaml")
-SECRETS_FILE = os.path.join(BASE_DIR, "data", "secrets.json")
-
-
-def _read_persisted_secrets() -> Dict[str, str]:
-    """Lee las credenciales privadas almacenadas en el volumen persistente /app/data/."""
-    if not os.path.exists(SECRETS_FILE):
-        return {}
-    try:
-        import json
-        with open(SECRETS_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception as e:
-        logger.warning("No se pudo leer data/secrets.json: %s", e)
-        return {}
-
-
-def _save_persisted_secret(key: str, value: str) -> None:
-    """Guarda un secreto en data/secrets.json (persistente ante recreación de Docker)."""
-    import json
-    data = _read_persisted_secrets()
-    data[key] = value
-    os.makedirs(os.path.dirname(SECRETS_FILE), exist_ok=True)
-    try:
-        with open(SECRETS_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
-    except Exception as e:
-        logger.error("No se pudo escribir en data/secrets.json: %s", e)
-
-
-def _delete_persisted_secret(key: str) -> None:
-    """Elimina un secreto de data/secrets.json."""
-    import json
-    data = _read_persisted_secrets()
-    if key in data:
-        data.pop(key, None)
-        try:
-            with open(SECRETS_FILE, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2)
-        except Exception as e:
-            logger.error("No se pudo actualizar data/secrets.json al eliminar: %s", e)
-
-
-def _get_secret(key: str, default: str = "") -> str:
-    """Recupera un secreto con orden de precedencia: 1) data/secrets.json, 2) os.environ."""
-    persisted = _read_persisted_secrets()
-    if key in persisted and persisted[key]:
-        return str(persisted[key]).strip()
-    return str(os.getenv(key, default)).strip()
+from ...storage import (
+    CONFIG_DIR,
+    DATA_DIR,
+    PROJECT_ROOT as BASE_DIR,
+    SECRETS_FILE,
+    SETTINGS_FILE,
+    delete_persisted_secret as _delete_persisted_secret,
+    get_secret as _get_secret,
+    read_persisted_secrets as _read_persisted_secrets,
+    save_persisted_secret as _save_persisted_secret,
+)
 
 
 def _update_env_file(key: str, value: str) -> None:

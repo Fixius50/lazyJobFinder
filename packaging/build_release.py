@@ -255,8 +255,11 @@ class ReleaseBuilder:
 
         log("Creando contexto de construcción Docker aislado (sin datos personales)...", "INFO")
         shutil.copy2(os.path.join(ROOT_DIR, "Dockerfile"), os.path.join(isolated_context, "Dockerfile"))
-        shutil.copy2(os.path.join(ROOT_DIR, "requirements.txt"), os.path.join(isolated_context, "requirements.txt"))
-        shutil.copytree(os.path.join(ROOT_DIR, "src"), os.path.join(isolated_context, "src"))
+        shutil.copytree(
+            os.path.join(ROOT_DIR, "src"),
+            os.path.join(isolated_context, "src"),
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo"),
+        )
 
         # El directorio config dentro de la imagen contiene ÚNICAMENTE las plantillas limpias
         shutil.copytree(CONFIG_TEMPLATES_DIR, os.path.join(isolated_context, "config"))
@@ -585,61 +588,113 @@ class ReleaseBuilder:
         files_count = 0
 
         with tarfile.open(images_tar_path, "r") as main_tar:
-            for member in main_tar.getmembers():
-                if member.name.endswith("layer.tar") or (member.name.startswith("blobs/sha256/") and member.size > 0):
-                    layer_stream = main_tar.extractfile(member)
-                    if not layer_stream:
-                        continue
-                    try:
-                        with tarfile.open(fileobj=layer_stream, mode="r:*") as layer_tar:
-                            layers_count += 1
-                            for sub in layer_tar.getmembers():
-                                files_count += 1
-                                sub_name = os.path.basename(sub.name)
+            members_by_name = {m.name.replace("\\", "/"): m for m in main_tar.getmembers()}
 
-                                # 1. Validar nombre de archivo
-                                for pat in forbidden_filenames:
-                                    if pat.match(sub_name):
+            # 1. Obtener lista de capas obligatorias desde manifest.json
+            manifest_candidates = ["manifest.json", "./manifest.json"]
+            manifest_member = None
+            for cand in manifest_candidates:
+                if cand in members_by_name:
+                    manifest_member = members_by_name[cand]
+                    break
+
+            expected_layers: List[str] = []
+            if manifest_member:
+                mf = main_tar.extractfile(manifest_member)
+                if not mf:
+                    raise RuntimeError("AUDITORÍA DE CAPAS DOCKER FALLIDA: No se pudo leer 'manifest.json' de images.tar.")
+                try:
+                    manifest_data = json.loads(mf.read().decode("utf-8"))
+                    if isinstance(manifest_data, list):
+                        for img in manifest_data:
+                            for lyr in img.get("Layers", []):
+                                norm_lyr = lyr.replace("\\", "/")
+                                if norm_lyr not in expected_layers:
+                                    expected_layers.append(norm_lyr)
+                except Exception as exc:
+                    raise RuntimeError(f"AUDITORÍA DE CAPAS DOCKER FALLIDA: 'manifest.json' corrupto o inválido: {exc}")
+
+            # Si no hay manifest.json o no especificaba capas, identificar miembros de capas por convención Docker
+            if not expected_layers:
+                for name, m in members_by_name.items():
+                    if name.endswith("layer.tar") or (name.startswith("blobs/sha256/") and m.size > 0):
+                        expected_layers.append(name)
+
+            if not expected_layers:
+                raise RuntimeError("AUDITORÍA DE CAPAS DOCKER FALLIDA: No se encontraron capas de imágenes en 'images.tar'.")
+
+            # 2. Inspeccionar obligatoriamente cada capa (sin omitir fallos de lectura)
+            for layer_name in expected_layers:
+                clean_layer = layer_name.lstrip("./")
+                layer_member = members_by_name.get(layer_name) or members_by_name.get(f"./{clean_layer}") or members_by_name.get(clean_layer)
+
+                if not layer_member:
+                    raise RuntimeError(
+                        f"AUDITORÍA DE CAPAS DOCKER FALLIDA: La capa obligatoria '{layer_name}' especificada en manifest.json no existe en images.tar."
+                    )
+
+                layer_stream = main_tar.extractfile(layer_member)
+                if not layer_stream:
+                    raise RuntimeError(
+                        f"AUDITORÍA DE CAPAS DOCKER FALLIDA: No se pudo extraer el flujo de datos de la capa '{layer_name}'."
+                    )
+
+                try:
+                    with tarfile.open(fileobj=layer_stream, mode="r:*") as layer_tar:
+                        layers_count += 1
+                        for sub in layer_tar.getmembers():
+                            files_count += 1
+                            sub_name = os.path.basename(sub.name)
+
+                            # 1. Validar nombre de archivo
+                            for pat in forbidden_filenames:
+                                if pat.match(sub_name):
+                                    raise RuntimeError(
+                                        f"AUDITORÍA DE CAPAS DOCKER BLOQUEADA: Archivo prohibido '{sub.name}' detectado dentro de la capa '{layer_name}' de images.tar."
+                                    )
+
+                            # 2. Validar contenido en archivos no binarios
+                            if sub.isfile() and sub.size > 0:
+                                sf = layer_tar.extractfile(sub)
+                                if not sf:
+                                    continue
+
+                                # Lectura de muestra inicial para discernir binarios de texto
+                                try:
+                                    sample = sf.read(1024)
+                                    if b"\x00" in sample:
+                                        # Archivo binario (ejecutable, biblioteca, imagen), se omite análisis textual
+                                        continue
+                                    # Archivo textual: leer completo y decodificar
+                                    sf.seek(0)
+                                    text_content = sf.read().decode("utf-8", errors="ignore")
+                                except (IOError, OSError) as read_err:
+                                    log(f"Aviso leyendo archivo '{sub.name}' en capa '{layer_name}': {read_err}", "WARN")
+                                    continue
+
+                                # Evaluación de patrones sospechosos (Cualquier fallo se propaga)
+                                for p, desc in suspicious_patterns:
+                                    if re.search(p, text_content):
                                         raise RuntimeError(
-                                            f"AUDITORÍA DE CAPAS DOCKER BLOQUEADA: Archivo prohibido '{sub.name}' detectado dentro de la capa '{member.name}' de images.tar."
+                                            f"AUDITORÍA DE CAPAS DOCKER BLOQUEADA en '{sub.name}' (capa '{layer_name}'): {desc}"
                                         )
-
-                                # 2. Validar contenido en archivos no binarios
-                                if sub.isfile() and sub.size > 0:
-                                    sf = layer_tar.extractfile(sub)
-                                    if not sf:
-                                        continue
-
-                                    # Lectura de muestra inicial para discernir binarios de texto
-                                    try:
-                                        sample = sf.read(1024)
-                                        if b"\x00" in sample:
-                                            # Archivo binario (ejecutable, biblioteca, imagen), se omite análisis textual
-                                            continue
-                                        # Archivo textual: leer completo y decodificar
-                                        sf.seek(0)
-                                        text_content = sf.read().decode("utf-8", errors="ignore")
-                                    except (IOError, OSError):
-                                        continue
-
-                                    # Evaluación de patrones sospechosos (Cualquier fallo se propaga)
-                                    for p, desc in suspicious_patterns:
-                                        if re.search(p, text_content):
-                                            raise RuntimeError(
-                                                f"AUDITORÍA DE CAPAS DOCKER BLOQUEADA en '{sub.name}' (capa '{member.name}'): {desc}"
-                                            )
-                    except (tarfile.ReadError, tarfile.CompressionError):
-                        continue
+                except Exception as layer_err:
+                    if isinstance(layer_err, RuntimeError):
+                        raise
+                    raise RuntimeError(
+                        f"AUDITORÍA DE CAPAS DOCKER FALLIDA: Error al abrir o inspeccionar la capa obligatoria '{layer_name}': {layer_err}"
+                    )
 
         log(f"  -> Capas Docker inspeccionadas: {layers_count} capas y {files_count} archivos verificados limpios de secretos.", "SUCCESS")
 
     def _audit_ollama_model_archive(self, model_tar_path: str) -> None:
         """
         Verifica la estructura real del archivo tarball del modelo de Ollama:
-        1. Comprueba la ruta canónica exacta del manifiesto de qwen2.5:3b-instruct.
-        2. Exige que los digests no estén vacíos.
-        3. Calcula y valida el hash SHA-256 criptográfico real del contenido de cada blob contra su digest.
-        4. Exige la presencia del blob principal de pesos neuronales (> 500 MB).
+        1. Comprueba la ruta canónica y etiqueta exacta del manifiesto de qwen2.5:3b-instruct (rechazando coincidencias aproximadas).
+        2. Valida el esquema formal del manifiesto (schemaVersion, mediaType, config, layers).
+        3. Exige que los digests no estén vacíos y tengan formato SHA-256 válido.
+        4. Calcula y valida el hash SHA-256 criptográfico real del contenido de cada blob contra su digest.
+        5. Exige la presencia del blob principal de pesos neuronales (> 500 MB).
         """
         log("  -> Validando estructura interna, manifiesto y SHA-256 de blobs reales en ollama_model.tar.gz...", "INFO")
         with tarfile.open(model_tar_path, "r:gz") as mtf:
@@ -654,47 +709,64 @@ class ReleaseBuilder:
                 )
 
             # Localizar la ruta canónica exacta del modelo qwen2.5:3b-instruct
-            expected_manifest_candidates = [
-                "manifests/registry.ollama.ai/library/qwen2.5/3b-instruct",
-                "manifests/registry.ollama.ai/library/qwen2.5:3b-instruct",
-            ]
+            # Cumple estrictamente el formato canónico de Ollama: manifests/registry.ollama.ai/library/qwen2.5/(3b-instruct|latest)
+            manifest_regex = re.compile(
+                r"^(?:root/\.ollama/models/)?manifests/registry\.ollama\.ai/library/qwen2\.5/(?:3b-instruct|latest)$"
+            )
             exact_manifest_path = None
-            for cand in expected_manifest_candidates:
-                for name in member_names:
-                    if name.endswith(cand) or name == cand:
-                        exact_manifest_path = name
-                        break
-                if exact_manifest_path:
+            for name in member_names:
+                clean_name = name.lstrip("./")
+                if manifest_regex.match(clean_name):
+                    exact_manifest_path = name
                     break
 
             if not exact_manifest_path:
-                # Comprobación de prefijo y etiqueta estricta si la estructura de carpetas tiene variante
-                for name in member_names:
-                    if "manifests" in name and "qwen2.5" in name and "3b-instruct" in name:
-                        exact_manifest_path = name
-                        break
-
-            if not exact_manifest_path:
                 raise RuntimeError(
-                    "AUDITORÍA DE MODELO FALLIDA: No se encontró el manifiesto con la etiqueta exacta 'qwen2.5:3b-instruct' en 'ollama_model.tar.gz'."
+                    "AUDITORÍA DE MODELO FALLIDA: No se encontró el manifiesto con la ruta canónica y etiqueta exacta "
+                    "'manifests/registry.ollama.ai/library/qwen2.5/3b-instruct' en 'ollama_model.tar.gz'. "
+                    "Se rechazan coincidencias aproximadas o ambiguas."
                 )
 
             manifest_file = mtf.extractfile(exact_manifest_path)
             if not manifest_file:
                 raise RuntimeError(f"No se pudo leer el archivo de manifiesto: {exact_manifest_path}")
 
-            manifest_json = json.loads(manifest_file.read().decode("utf-8"))
-            required_digests = []
+            try:
+                manifest_json = json.loads(manifest_file.read().decode("utf-8"))
+            except Exception as e:
+                raise RuntimeError(f"AUDITORÍA DE MODELO FALLIDA: El archivo de manifiesto no es JSON válido: {e}")
 
+            # Validación estricta del esquema del manifiesto
+            if not isinstance(manifest_json, dict):
+                raise RuntimeError("AUDITORÍA DE MODELO FALLIDA: El manifiesto no contiene un objeto JSON válido.")
+            if str(manifest_json.get("schemaVersion")) not in ("2", "2.0"):
+                raise RuntimeError(f"AUDITORÍA DE MODELO FALLIDA: schemaVersion inválido ({manifest_json.get('schemaVersion')}).")
+            if not manifest_json.get("mediaType"):
+                raise RuntimeError("AUDITORÍA DE MODELO FALLIDA: Falta 'mediaType' en el manifiesto.")
+
+            required_digests = []
             if "config" in manifest_json and "digest" in manifest_json["config"]:
-                required_digests.append(manifest_json["config"]["digest"].replace("sha256:", "").replace("sha256-", ""))
-            for layer in manifest_json.get("layers", []):
+                clean_cfg = manifest_json["config"]["digest"].replace("sha256:", "").replace("sha256-", "").strip().lower()
+                if re.match(r"^[a-f0-9]{64}$", clean_cfg):
+                    required_digests.append(clean_cfg)
+                else:
+                    raise RuntimeError(f"AUDITORÍA DE MODELO FALLIDA: Digest de configuración inválido: {clean_cfg}")
+
+            layers = manifest_json.get("layers", [])
+            if not layers or not isinstance(layers, list):
+                raise RuntimeError("AUDITORÍA DE MODELO FALLIDA: El manifiesto no contiene lista de capas 'layers'.")
+
+            for layer in layers:
                 if "digest" in layer:
-                    required_digests.append(layer["digest"].replace("sha256:", "").replace("sha256-", ""))
+                    clean_lyr = layer["digest"].replace("sha256:", "").replace("sha256-", "").strip().lower()
+                    if re.match(r"^[a-f0-9]{64}$", clean_lyr):
+                        required_digests.append(clean_lyr)
+                    else:
+                        raise RuntimeError(f"AUDITORÍA DE MODELO FALLIDA: Digest de capa inválido: {clean_lyr}")
 
             if not required_digests:
                 raise RuntimeError(
-                    f"AUDITORÍA DE MODELO FALLIDA: El manifiesto '{exact_manifest_path}' no contiene capas ni digests de configuración válidos."
+                    f"AUDITORÍA DE MODELO FALLIDA: El manifiesto '{exact_manifest_path}' no contiene capas ni digests válidos."
                 )
 
             has_large_weight_blob = False
@@ -791,21 +863,56 @@ class ReleaseBuilder:
                             cmd = [innoextract_tool, "x", f"-o{temp_exe_dir}", "-y", art]
                         ret_ex = subprocess.call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                         if ret_ex == 0:
+                            # 1. Auditoría de seguridad estricta en el contenido extraído
                             self.audit_security(temp_exe_dir)
+
+                            # 2. Validar presencia o ausencia de componentes según tipo de distribución
+                            exe_files = []
+                            for root_d, _, f_list in os.walk(temp_exe_dir):
+                                for f_item in f_list:
+                                    exe_files.append(f_item.lower())
+
+                            exe_has_images = "images.tar" in exe_files
+                            exe_has_model = "ollama_model.tar.gz" in exe_files
+                            exe_has_light = ".light_release" in exe_files
+
+                            expected_has_images = not self.skip_docker and os.path.exists(staging_images)
+                            expected_has_model = not self.skip_model and os.path.exists(staging_model)
+
+                            if is_complete:
+                                if not exe_has_images:
+                                    raise RuntimeError(f"AUDITORÍA EXE FALLIDA: El instalador completo '{filename}' no contiene 'images.tar'.")
+                                if not exe_has_model:
+                                    raise RuntimeError(f"AUDITORÍA EXE FALLIDA: El instalador completo '{filename}' no contiene 'ollama_model.tar.gz'.")
+                                if exe_has_light:
+                                    raise RuntimeError(f"AUDITORÍA EXE FALLIDA: El instalador completo '{filename}' contiene inesperadamente '.light_release'.")
+                            else:
+                                if expected_has_images != exe_has_images:
+                                    raise RuntimeError(f"AUDITORÍA EXE FALLIDA: Presencia de 'images.tar' en '{filename}' ({exe_has_images}) no coincide con lo esperado ({expected_has_images}).")
+                                if expected_has_model != exe_has_model:
+                                    raise RuntimeError(f"AUDITORÍA EXE FALLIDA: Presencia de 'ollama_model.tar.gz' en '{filename}' ({exe_has_model}) no coincide con lo esperado ({expected_has_model}).")
+                                if not exe_has_light:
+                                    raise RuntimeError(f"AUDITORÍA EXE FALLIDA: El instalador ligero '{filename}' no contiene '.light_release'.")
+
                             artifact_audit_status[filename] = "verified_deep_extracted"
-                            log(f"     [EXE] Inspección interna de '{filename}' superada con éxito ({innoextract_tool}).", "SUCCESS")
+                            log(f"     [EXE] Inspección interna exhaustiva de '{filename}' superada con éxito ({innoextract_tool}).", "SUCCESS")
                         else:
-                            log(f"     [EXE] Aviso: {innoextract_tool} no pudo extraer el instalador .exe. Validando mediante hash SHA-256 e inventario de staging.", "WARN")
-                            artifact_audit_status[filename] = "verified_staging_hash"
+                            log(
+                                f"     [EXE] AVISO: {innoextract_tool} no pudo extraer el instalador .exe. "
+                                "El contenido interno NO ha podido ser inspeccionado de forma directa. "
+                                "Se acredita únicamente la integridad criptográfica del archivo externo.",
+                                "WARN",
+                            )
+                            artifact_audit_status[filename] = "unverified_contents_hash_only"
                     finally:
                         shutil.rmtree(temp_exe_dir, ignore_errors=True)
                 else:
                     log(
-                        f"     [EXE] Aviso: innoextract/7z no disponibles en el host. El contenido interno de '{filename}' no se ha podido inspeccionar de forma directa. "
-                        "Su integridad se valida mediante hash SHA-256 e inventario de staging compilado.",
+                        f"     [EXE] AVISO: innoextract/7z no están disponibles en el host. El contenido interno de '{filename}' "
+                        "NO se ha inspeccionado directamente. Se acredita únicamente la integridad criptográfica del archivo externo.",
                         "WARN",
                     )
-                    artifact_audit_status[filename] = "verified_staging_hash"
+                    artifact_audit_status[filename] = "unverified_contents_hash_only"
 
                 if is_complete and size_mb < 1200:
                     raise RuntimeError(
@@ -844,15 +951,21 @@ class ReleaseBuilder:
                             f"AUDITORÍA FINAL BLOQUEADA: El paquete '{filename}' contiene el archivo confidencial/prohibido: '{norm_name}'."
                         )
 
-            # Comprobación de componentes según tipo de distribución
+            # Comprobación estricta de componentes según tipo de distribución
             has_images = any(m.endswith("images.tar") for m in normalized_names)
             has_model = any(m.endswith("ollama_model.tar.gz") for m in normalized_names)
+            has_light = any(m.endswith(".light_release") for m in normalized_names)
+
+            expected_has_images = not self.skip_docker and os.path.exists(staging_images)
+            expected_has_model = not self.skip_model and os.path.exists(staging_model)
 
             if is_complete:
                 if not has_images:
                     raise RuntimeError(f"AUDITORÍA FINAL FALLIDA: La distribución completa '{filename}' no contiene 'images.tar'.")
                 if not has_model:
                     raise RuntimeError(f"AUDITORÍA FINAL FALLIDA: La distribución completa '{filename}' no contiene 'ollama_model.tar.gz'.")
+                if has_light:
+                    raise RuntimeError(f"AUDITORÍA FINAL FALLIDA: La distribución completa '{filename}' contiene inesperadamente '.light_release'.")
 
                 if size_mb < 1200:
                     raise RuntimeError(
@@ -879,10 +992,34 @@ class ReleaseBuilder:
 
                 artifact_audit_status[filename] = "verified_complete_nested"
             else:
-                if self.skip_docker and has_images:
-                    raise RuntimeError(f"AUDITORÍA FALLIDA: Distribución ligera contiene inesperadamente 'images.tar'.")
-                if self.skip_model and has_model:
-                    raise RuntimeError(f"AUDITORÍA FALLIDA: Distribución ligera contiene inesperadamente 'ollama_model.tar.gz'.")
+                # Comprobación exhaustiva de coherencia para todas las combinaciones ligeras
+                if not has_light:
+                    raise RuntimeError(f"AUDITORÍA FALLIDA: El artefacto ligero '{filename}' no incluye el marcador obligatorio '.light_release'.")
+
+                if expected_has_images:
+                    if not has_images:
+                        raise RuntimeError(f"AUDITORÍA FALLIDA: El paquete '{filename}' debería incluir 'images.tar' pero falta.")
+                    if not staging_images_hash:
+                        raise RuntimeError("Falta el hash de images.tar en staging para validar el paquete ligero.")
+                    nested_img_hash = self._extract_and_hash_member_from_archive(art, "images.tar")
+                    if nested_img_hash != staging_images_hash:
+                        raise RuntimeError(f"CORRUPCIÓN: 'images.tar' en '{filename}' no coincide con staging.")
+                else:
+                    if has_images:
+                        raise RuntimeError(f"AUDITORÍA FALLIDA: Distribución ligera '{filename}' contiene inesperadamente 'images.tar'.")
+
+                if expected_has_model:
+                    if not has_model:
+                        raise RuntimeError(f"AUDITORÍA FALLIDA: El paquete '{filename}' debería incluir 'ollama_model.tar.gz' pero falta.")
+                    if not staging_model_hash:
+                        raise RuntimeError("Falta el hash de ollama_model.tar.gz en staging para validar el paquete ligero.")
+                    nested_model_hash = self._extract_and_hash_member_from_archive(art, "ollama_model.tar.gz")
+                    if nested_model_hash != staging_model_hash:
+                        raise RuntimeError(f"CORRUPCIÓN: 'ollama_model.tar.gz' en '{filename}' no coincide con staging.")
+                else:
+                    if has_model:
+                        raise RuntimeError(f"AUDITORÍA FALLIDA: Distribución ligera '{filename}' contiene inesperadamente 'ollama_model.tar.gz'.")
+
                 artifact_audit_status[filename] = "verified_lightweight"
 
         log(f"Auditoría final de seguridad e integridad superada con éxito en todos los artefactos ({dist_type_label}).", "SUCCESS")

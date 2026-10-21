@@ -13,8 +13,7 @@ from ..deps import get_db
 logger = logging.getLogger("lazyJobFinder.api.jobs")
 router = APIRouter(prefix="/jobs", tags=["Candidaturas y Ofertas"])
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-DOCS_DIR = os.path.join(BASE_DIR, "data", "documents")
+from ...storage import DOCUMENTS_DIR, PROJECT_ROOT as BASE_DIR, is_safe_path
 
 
 class UpdateJobStatusRequest(BaseModel):
@@ -144,11 +143,11 @@ def download_job_document(job_id: int, doc_type: str):
         )
 
     # Verificación de seguridad: Evitar Directory Traversal
-    canonical_target = os.path.realpath(target_path)
-    canonical_base = os.path.realpath(BASE_DIR)
-    if not canonical_target.startswith(canonical_base):
-        logger.security_warning("Intento de path traversal bloqueado: %s", target_path)
+    if not is_safe_path(target_path, DOCUMENTS_DIR) and not is_safe_path(target_path, BASE_DIR):
+        logger.warning("Intento de path traversal bloqueado: %s", target_path)
         raise HTTPException(status_code=403, detail="Acceso a ruta de archivo no autorizado.")
+
+    canonical_target = os.path.realpath(target_path)
 
     filename = os.path.basename(canonical_target)
     return FileResponse(

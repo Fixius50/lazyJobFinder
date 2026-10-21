@@ -49,11 +49,20 @@ Source: "..\staging\config\*"; DestDir: "{app}\config"; Flags: onlyifdoesntexist
 ; Directorios de datos del usuario
 Source: "..\staging\data\*"; DestDir: "{app}\data"; Flags: onlyifdoesntexist recursesubdirs createallsubdirs
 
-; Imágenes de contenedores empaquetadas (obligatorias para paquete completo x64)
-Source: "..\staging\images.tar"; DestDir: "{app}"; Flags: ignoreversion
+; Marcador de distribución ligera (si existe en staging)
+#if FileExists("..\staging\.light_release")
+Source: "..\staging\.light_release"; DestDir: "{app}"; Flags: ignoreversion
+#endif
 
-; Datos del modelo de IA empaquetado (obligatorio para paquete completo)
+; Imágenes de contenedores empaquetadas (solo si existen en staging)
+#if FileExists("..\staging\images.tar")
+Source: "..\staging\images.tar"; DestDir: "{app}"; Flags: ignoreversion
+#endif
+
+; Datos del modelo de IA empaquetado (solo si existen en staging)
+#if FileExists("..\staging\ollama_model.tar.gz")
 Source: "..\staging\ollama_model.tar.gz"; DestDir: "{app}"; Flags: ignoreversion
+#endif
 
 [Dirs]
 Name: "{app}\data"; Permissions: users-full

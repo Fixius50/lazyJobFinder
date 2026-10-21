@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import subprocess
 from typing import Any, AsyncGenerator, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query, status
@@ -165,12 +166,15 @@ def _find_compose_container(client, service_name: str, project_name: Optional[st
             if c_svc == service_name:
                 return c
 
-        # 2. Fallback por nombre estrictamente acotado al prefijo del proyecto
+        # 2. Fallback por convención exacta de nombres de Compose (evita coincidencias accidentales)
         if resolved_proj:
-            proj_prefix = resolved_proj.lower()
+            proj_prefix = re.escape(resolved_proj.lower())
+            svc_pattern = re.compile(
+                rf"^{proj_prefix}[_-]{re.escape(service_name.lower())}(?:[_-]\d+)?$"
+            )
             for c in containers:
                 c_name = c.name.lower()
-                if (c_name.startswith(f"{proj_prefix}_") or c_name.startswith(f"{proj_prefix}-")) and service_name in c_name:
+                if svc_pattern.match(c_name):
                     return c
         # Si no hay proyecto configurado, se rechaza cualquier fallback genérico por seguridad
     except Exception as e:

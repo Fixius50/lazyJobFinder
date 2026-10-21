@@ -30,8 +30,8 @@ class JobPipelineRunner:
         config_dir: Optional[str] = None,
         db_path: Optional[str] = None,
     ):
-        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        self.config_dir = config_dir or os.path.join(base_dir, "config")
+        from ..storage import CONFIG_DIR
+        self.config_dir = config_dir or CONFIG_DIR
 
         # 1. Cargar configuraciones
         self.settings = self._load_yaml(os.path.join(self.config_dir, "settings.yaml"))

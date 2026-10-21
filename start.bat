@@ -4,6 +4,8 @@ title lazyJobFinder - Lanzador Principal
 
 cd /d "%~dp0"
 
+if not defined PYTHONPYCACHEPREFIX set "PYTHONPYCACHEPREFIX=%~dp0.cache\pycache"
+
 set "CLI_INVOKED=0"
 
 :: -----------------------------------------------------------------------------

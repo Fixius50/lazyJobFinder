@@ -13,10 +13,13 @@ from typing import Any, Dict, Optional, Tuple
 
 logger = logging.getLogger("lazyJobFinder.tailoring.cv_reader")
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-UPLOAD_DIR = os.path.join(BASE_DIR, "data", "uploaded_cvs")
-BASE_CV_PATH = os.path.join(BASE_DIR, "config", "cv_base.md")
-ACTIVE_CV_CONFIG_FILE = os.path.join(BASE_DIR, "data", "active_cv.json")
+from ..storage import (
+    ACTIVE_CV_FILE as ACTIVE_CV_CONFIG_FILE,
+    BASE_CV_FILE as BASE_CV_PATH,
+    PROJECT_ROOT as BASE_DIR,
+    UPLOAD_DIR,
+    read_active_cv_pointer,
+)
 
 
 def extract_text_from_pdf(pdf_path: str) -> str:
@@ -93,14 +96,8 @@ def get_active_cv_text_and_meta() -> Tuple[str, Dict[str, Any]]:
     Si se ha subido y seleccionado un archivo en data/uploaded_cvs/, lee ese archivo.
     Si no hay archivos subidos o está en 'none', devuelve texto vacío con has_cv=False (sin filtrado de CV).
     """
-    selected_filename = "none"
-    if os.path.exists(ACTIVE_CV_CONFIG_FILE):
-        try:
-            with open(ACTIVE_CV_CONFIG_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                selected_filename = data.get("selected_filename", "none")
-        except Exception:
-            selected_filename = "none"
+    pointer = read_active_cv_pointer()
+    selected_filename = pointer.get("selected_filename", "none")
 
     if selected_filename and selected_filename not in ("none", "default"):
         custom_path = os.path.join(UPLOAD_DIR, os.path.basename(selected_filename))

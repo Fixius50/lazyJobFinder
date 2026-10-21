@@ -43,6 +43,7 @@ services:
     environment:
       - OLLAMA_BASE_URL=http://ollama:11434
       - DATABASE_PATH=/app/data/lazyjobfinder.db
+      - PYTHONPYCACHEPREFIX=/app/.cache/pycache
     ports:
       - "127.0.0.1:8000:8000"
     volumes:

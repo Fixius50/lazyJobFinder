@@ -16,10 +16,15 @@ from ..deps import get_db
 logger = logging.getLogger("lazyJobFinder.api.cv")
 router = APIRouter(prefix="/cv", tags=["CV y Perfil"])
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-UPLOAD_DIR = os.path.join(BASE_DIR, "data", "uploaded_cvs")
-BASE_CV_PATH = os.path.join(BASE_DIR, "config", "cv_base.md")
-ACTIVE_CV_CONFIG_FILE = os.path.join(BASE_DIR, "data", "active_cv.json")
+from ...storage import (
+    ACTIVE_CV_FILE as ACTIVE_CV_CONFIG_FILE,
+    BASE_CV_FILE as BASE_CV_PATH,
+    PROJECT_ROOT as BASE_DIR,
+    UPLOAD_DIR,
+    ensure_storage_dirs,
+    read_active_cv_pointer,
+    write_active_cv_pointer,
+)
 
 ALLOWED_EXTENSIONS = set(CV_LIMITS.get("allowed_extensions", [".pdf", ".md", ".txt"]))
 MAX_FILE_SIZE_BYTES = CV_LIMITS.get("max_size_bytes", 5 * 1024 * 1024)
@@ -30,21 +35,14 @@ class SelectCVRequest(BaseModel):
 
 
 def _ensure_upload_dir():
-    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    ensure_storage_dirs()
 
 
 def _get_active_cv_info() -> Dict[str, Any]:
     """Recupera la información del CV actualmente seleccionado sin enviar datos a la IA."""
     _ensure_upload_dir()
-    selected_filename = "none"
-    if os.path.exists(ACTIVE_CV_CONFIG_FILE):
-        try:
-            import json
-            with open(ACTIVE_CV_CONFIG_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                selected_filename = data.get("selected_filename", "none")
-        except Exception:
-            selected_filename = "none"
+    pointer = read_active_cv_pointer()
+    selected_filename = pointer.get("selected_filename", "none")
 
     if selected_filename and selected_filename not in ("none", "default"):
         target_path = os.path.join(UPLOAD_DIR, os.path.basename(selected_filename))
@@ -203,9 +201,7 @@ def select_active_cv(req: SelectCVRequest) -> Dict[str, Any]:
             raise HTTPException(status_code=404, detail="El archivo CV seleccionado no existe.")
         choice = clean_name
 
-    import json
-    with open(ACTIVE_CV_CONFIG_FILE, "w", encoding="utf-8") as f:
-        json.dump({"selected_filename": choice, "updated_at": time.time()}, f)
+    write_active_cv_pointer(choice)
 
     db = get_db()
     db.log_event("INFO", "cv", f"CV activo actualizado a: {choice}")
@@ -247,17 +243,13 @@ def delete_uploaded_cv(filename: str) -> Dict[str, Any]:
 
     # Si era el CV activo seleccionado, volver a 'none'
     reverted_to_none = False
-    if os.path.exists(ACTIVE_CV_CONFIG_FILE):
+    current_pointer = read_active_cv_pointer()
+    if current_pointer.get("selected_filename") == clean_name:
         try:
-            import json
-            with open(ACTIVE_CV_CONFIG_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            if data.get("selected_filename") == clean_name:
-                with open(ACTIVE_CV_CONFIG_FILE, "w", encoding="utf-8") as f:
-                    json.dump({"selected_filename": "none", "updated_at": time.time()}, f)
-                reverted_to_none = True
+            write_active_cv_pointer("none")
+            reverted_to_none = True
         except Exception as e:
-            logger.warning("Error comprobando active_cv.json tras borrado: %s", e)
+            logger.warning("Error restableciendo active_cv.json tras borrado: %s", e)
 
     db = get_db()
     db.log_event("INFO", "cv", f"Archivo CV eliminado: {clean_name} (restaurado a sin CV: {reverted_to_none})")

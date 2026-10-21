@@ -24,11 +24,8 @@ class PDFRenderer:
     """
 
     def __init__(self, base_output_dir: Optional[str] = None):
-        self.output_dir = base_output_dir or os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-            "data",
-            "documents",
-        )
+        from ..storage import DOCUMENTS_DIR
+        self.output_dir = base_output_dir or DOCUMENTS_DIR
         os.makedirs(self.output_dir, exist_ok=True)
 
     def render_cv_and_letter(

@@ -10,6 +10,7 @@ data/documents/*
 !data/documents/.gitkeep
 
 # Python cache y compilados
+.cache/
 __pycache__/
 *.py[cod]
 *$py.class

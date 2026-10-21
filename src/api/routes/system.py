@@ -512,9 +512,22 @@ def get_system_logs(
     level: Optional[str] = None,
     source: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    """Devuelve los registros históricos persistidos en SQLite."""
+    """Devuelve los registros recientes persistidos en SQLite (purgando automáticamente los antiguos)."""
     db = get_db()
     return db.get_system_logs(limit=limit, level=level, source=source)
+
+
+@router.delete("/logs")
+def clear_system_logs() -> Dict[str, Any]:
+    """Elimina los registros antiguos y vacía el histórico de la consola web."""
+    db = get_db()
+    deleted = db.clear_system_logs()
+    db.log_event("INFO", "system", "Consola de registros reiniciada limpiamente.")
+    return {
+        "success": True,
+        "deleted_count": deleted,
+        "message": f"Se eliminaron {deleted} registros antiguos. Consola reiniciada."
+    }
 
 
 @router.get("/logs/container")

@@ -89,7 +89,12 @@ export function LogConsole({ initialLogs = [], height = "h-80" }: LogConsoleProp
     }
   }, [logs, containerRawLogs, autoScroll]);
 
-  const clearView = () => {
+  const clearView = async () => {
+    try {
+      await api.clearSystemLogs();
+    } catch (e) {
+      console.warn("No se pudo vaciar logs en backend:", e);
+    }
     setLogs([]);
     setContainerRawLogs("");
   };

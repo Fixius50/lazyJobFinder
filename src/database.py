@@ -220,6 +220,7 @@ class Database:
 
         # Recuperar ejecuciones interrumpidas en el último reinicio
         self.recover_interrupted_runs()
+        self.prune_old_system_logs()
 
         logger.info("Base de datos inicializada correctamente en %s", self.db_path)
 
@@ -934,6 +935,46 @@ class Database:
             with self._get_connection() as conn:
                 conn.execute(sql, params)
 
+    def prune_old_system_logs(self, max_entries: int = 150, retention_hours: int = 24) -> int:
+        """
+        Elimina los logs antiguos conservando únicamente los registros recientes (últimas 24h).
+        Garantiza que la consola web y los registros solo muestren eventos nuevos.
+        """
+        try:
+            with self._get_connection() as conn:
+                # 1. Eliminar logs con más de retention_hours de antigüedad
+                cursor1 = conn.execute(
+                    "DELETE FROM system_logs WHERE timestamp < datetime('now', '-' || ? || ' hours', 'localtime')",
+                    (retention_hours,),
+                )
+                deleted_by_time = cursor1.rowcount
+
+                # 2. Asegurar que nunca exceda max_entries manteniendo los IDs más recientes
+                cursor2 = conn.execute(
+                    """
+                    DELETE FROM system_logs 
+                    WHERE id NOT IN (
+                        SELECT id FROM system_logs ORDER BY id DESC LIMIT ?
+                    )
+                    """,
+                    (max_entries,),
+                )
+                deleted_by_limit = cursor2.rowcount
+                return deleted_by_time + deleted_by_limit
+        except Exception as e:
+            logger.error("Error purgando logs antiguos: %s", e)
+            return 0
+
+    def clear_system_logs(self) -> int:
+        """Elimina todos los logs del sistema para reiniciar la consola con registros limpios."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.execute("DELETE FROM system_logs")
+                return cursor.rowcount
+        except Exception as e:
+            logger.error("Error vaciando system_logs: %s", e)
+            return 0
+
     def get_system_logs(
         self,
         limit: int = 150,
@@ -941,6 +982,7 @@ class Database:
         source: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Recupera los logs del sistema estructurados para la consola web de administración."""
+        self.prune_old_system_logs(max_entries=limit, retention_hours=24)
         where = ["1=1"]
         params: List[Any] = []
         if level:

@@ -108,6 +108,11 @@ export const api = {
     if (source) params.append("source", source);
     return request<SystemLogItem[]>(`/system/logs?${params.toString()}`, { timeoutMs: 15000 });
   },
+  clearSystemLogs: () =>
+    request<{ success: boolean; deleted_count: number; message: string }>("/system/logs", {
+      method: "DELETE",
+      timeoutMs: 10000,
+    }),
   getContainerLogs: (service: string = "all", tail = 80) =>
     request<{ service: string; logs: string }>(`/system/logs/container?service=${service}&tail=${tail}`, { timeoutMs: 15000 }),
 

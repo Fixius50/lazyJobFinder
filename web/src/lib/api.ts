@@ -14,6 +14,7 @@ import type {
   ActiveCVInfo,
   SystemLogItem,
   SettingsResponse,
+  FilterFacetsResponse,
 } from "@/types";
 
 export function getApiBaseUrl(): string {
@@ -152,7 +153,13 @@ export const api = {
     }
   },
   selectActiveCV: (filename: string) =>
-    request<{ success: boolean; selected: string; active_info: ActiveCVInfo }>("/cv/select", {
+    request<{
+      success: boolean;
+      selected: string;
+      active_info: ActiveCVInfo;
+      re_evaluated_jobs?: number;
+      message?: string;
+    }>("/cv/select", {
       method: "POST",
       body: JSON.stringify({ filename }),
     }),
@@ -161,7 +168,7 @@ export const api = {
       `/cv/${encodeURIComponent(filename)}`,
       { method: "DELETE" }
     ),
-  previewActiveCV: () =>
+  previewActiveCV: (filename?: string) =>
     request<{
       filename: string;
       type: string;
@@ -172,7 +179,14 @@ export const api = {
       full_text_length: number;
       is_default: boolean;
       error?: string;
-    }>("/cv/preview"),
+    }>(`/cv/preview${filename ? `?filename=${encodeURIComponent(filename)}` : ""}`),
+  reevaluateCV: () =>
+    request<{
+      success: boolean;
+      re_evaluated_jobs: number;
+      active_info: ActiveCVInfo;
+      message: string;
+    }>("/cv/reevaluate", { method: "POST" }),
   getPreflight: () => request<PreflightResponse>("/search/preflight"),
   triggerSearch: () => request<{ success: boolean; message: string }>("/search/run", { method: "POST" }),
   getSearchStatus: () => request<any>("/search/status"),

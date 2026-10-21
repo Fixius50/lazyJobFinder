@@ -739,6 +739,19 @@ class Database:
             cursor = conn.execute(query, (limit,))
             return [dict(row) for row in cursor.fetchall()]
 
+    def get_all_jobs_for_scoring(self, limit: int = 200) -> List[Dict[str, Any]]:
+        """Recupera todas las ofertas activas registradas para contrastar afinidad con el CV activo."""
+        with self._get_connection() as conn:
+            query = """
+                SELECT id, title, company, location, is_remote, description, source, created_at
+                FROM jobs
+                WHERE ui_saved = 1
+                ORDER BY id DESC
+                LIMIT ?
+            """
+            cursor = conn.execute(query, (limit,))
+            return [dict(row) for row in cursor.fetchall()]
+
     def log_event(self, level: str, source: str, message: str, details: Optional[str] = None) -> None:
         """Registra un evento o error del sistema de forma persistente."""
         try:
@@ -803,10 +816,6 @@ class Database:
             search_param = f"%{search.strip().lower()}%"
             where_clauses.append("(LOWER(j.title) LIKE ? OR LOWER(j.company) LIKE ? OR LOWER(j.location) LIKE ?)")
             params.extend([search_param, search_param, search_param])
-
-        if location:
-            where_clauses.append("LOWER(j.location) LIKE ?")
-            params.append(f"%{location.strip().lower()}%")
 
         if source:
             src = str(source).strip().lower()

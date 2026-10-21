@@ -33,11 +33,8 @@ export function ApplicationsView() {
   const [minScore, setMinScore] = useState<number>(0);
   const [currentPage, setCurrentPage] = useState<number>(1);
 
-  // Filtros Avanzados Geográficos y por Dimensiones
-  const [geoLat, setGeoLat] = useState<number>(40.4168);
-  const [geoLon, setGeoLon] = useState<number>(-3.7038);
-  const [geoRadiusKm, setGeoRadiusKm] = useState<number>(50);
-  const [locationName, setLocationName] = useState<string>("Cualquier lugar");
+  // Filtros Avanzados y por Dimensiones
+  const [locationName, setLocationName] = useState<string>("");
   const [isAllLocations, setIsAllLocations] = useState<boolean>(true);
 
   const [selectedModalities, setSelectedModalities] = useState<string[]>([]);
@@ -74,6 +71,7 @@ export function ApplicationsView() {
 
       const res = await api.listJobs({
         search: searchTerm || undefined,
+        location: !isAllLocations && locationName ? locationName : undefined,
         source: selectedSource || undefined,
         status: selectedStatus || undefined,
         min_score: minScore > 0 ? minScore : undefined,
@@ -84,9 +82,6 @@ export function ApplicationsView() {
         min_salary: minSal,
         schedules: selectedSchedules.length > 0 ? selectedSchedules : undefined,
         contract_types: selectedContractTypes.length > 0 ? selectedContractTypes : undefined,
-        geo_lat: !isAllLocations ? geoLat : undefined,
-        geo_lon: !isAllLocations ? geoLon : undefined,
-        geo_radius_km: !isAllLocations ? geoRadiusKm : undefined,
         page: currentPage,
         page_size: 20,
         sort_by: "created_at",
@@ -114,9 +109,7 @@ export function ApplicationsView() {
     selectedSchedules,
     selectedContractTypes,
     isAllLocations,
-    geoLat,
-    geoLon,
-    geoRadiusKm,
+    locationName,
     currentPage,
   ]);
 
@@ -133,10 +126,7 @@ export function ApplicationsView() {
     setSelectedStatus("");
     setMinScore(0);
     setIsAllLocations(true);
-    setGeoLat(40.4168);
-    setGeoLon(-3.7038);
-    setGeoRadiusKm(50);
-    setLocationName("Madrid");
+    setLocationName("");
     setSelectedModalities([]);
     setSelectedCategories([]);
     setSelectedEducations([]);
@@ -246,28 +236,24 @@ export function ApplicationsView() {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6 items-start">
         {showCvPanel && (
           <aside className="lg:col-span-4 xl:col-span-3 space-y-4">
-            <CvManager onCvChanged={fetchJobs} />
+            <CvManager
+              onCvChanged={() => {
+                loadFacets();
+                fetchJobs();
+              }}
+            />
             <JobFilters
               facets={facets}
               searchTerm={searchTerm}
               onSearchTermChange={setSearchTerm}
               exclusionTerm={exclusionTerm}
               onExclusionTermChange={setExclusionTerm}
-              geoLat={geoLat}
-              geoLon={geoLon}
-              geoRadiusKm={geoRadiusKm}
               locationName={locationName}
+              onLocationChange={(loc) => {
+                setLocationName(loc);
+                setCurrentPage(1);
+              }}
               isAllLocations={isAllLocations}
-              onGeoLocationChange={(lat, lon, name) => {
-                setGeoLat(lat);
-                setGeoLon(lon);
-                setLocationName(name);
-                setCurrentPage(1);
-              }}
-              onGeoRadiusChange={(radiusKm) => {
-                setGeoRadiusKm(radiusKm);
-                setCurrentPage(1);
-              }}
               onToggleAllLocations={(all) => {
                 setIsAllLocations(all);
                 setCurrentPage(1);

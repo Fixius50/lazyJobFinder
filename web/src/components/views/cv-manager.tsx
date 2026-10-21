@@ -90,8 +90,9 @@ export function CvManager({ onCvChanged, className = "" }: CvManagerProps) {
       clearInterval(progressInterval);
       setUploadProgress(100);
       const ext = (res.type || res.filename?.split(".").pop() || "archivo").toUpperCase();
+      const countMsg = res.re_evaluated_jobs !== undefined ? ` • ${res.re_evaluated_jobs} ofertas adaptadas` : "";
       setUploadMessage({
-        text: `CV "${res.filename}" cargado (${ext}).`,
+        text: `CV "${res.filename}" activado (${ext})${countMsg}.`,
         error: false,
       });
       await loadData();
@@ -113,7 +114,12 @@ export function CvManager({ onCvChanged, className = "" }: CvManagerProps) {
 
   const handleSelectCV = async (filename: string) => {
     try {
-      await api.selectActiveCV(filename);
+      const res = await api.selectActiveCV(filename);
+      const countMsg = res.re_evaluated_jobs !== undefined ? ` • ${res.re_evaluated_jobs} ofertas adaptadas` : "";
+      setUploadMessage({
+        text: `CV activo: "${filename}"${countMsg}.`,
+        error: false,
+      });
       await loadData();
       if (onCvChanged) onCvChanged();
     } catch (err: any) {
@@ -122,11 +128,11 @@ export function CvManager({ onCvChanged, className = "" }: CvManagerProps) {
     }
   };
 
-  const handlePreview = async () => {
+  const handlePreview = async (filename?: string) => {
     setCvPreviewLoading(true);
     setCvPreviewOpen(true);
     try {
-      const data = await api.previewActiveCV();
+      const data = await api.previewActiveCV(filename);
       setCvPreviewData(data);
     } catch (err: any) {
       alert(`Error extrayendo texto: ${err.message}`);
@@ -172,9 +178,22 @@ export function CvManager({ onCvChanged, className = "" }: CvManagerProps) {
               <InfoTooltip content="Documento que evalúa la IA local frente a cada oferta para determinar la puntuación ATS y redactar documentos adaptados." />
             </div>
             <div className="flex items-center gap-1">
-              <Badge variant={activeCV?.type === "none" ? "outline" : "secondary"} className="text-[10px] py-0">
-                {activeCV?.type === "none" ? "Sin CV (Sin filtro)" : "Personalizado"}
-              </Badge>
+              {activeCV && activeCV.type !== "none" ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => handlePreview(activeCV.filename)}
+                  className="h-6 w-6 p-0 text-primary hover:bg-primary/15 rounded"
+                  title="Ver texto extraído del currículum activo"
+                >
+                  <Eye className="h-3.5 w-3.5" />
+                </Button>
+              ) : (
+                <Badge variant="outline" className="text-[10px] py-0 text-muted-foreground">
+                  Sin CV
+                </Badge>
+              )}
             </div>
           </div>
         </CardHeader>
@@ -182,11 +201,23 @@ export function CvManager({ onCvChanged, className = "" }: CvManagerProps) {
         <CardContent className="space-y-3 pt-3 px-3 sm:px-4">
           {/* Ficha técnica compacta */}
           <div className="bg-muted/40 p-2 rounded-lg text-xs space-y-1 font-mono border">
-            <div className="flex justify-between gap-2">
+            <div className="flex justify-between items-center gap-2">
               <span className="text-muted-foreground shrink-0">Archivo Activo:</span>
-              <span className="font-semibold text-foreground truncate max-w-[150px]" title={activeCV?.filename}>
-                {activeCV?.filename || "Ninguno"}
-              </span>
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className="font-semibold text-foreground truncate max-w-[130px]" title={activeCV?.filename}>
+                  {activeCV?.filename || "Ninguno"}
+                </span>
+                {activeCV?.type !== "none" && activeCV?.filename && (
+                  <button
+                    type="button"
+                    onClick={() => handlePreview(activeCV.filename)}
+                    className="text-primary hover:text-primary/70 transition-colors p-0.5 rounded hover:bg-primary/10"
+                    title="Ver texto extraído de este currículum"
+                  >
+                    <Eye className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
             </div>
             <div className="flex justify-between gap-2 text-[11px]">
               <span className="text-muted-foreground shrink-0">Tamaño:</span>
@@ -290,9 +321,16 @@ export function CvManager({ onCvChanged, className = "" }: CvManagerProps) {
 
                       <div className="flex items-center gap-1 shrink-0">
                         {isActive ? (
-                          <Badge variant="default" className="text-[9px] py-0 px-1 font-semibold">
-                            Activo
-                          </Badge>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => handlePreview(c.filename)}
+                            className="h-6 w-6 p-0 text-primary hover:bg-primary/20 rounded flex items-center justify-center"
+                            title="Ver texto extraído de este currículum"
+                          >
+                            <Eye className="h-3.5 w-3.5" />
+                          </Button>
                         ) : (
                           <Button
                             type="button"
@@ -349,19 +387,6 @@ export function CvManager({ onCvChanged, className = "" }: CvManagerProps) {
               <span className="truncate">{uploadMessage.text}</span>
             </div>
           )}
-
-          {/* Botón de Previsualización de Texto Extraído */}
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={handlePreview}
-            disabled={activeCV?.type === "none"}
-            className="w-full text-xs h-7 flex items-center justify-center gap-1.5 text-muted-foreground hover:text-foreground border border-dashed border-border/60 hover:border-primary/40 disabled:opacity-50"
-          >
-            <Eye className="h-3.5 w-3.5 text-primary" />
-            <span>{activeCV?.type === "none" ? "Sin CV activo para previsualizar" : "Previsualizar Texto Extraído"}</span>
-          </Button>
         </CardContent>
       </Card>
 

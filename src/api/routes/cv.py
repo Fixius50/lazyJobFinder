@@ -77,12 +77,42 @@ def get_active_cv() -> Dict[str, Any]:
 
 
 @router.get("/preview")
-def preview_active_cv() -> Dict[str, Any]:
+def preview_cv(filename: Optional[str] = None) -> Dict[str, Any]:
     """
-    Extrae y devuelve el texto plano del CV actualmente seleccionado,
+    Extrae y devuelve el texto plano del CV activo o del archivo indicado por filename,
     permitiendo al usuario validar cómo se lee su archivo (PDF, Markdown o texto).
     """
-    from ...tailoring.cv_reader import get_active_cv_text_and_meta
+    from ...tailoring.cv_reader import get_active_cv_text_and_meta, extract_cv_text
+
+    if filename and filename not in ("none", "default"):
+        target_path = os.path.join(UPLOAD_DIR, os.path.basename(filename))
+        if os.path.exists(target_path):
+            try:
+                text = extract_cv_text(target_path)
+                return {
+                    "filename": os.path.basename(target_path),
+                    "type": "custom",
+                    "extension": os.path.splitext(target_path)[1].lower(),
+                    "char_count": len(text),
+                    "word_count": len(text.split()),
+                    "text_preview": text[:5000],
+                    "full_text_length": len(text),
+                    "is_default": False,
+                    "error": None,
+                }
+            except Exception as e:
+                return {
+                    "filename": os.path.basename(target_path),
+                    "type": "custom",
+                    "extension": os.path.splitext(target_path)[1].lower(),
+                    "char_count": 0,
+                    "word_count": 0,
+                    "text_preview": "",
+                    "full_text_length": 0,
+                    "is_default": False,
+                    "error": str(e),
+                }
+
     text, meta = get_active_cv_text_and_meta()
     return {
         "filename": meta.get("filename"),
@@ -171,9 +201,15 @@ async def upload_cv_file(file: UploadFile = File(...)) -> Dict[str, Any]:
         logger.error("Error guardando archivo CV: %s", e)
         raise HTTPException(status_code=500, detail=f"Error al guardar el archivo: {str(e)}")
 
+    # Auto-activar el archivo CV subido de forma inmediata
+    write_active_cv_pointer(safe_filename)
+
     # Registrar en base de datos para auditoría
     db = get_db()
-    db.log_event("INFO", "cv", f"Archivo CV subido correctamente: {safe_filename} ({total_bytes} bytes)")
+    db.log_event("INFO", "cv", f"Archivo CV subido y activado: {safe_filename} ({total_bytes} bytes)")
+
+    # Reevaluar ofertas existentes adaptándolas al nuevo CV
+    re_evaluated = _reevaluate_jobs_with_active_cv(db)
 
     return {
         "success": True,
@@ -181,13 +217,33 @@ async def upload_cv_file(file: UploadFile = File(...)) -> Dict[str, Any]:
         "original_name": filename,
         "size_bytes": total_bytes,
         "type": ext.lstrip(".").upper(),
-        "message": "Archivo CV subido y almacenado de forma segura en almacenamiento local.",
+        "re_evaluated_jobs": re_evaluated,
+        "active_info": _get_active_cv_info(),
+        "message": f"CV '{safe_filename}' subido y activado. {re_evaluated} ofertas adaptadas a tu perfil.",
     }
+
+
+def _reevaluate_jobs_with_active_cv(db: Any) -> int:
+    """Reevalúa las ofertas registradas adaptándolas al CV activo."""
+    try:
+        from ...evaluator.scoring_engine import ScoringEngine
+        import yaml
+        settings_path = os.path.join(BASE_DIR, "config", "settings.yaml")
+        profile_path = os.path.join(BASE_DIR, "config", "profile.yaml")
+        settings = {}
+        if os.path.exists(settings_path):
+            with open(settings_path, "r", encoding="utf-8") as f:
+                settings = yaml.safe_load(f) or {}
+        engine = ScoringEngine(db, profile_path, settings)
+        return engine.reevaluate_all_jobs(max_jobs=150)
+    except Exception as e:
+        logger.warning("Fallo al reevaluar ofertas con el CV activo: %s", e)
+        return 0
 
 
 @router.post("/select")
 def select_active_cv(req: SelectCVRequest) -> Dict[str, Any]:
-    """Selecciona qué CV actúa como referencia activa en la interfaz."""
+    """Selecciona qué CV actúa como referencia activa en la interfaz y readapta las ofertas."""
     _ensure_upload_dir()
     choice = req.filename.strip()
 
@@ -206,10 +262,28 @@ def select_active_cv(req: SelectCVRequest) -> Dict[str, Any]:
     db = get_db()
     db.log_event("INFO", "cv", f"CV activo actualizado a: {choice}")
 
+    # Reevaluar ofertas adaptándolas al nuevo CV seleccionado
+    re_evaluated = _reevaluate_jobs_with_active_cv(db)
+
     return {
         "success": True,
         "selected": choice,
         "active_info": _get_active_cv_info(),
+        "re_evaluated_jobs": re_evaluated,
+        "message": f"CV activo actualizado a '{choice}'. {re_evaluated} ofertas adaptadas.",
+    }
+
+
+@router.post("/reevaluate")
+def reevaluate_cv_jobs() -> Dict[str, Any]:
+    """Reevalúa manualmente las ofertas guardadas contra el CV activo."""
+    db = get_db()
+    re_evaluated = _reevaluate_jobs_with_active_cv(db)
+    return {
+        "success": True,
+        "re_evaluated_jobs": re_evaluated,
+        "active_info": _get_active_cv_info(),
+        "message": f"Se han adaptado y reevaluado {re_evaluated} ofertas con el CV activo.",
     }
 
 

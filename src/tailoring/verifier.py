@@ -49,6 +49,36 @@ class ProfileVerifier:
             if isinstance(h, str):
                 skills.add(h.lower().strip())
 
+        # Extraer competencias, herramientas y habilidades directamente del texto del CV activo
+        if self.cv_text:
+            lines = self.cv_text.splitlines()
+            in_skills_section = False
+            for line in lines:
+                clean_line = line.strip()
+                if not clean_line:
+                    continue
+                # Detección de encabezados de sección de habilidades en cualquier profesión
+                if re.match(r"^(#+|[A-ZÁÉÍÓÚ\s]{3,}:?|\*\*).*(habilidad|competencia|conocimiento|skill|tecnolog|herramienta|aptitud|tools|idioma|destreza)", clean_line, re.IGNORECASE):
+                    in_skills_section = True
+                    continue
+                elif re.match(r"^(#+|[A-ZÁÉÍÓÚ\s]{3,}:?|\*\*).*(experiencia|educaci|formaci|contacto|sobre m|perfil|proyectos|trayectoria|intereses)", clean_line, re.IGNORECASE):
+                    in_skills_section = False
+
+                if in_skills_section:
+                    parts = re.split(r"[,;•|·\*\-\–/\t]", clean_line)
+                    for p in parts:
+                        cand = p.strip().lower()
+                        if 2 <= len(cand) <= 35 and not cand.isdigit():
+                            cand = re.sub(r"^(nivel|conocimientos en|experiencia en|avanzado|medio|básico|alto|dominio de)\s+", "", cand).strip()
+                            if len(cand) >= 2:
+                                skills.add(cand)
+                else:
+                    # Viñetas con términos concisos
+                    if clean_line.startswith(("-", "*", "•")):
+                        item = clean_line.lstrip("-*• ").strip().lower()
+                        if 2 <= len(item) <= 30 and not any(v in item for v in ["responsable", "desarrollé", "trabajé", "durante", "gestioné", "lideré"]):
+                            skills.add(item)
+
         return {s for s in skills if s}
 
     def _extract_allowed_institutions(self) -> Set[str]:
@@ -66,6 +96,15 @@ class ProfileVerifier:
         candidato = self.profile.get("candidato", {})
         if candidato.get("titulo_profesional"):
             degs.add(candidato.get("titulo_profesional").lower().strip())
+
+        if self.cv_text:
+            degree_matches = re.findall(
+                r"(?:grado|máster|master|ingenier[íi]a|licenciatura|fp|ciclo formativo|técnico superior|bachillerato|diplomatura)\s+(?:en\s+)?[a-zA-ZáéíóúÁÉÍÓÚñÑ\s]{3,40}",
+                self.cv_text,
+                re.IGNORECASE,
+            )
+            for dm in degree_matches:
+                degs.add(dm.strip().lower())
         return degs
 
     def _extract_allowed_projects(self) -> List[Dict[str, Any]]:

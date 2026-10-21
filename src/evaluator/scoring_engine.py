@@ -339,3 +339,21 @@ class ScoringEngine:
         self.db.update_job_status(job["id"], new_status)
 
         return eval_result
+
+    def reevaluate_all_jobs(self, max_jobs: int = 150) -> int:
+        """
+        Reevalúa las ofertas guardadas en la base de datos contra el CV actualmente activo.
+        Actualiza puntuación ATS, competencias coincidentes, carencias y reasoning en tiempo real.
+        """
+        jobs = self.db.get_all_jobs_for_scoring(limit=max_jobs)
+        if not jobs:
+            return 0
+
+        evaluated_count = 0
+        for job in jobs:
+            try:
+                self.evaluate(job)
+                evaluated_count += 1
+            except Exception as e:
+                logger.error("Error reevaluando oferta ID %s: %s", job.get("id"), e)
+        return evaluated_count

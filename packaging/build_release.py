@@ -307,13 +307,6 @@ class ReleaseBuilder:
             raise RuntimeError("Fallo crítico: no se pudo exportar images.tar con las imágenes de lazyjobfinder y Ollama.")
         log(f"Imágenes exportadas con éxito ({os.path.getsize(images_tar) // (1024*1024)} MB).", "SUCCESS")
 
-        # 3. Exportación real y aislada del modelo de Ollama si no se omite
-        if not self.skip_model:
-            self.export_ollama_model()
-        else:
-            log("Distribución configurada como LIGERA (--skip-model): se omitirá el modelo de IA en el paquete.", "WARN")
-            self.model_included = False
-
     def export_ollama_model(self) -> None:
         """
         Descarga y exporta EXCLUSIVAMENTE los datos del modelo qwen2.5:3b-instruct
@@ -374,6 +367,27 @@ class ReleaseBuilder:
                     f"El modelo qwen2.5:3b-instruct no aparece en 'ollama list': {verify_res.stdout}"
                 )
             log("Modelo qwen2.5:3b-instruct verificado en 'ollama list'.", "SUCCESS")
+
+            # 4.1 Extraer y registrar los digests de referencia independientes de qwen2.5:3b-instruct directamente del contenedor
+            read_mf_cmd = [
+                "docker", "exec", container_name,
+                "cat", "/root/.ollama/models/manifests/registry.ollama.ai/library/qwen2.5/3b-instruct",
+            ]
+            mf_res = subprocess.run(read_mf_cmd, capture_output=True, text=True)
+            if mf_res.returncode == 0 and mf_res.stdout:
+                try:
+                    mf_data = json.loads(mf_res.stdout)
+                    ref_digests = []
+                    if "config" in mf_data and "digest" in mf_data["config"]:
+                        ref_digests.append(mf_data["config"]["digest"].replace("sha256:", "").replace("sha256-", "").strip().lower())
+                    for lyr in mf_data.get("layers", []):
+                        if "digest" in lyr:
+                            ref_digests.append(lyr["digest"].replace("sha256:", "").replace("sha256-", "").strip().lower())
+                    if ref_digests:
+                        self._staging_model_digests = ref_digests
+                        log(f"Referencia independiente de 'qwen2.5:3b-instruct' capturada del contenedor ({len(ref_digests)} digests).", "SUCCESS")
+                except Exception as exc:
+                    log(f"Aviso al parsear manifiesto de referencia desde el contenedor: {exc}", "WARN")
 
             # 5. Detener el contenedor de servicio para volcar los datos a salvo
             subprocess.run(["docker", "stop", "-t", "5", container_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -1185,10 +1199,17 @@ class ReleaseBuilder:
         # 3. Preparación del directorio staging y auditoría de staging
         self.prepare_staging()
 
-        # 4. Construcción de imágenes Docker (en contexto aislado)
+        # 4. Construcción y empaquetado de imágenes Docker (en contexto aislado)
         self.build_docker_images()
 
-        # 5. Generación de artefactos según plataforma
+        # 5. Exportación del modelo Ollama (independiente de --skip-docker)
+        if not self.skip_model:
+            self.export_ollama_model()
+        else:
+            log("Distribución configurada como LIGERA (--skip-model): se omitirá el modelo de IA en el paquete.", "WARN")
+            self.model_included = False
+
+        # 6. Generación de artefactos según plataforma
         artifacts = []
         build_windows = platforms_target in ("all", "windows")
         build_linux = platforms_target in ("all", "linux")

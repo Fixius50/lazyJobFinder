@@ -1,8 +1,5 @@
 busqueda:
-  terminos:
-  - Desarrollador Software
-  - Programador
-  - Desarrollador Full Stack
+  terminos: []
   ubicaciones:
   - Spain
   - Remoto
@@ -11,7 +8,7 @@ busqueda:
   limite_por_fuente: 15
 fuentes:
   tecnoempleo_rss:
-    habilitado: true
+    habilitado: false
   jobspy:
     habilitado: true
     sitios:

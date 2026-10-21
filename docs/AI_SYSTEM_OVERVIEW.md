@@ -15,12 +15,12 @@
 3. **Procesamiento de IA 100% Local**: La extracción del perfil, el scoring y la adaptación de documentos se ejecutan exclusivamente en localhost dentro del contenedor. Ningún servicio externo de IA recibe el currículum.
 4. **Canales desacoplados de visualización y notificación**: Panel Web SPA local moderno (Next.js exportado estáticamente y servido por FastAPI en http://localhost:8000) para control de servicios, inspección de ofertas y gestión de CV; complementado por un bot privado de Telegram opcional para notificaciones de resumen y entrega de PDFs.
 5. **Ninguna candidatura automática**: El sistema jamás envía solicitudes ni contacta con empresas automáticamente. El control de postulación permanece 100% en manos del usuario.
-6. **Soporte de Currículum Universal**: El motor de evaluación y pre-filtrado no descarta por categorías rígidas preestablecidas. Si no se selecciona ningún CV, el sistema conserva todas las ofertas descubiertas; si se sube un CV (PDF/MD/TXT), la IA contrasta directamente las competencias y experiencia reales del candidato contra los requisitos de la vacante.
+6. **Soporte de Currículum Universal y Dinamismo Total**: El sistema es 100% agnóstico a la profesión (mozo de almacén, carretillero, sanitario, administrativo, hostelería, informática, etc.) y no impone plantillas ni perfiles por defecto. Al activar un CV (PDF/MD/TXT), la IA extrae dinámicamente los términos de búsqueda en portales globales (Indeed, LinkedIn, Glassdoor, Google Jobs, InfoJobs) y evalúa la afinidad objetivamente. Sin CV activo, la vista se mantiene limpia y no se lanzan búsquedas.
 
 > [!WARNING]
 > ### Clarificación de Privacidad, Huella de Red y Transmisión de Datos
-> 1. **Inferencia de IA (100% Local)**: El modelo LLM (Ollama en Docker) se ejecuta íntegramente en localhost. El CV maestro, los datos de contacto y el perfil jamás se envían a ningún servicio de IA externo o en la nube.
-> 2. **Consultas Salientes a Portales de Empleo (Huella de Red)**: Las peticiones HTTP(S) hacia Tecnoempleo RSS, InfoJobs API y los scrapers de JobSpy (Indeed, LinkedIn, Glassdoor, Google Jobs) **no** envían datos personales, pero **sí revelan a los portales y al proveedor de internet (ISP)** la dirección IP pública del usuario, cabeceras User-Agent, y los términos de búsqueda configurados (*«Desarrollador Junior»*, *«Junior Java»*) y ubicaciones (*«Spain»*).
+> 1. **Inferencia de IA (100% Local)**: El modelo LLM (Ollama en Docker) se ejecuta íntegramente en localhost. El CV, los datos de contacto y el texto analizado jamás se envían a ningún servicio de IA externo o en la nube.
+> 2. **Consultas Salientes a Portales de Empleo (Huella de Red)**: Las peticiones HTTP(S) hacia las APIs y scrapers globales de JobSpy (Indeed, LinkedIn, Glassdoor, Google Jobs) e InfoJobs **no** envían datos personales, pero **sí revelan a los portales y al proveedor de internet (ISP)** la dirección IP pública del usuario, cabeceras User-Agent, y los términos de búsqueda activos correspondientes al CV o definidos por el usuario y ubicaciones (*«Spain»*).
 > 3. **Transmisión de Documentos por Telegram (Salida Externa)**: El envío de los currículums y cartas en PDF a través del bot utiliza la API oficial de Telegram (`api.telegram.org`). Por tanto, **los documentos generados SÍ abandonan el equipo local y transitan por los centros de datos en la nube de Telegram**.
 > 4. **Modo Estricto Local (Zero-Network CV)**: Si el usuario desea privacidad absoluta donde ningún documento salga del equipo, puede desactivar el envío de documentos en `config/settings.yaml` (`generar_documentos: false` o apagar el bot), consultando los PDFs generados exclusivamente en el almacenamiento local montado en `data/documents/`.
 
@@ -31,12 +31,14 @@
 ```
 lazyJobFinder/
 ├── config/
-│   ├── profile.yaml          # Perfil canónico estructurado del candidato (DAM, proyectos, stack)
-│   ├── settings.yaml         # Términos de búsqueda, ubicaciones, filtros de exclusión y horarios
-│   └── cv_base.md            # Currículum maestro original en Markdown (debe permanecer siempre inalterado)
+│   ├── profile.yaml          # Perfil estructurado editable (limpio de plantillas o datos fijos)
+│   ├── settings.yaml         # Configuración general y términos dinámicos sincronizados
+│   └── shared_constants.json # Frases de confirmación y constantes compartidas
 ├── data/                     # Volumen persistente local montado en Docker (/app/data)
 │   ├── documents/            # Carpetas organizadas {job_id}_{empresa}/ con PDFs, Markdown y diffs
 │   │   └── .gitkeep
+│   ├── uploaded_cvs/         # Currículums subidos por el usuario (PDF, MD, TXT)
+│   ├── active_cv.json        # Puntero atómico al CV activo y sus términos adaptados
 │   └── lazyjobfinder.db      # Base de datos SQLite en modo WAL
 ├── docs/                     # Documentación técnica de referencia
 │   ├── AI_SYSTEM_OVERVIEW.md # [ESTE DOCUMENTO] Base de conocimiento para IAs

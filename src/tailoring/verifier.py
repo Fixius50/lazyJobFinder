@@ -25,38 +25,10 @@ class ProfileVerifier:
         self.has_commercial_employment = bool(profile.get("experiencia_laboral", [])) or "experiencia" in self.cv_text_lower
 
     def _extract_allowed_skills(self) -> Set[str]:
-        # Si se aporta un texto de CV activo (cualquier archivo cargado o seleccionado),
-        # las competencias DEBEN provenir 100% exclusivamente del CV aportado.
-        # NUNCA inyectar competencias técnicas de profile.yaml (evita mezclar perfiles IT con no IT).
+        # Las competencias y herramientas DEBEN provenir 100% exclusivamente del CV aportado.
         if self.cv_text and self.cv_text.strip():
             return self._extract_skills_from_cv_text()
-
-        # Solo si no hay CV cargado o está vacío, recurrir a las competencias de profile.yaml
-        skills = set()
-        competencias = self.profile.get("competencias_tecnicas", {})
-        if isinstance(competencias, dict):
-            for k, val in competencias.items():
-                if isinstance(val, list):
-                    for item in val:
-                        if isinstance(item, dict):
-                            skills.add(item.get("nombre", "").lower().strip())
-                            for c in item.get("conceptos", []):
-                                skills.add(c.lower().strip())
-                        elif isinstance(item, str):
-                            skills.add(item.lower().strip())
-                elif isinstance(val, str):
-                    skills.add(val.lower().strip())
-        elif isinstance(competencias, list):
-            for item in competencias:
-                if isinstance(item, str):
-                    skills.add(item.lower().strip())
-
-        # Habilidades adicionales generales del perfil
-        for h in self.profile.get("habilidades", []):
-            if isinstance(h, str):
-                skills.add(h.lower().strip())
-
-        return {s for s in skills if s}
+        return set()
 
     def _extract_skills_from_cv_text(self) -> Set[str]:
         """Extrae competencias, herramientas, maquinaria y aptitudes exclusivamente del CV activo de forma universal."""
@@ -161,22 +133,18 @@ class ProfileVerifier:
 
     def _extract_allowed_institutions(self) -> Set[str]:
         inst = set()
-        if not self.cv_text:
-            for f in self.profile.get("formacion", []):
-                if isinstance(f, dict) and f.get("institucion"):
-                    inst.add(f.get("institucion").lower().strip())
+        if self.cv_text:
+            matches = re.findall(
+                r"(?:universidad|instituto|centro|colegio|escuela|cámara de comercio|grupo adecco|adecco|servicio de prevención)\s+[a-zA-ZáéíóúÁÉÍÓÚñÑ\s]{3,35}",
+                self.cv_text,
+                re.IGNORECASE,
+            )
+            for m in matches:
+                inst.add(m.strip().lower())
         return inst
 
     def _extract_allowed_degrees(self) -> Set[str]:
         degs = set()
-        if not self.cv_text:
-            for f in self.profile.get("formacion", []):
-                if isinstance(f, dict) and f.get("titulo"):
-                    degs.add(f.get("titulo").lower().strip())
-            candidato = self.profile.get("candidato", {})
-            if candidato.get("titulo_profesional"):
-                degs.add(candidato.get("titulo_profesional").lower().strip())
-
         if self.cv_text:
             degree_matches = re.findall(
                 r"(?:grado|máster|master|ingenier[íi]a|licenciatura|fp|ciclo formativo|técnico superior|bachillerato|diplomatura|curso|certificaci[óo]n|programa de formación)\s+(?:en\s+)?[a-zA-ZáéíóúÁÉÍÓÚñÑ\s]{3,40}",
@@ -188,7 +156,7 @@ class ProfileVerifier:
         return degs
 
     def _extract_allowed_projects(self) -> List[Dict[str, Any]]:
-        return self.profile.get("proyectos", []) or self.profile.get("proyectos_destacados", [])
+        return []
 
     def get_approved_atomic_facts(self) -> Dict[str, Any]:
         """

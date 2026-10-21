@@ -57,7 +57,6 @@ def _get_active_cv_info() -> Dict[str, Any]:
                 "is_default": False,
                 "description": "CV personalizado cargado localmente.",
                 "search_terms": pointer.get("search_terms", []),
-                "is_tech_role": pointer.get("is_tech_role", False),
                 "primary_role": pointer.get("primary_role", ""),
             }
 
@@ -71,31 +70,39 @@ def _get_active_cv_info() -> Dict[str, Any]:
         "is_default": False,
         "description": "Sin CV activo. Las ofertas se conservarán sin filtrar por currículum.",
         "search_terms": [],
-        "is_tech_role": False,
         "primary_role": "",
     }
 
 
 def _sync_terms_and_update_settings(filename: str, file_path: Optional[str] = None) -> Dict[str, Any]:
-    """Analiza el CV, extrae términos de búsqueda y los sincroniza en active_cv.json y settings.yaml."""
+    """Analiza el CV, extrae términos de búsqueda universales y los sincroniza en active_cv.json y settings.yaml."""
     from ...tailoring.cv_reader import extract_cv_text, extract_search_terms_from_cv
     from ...storage import write_active_cv_pointer, SETTINGS_FILE
     import yaml
 
     if filename in ("none", "Ninguno", "", "default") or not file_path or not os.path.exists(file_path):
-        write_active_cv_pointer("none", search_terms=[], is_tech_role=False, primary_role="")
-        return {"search_terms": [], "is_tech_role": False, "primary_role": ""}
+        write_active_cv_pointer("none", search_terms=[], primary_role="")
+        if os.path.exists(SETTINGS_FILE):
+            try:
+                with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+                    settings_data = yaml.safe_load(f) or {}
+                if "busqueda" not in settings_data:
+                    settings_data["busqueda"] = {}
+                settings_data["busqueda"]["terminos"] = []
+                with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+                    yaml.dump(settings_data, f, allow_unicode=True, sort_keys=False)
+            except Exception as se:
+                logger.debug("Error limpiando terminos en settings.yaml: %s", se)
+        return {"search_terms": [], "primary_role": ""}
 
     text = extract_cv_text(file_path)
     profile_info = extract_search_terms_from_cv(text)
     terms = profile_info.get("search_terms", [])
-    is_tech = profile_info.get("is_tech_role", False)
     primary_role = profile_info.get("primary_role", "")
 
     write_active_cv_pointer(
         filename,
         search_terms=terms,
-        is_tech_role=is_tech,
         primary_role=primary_role,
     )
 
@@ -108,7 +115,7 @@ def _sync_terms_and_update_settings(filename: str, file_path: Optional[str] = No
             settings_data["busqueda"]["terminos"] = terms
             with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
                 yaml.dump(settings_data, f, allow_unicode=True, sort_keys=False)
-            print(f"[CV Auto-Config] Sincronizados términos para '{filename}': {terms} (sector tech={is_tech})", flush=True)
+            print(f"[CV Auto-Config] Sincronizados términos para '{filename}': {terms}", flush=True)
         except Exception as se:
             logger.warning("No se pudo escribir terminos en settings.yaml: %s", se)
 

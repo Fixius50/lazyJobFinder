@@ -1,6 +1,6 @@
 # Guia de Contexto Tecnico para Agentes de IA
 
-Si eres un modelo de Inteligencia Artificial que trabaja en este repositorio, consulta las reglas detalladas del proyecto en:
+Si eres un modelo de Inteligencia Artificial que trabaja en este repositorio, consulta las reglas maestras detalladas del proyecto en:
 
 - Reglas maestras: .agents/rules/project_rules.md
 - Documento de arquitectura: docs/AI_SYSTEM_OVERVIEW.md
@@ -9,12 +9,13 @@ Si eres un modelo de Inteligencia Artificial que trabaja en este repositorio, co
 
 ## Directrices Fundamentales
 
-1. Coste 0 EUR/mes: No introduzcas dependencias ni llamadas a APIs de pago de IA (cero OpenAI, Anthropic, Claude o servicios cloud).
-2. Inferencia Ollama en Docker: La inferencia se realiza 100% en local dentro del contenedor `lazyjob_ollama` mediante CPU cuantizada (Q4_K_M) con el modelo `qwen2.5:3b-instruct`.
-3. Privacidad y Persistencia Soberana: Toda la evaluacion, deduplicacion y persistencia en SQLite WAL opera de forma local. El bot de Telegram es opcional y desacoplado.
-4. Veracidad Factual por Codigo: Todo contenido generado debe verificarse algoritmicamente mediante `ProfileVerifier` (`src/tailoring/verifier.py`) contra `config/profile.yaml`. Se prohibe alucinar experiencia laboral comercial o tecnologias ausentes en el perfil.
-5. Deduplicacion entre Portales: El esquema SQLite almacena `url_hash` y `content_fingerprint` (`src/database.py`) para evitar duplicados entre portales (ej. Indeed y LinkedIn).
-6. Documentos Controlados: Los PDFs se generan mediante plantillas fijas en ReportLab (`src/tailoring/pdf_renderer.py`). El LLM jamas controla el layout ni el diseno visual. El CV base (`config/cv_base.md`) es estrictamente de solo lectura.
-7. Aislamiento de Conectores: Cada portal de busqueda opera de forma independiente para que fallos de red o rate-limits en uno no cancelen las demas fuentes.
-8. Arquitectura Frontend: Interfaz SPA fluida construida en Next.js con Tailwind CSS relativo, separacion lateral global de como maximo 5vw, modularizacion en `src/types/`, `src/components/ui/`, `src/components/features/` y `src/components/views/`. Uso de `InfoTooltip` para mantener cabeceras limpias sin parrafos redundantes.
-9. Dualidad de Canales: El panel web local (FastAPI en puerto 8000 / Next.js en puerto 3000) es el centro de control principal. El bot de Telegram es un canal de entrega opcional que puede habilitarse o inhabilitarse desde los ajustes sin afectar a la web.
+1. Coste 0 EUR/mes: No introduzcas dependencias ni llamadas a APIs comerciales de pago de IA (cero OpenAI, Anthropic, Claude o servicios cloud). Inferencia 100% local con Ollama (`qwen2.5:3b-instruct` en CPU Q4_K_M).
+2. Sistema 100% Global y Agnóstico de Profesión: Prohibido categorizar o filtrar por sectores ("tecnología vs no tecnología"). El sistema es universal para cualquier oficio (mozo de almacén, fontanero, sanitario, administrativo, hostelería, transporte, informática, etc.).
+3. Cero Plantillas Fijas ni Perfiles Impuestos: `config/profile.yaml` y `config/settings.yaml` no contienen datos de desarrollador prefijados ni términos fijos. La única fuente de verdad es el CV activo que el usuario sube o selecciona.
+4. Dinamismo Autónomo según CV Activo: Al subir o elegir un CV, el sistema extrae automáticamente mediante IA los términos reales de búsqueda laboral y los sincroniza con el motor de descubrimiento.
+5. Comportamiento Sin CV: Si no hay CV activo, los filtros laterales se ocultan y no se lanzan búsquedas en portales hasta que se aporte un currículum.
+6. Fuentes Globales Activas por Defecto: Se priorizan portales universales para todos los sectores (JobSpy con Indeed, LinkedIn, Glassdoor, Google Jobs e InfoJobs). Portales exclusivos de un único sector (ej. Tecnoempleo) permanecen desactivados por defecto.
+7. Veracidad Factual por Código: `ProfileVerifier` valida algorítmicamente contra el texto real del CV activo aportado. Jamás inventar titulaciones, maquinaria o experiencia ausente.
+8. UX Fluida y Mantenimiento Directo: Controles de CV unificados en una sola línea en la cabecera. El vaciado de historial opera con modal directo de confirmación (sin requerir escribir frases de texto).
+9. Auto-Recarga en Caliente: El backend vigila cambios en `src/` y reinicia el proceso automáticamente.
+10. Prohibición de Testeo por Navegador: Jamás utilizar subagentes de navegador automatizado para testeo del sistema.

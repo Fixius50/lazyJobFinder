@@ -9,20 +9,21 @@
 ## ✨ Características Principales
 
 - **Inferencia IA 100% Local (Coste 0 €/mes):** Evaluación, scoring y redacción procesados íntegramente en tu equipo con Ollama (`qwen2.5:3b-instruct` en CPU Q4_K_M). Cero dependencias de OpenAI, Anthropic o servicios cloud de pago.
-- **Universal para Cualquier Profesión:** Admite cualquier tipo de currículum y carrera laboral (tecnología, administración, marketing, diseño, salud, educación, etc.).
-- **Modo Cero Filtro o Filtro Inteligente:**
-  - **Sin CV activo:** El sistema conserva **todas** las ofertas descubiertas sin descartes para que no te pierdas ninguna vacante.
-  - **Con CV activo (PDF, Markdown o TXT):** La IA evalúa la afinidad contra tu experiencia real, asigna una puntuación del 0 al 100 y genera documentos ATS adaptados.
-- **Multi-Portal con Aislamiento de Fallos:** Conectores independientes para Tecnoempleo (RSS oficial), InfoJobs (API oficial) y JobSpy (Indeed España, LinkedIn, Glassdoor y Google Jobs). Si un portal falla o aplica rate-limit, los demás continúan sin interrupción.
+- **Universal para Cualquier Profesión (100% Global):** Admite cualquier tipo de currículum y oficio (mozo de almacén, carretillero, logística, sanitario, administración, hostelería, mantenimiento, educación, tecnología, etc.). Prohibido cualquier sesgo o categorización artificial por sectores.
+- **Sin Plantillas ni Datos Prefijados:** El sistema no impone perfiles de muestra ni términos fijos en `profile.yaml` o `settings.yaml`. Opera de forma totalmente limpia y autónoma.
+- **Dinamismo Inteligente según CV Activo:**
+  - **Sin CV activo:** La pantalla de candidaturas permanece limpia con un mensaje orientativo, los filtros laterales se ocultan y no se lanzan búsquedas en portales.
+  - **Con CV activo (PDF, Markdown o TXT):** La IA analiza el texto de tu currículum, extrae automáticamente los términos de búsqueda laboral reales (ej. "Mozo de almacén", "Carretillero"), sincroniza la búsqueda en los portales y evalúa la afinidad contra tu experiencia real sin inventar datos.
+- **Portales Globales Activos por Defecto:** Escaneo en las mayores plataformas de empleo del mercado (Indeed España, LinkedIn, Glassdoor, Google Jobs e InfoJobs API). Los portales exclusivos de un único nicho (como Tecnoempleo) permanecen desactivados por defecto para no contaminar búsquedas generales.
 - **Deduplicación Inteligente:** Algoritmo difuso basado en RapidFuzz (`url_hash` y `content_fingerprint`) que detecta y agrupa vacantes idénticas publicadas en diferentes portales.
-- **Garantía Anti-Alucinación:** No inventa empresas ni competencias inexistentes. Si faltan requisitos exigidos, los detecta con honestidad y los expone transparentemente.
-- **Documentos Profesionales:** Compilación de cartas de presentación y CV adaptados mediante plantillas fijas y ReportLab, asegurando maquetación cuidada.
-- **Panel Web Unificado en http://localhost:8000:** Interfaz visual completa desarrollada en Next.js y servida directamente por el backend FastAPI:
-  - Filtros interactivos por afinidad y modalidad (Remoto, Híbrido, Presencial).
-  - Gestor de CV con subida local (PDF, MD, TXT), borrado y previsualización del texto extraído.
-  - Monitorización en tiempo real de servicios (Docker y Ollama) y consola de logs en vivo vía SSE.
-  - Configuración rápida de términos de búsqueda, ubicaciones y umbrales.
-- **Canal Telegram Desacoplado:** Opción de recibir alertas matutinas en el móvil con los documentos adjuntos, sin ser obligatorio para operar el sistema.
+- **Garantía Anti-Alucinación:** Valida objetivamente los requisitos contra el CV aportado. No inventa empresas ni competencias inexistentes. Si faltan requisitos, los expone transparentemente.
+- **Panel Web Unificado en http://localhost:8000:** Interfaz fluida desarrollada en Next.js servida por FastAPI:
+  - Barra de CV compacta integrada en una sola línea en la cabecera (selector, previsualización, subida y borrado).
+  - Vaciado de historial ágil mediante modal de confirmación directo (sin requerir escribir frases de texto).
+  - Filtros interactivos de afinidad y modalidad (Remoto, Híbrido, Presencial).
+  - Monitorización en vivo de servicios y consola de logs vía SSE.
+- **Auto-Recarga en Caliente:** El backend vigila cambios en el código fuente Python (`src/`) y reinicia el proceso automáticamente sin esperas ni comandos manuales.
+- **Canal Telegram Desacoplado:** Alertas opcionales en el móvil con los documentos adjuntos, sin ser obligatorio para operar el sistema.
 - **Sistema de Empaquetado y Distribución:** Generador automatizado de instaladores para **Windows** (`.exe` y `.zip` portable) y **GNU/Linux** (`.run` ejecutable y `.tar.gz`) con auditoría de seguridad previa y verificación SHA-256.
 
 ---

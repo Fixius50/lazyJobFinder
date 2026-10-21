@@ -189,7 +189,6 @@ def read_active_cv_pointer() -> Dict[str, Any]:
 def write_active_cv_pointer(
     filename: str,
     search_terms: Optional[list] = None,
-    is_tech_role: Optional[bool] = None,
     primary_role: Optional[str] = None,
 ) -> None:
     """Escribe de manera atómica la selección del CV activo en data/active_cv.json con sus términos de búsqueda adaptados."""
@@ -199,7 +198,6 @@ def write_active_cv_pointer(
         "selected_filename": filename,
         "updated_at": time.time(),
         "search_terms": search_terms if search_terms is not None else existing.get("search_terms", []),
-        "is_tech_role": is_tech_role if is_tech_role is not None else existing.get("is_tech_role", True),
         "primary_role": primary_role if primary_role is not None else existing.get("primary_role", ""),
     }
     tmp_file = f"{ACTIVE_CV_FILE}.tmp.{os.getpid()}"

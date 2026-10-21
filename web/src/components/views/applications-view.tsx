@@ -7,6 +7,7 @@ import {
   ChevronLeft,
   ChevronRight,
   FileCheck,
+  Sparkles,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -51,6 +52,7 @@ export function ApplicationsView() {
   const [detailLoading, setDetailLoading] = useState<boolean>(false);
 
   const [hasActiveCv, setHasActiveCv] = useState<boolean>(false);
+  const [searching, setSearching] = useState<boolean>(false);
 
   const loadFacets = async () => {
     try {
@@ -61,11 +63,48 @@ export function ApplicationsView() {
     }
   };
 
+  const pollSearchStatus = async () => {
+    try {
+      const status = await api.getSearchStatus();
+      if (status && status.is_running !== undefined) {
+        const running = Boolean(status.is_running);
+        setSearching(running);
+        return running;
+      }
+    } catch {
+      // Ignorar fallos puntuales
+    }
+    return false;
+  };
+
+  const handleTriggerSearch = async () => {
+    try {
+      setSearching(true);
+      const res = await api.triggerSearch();
+      alert(res.message || "Búsqueda de empleo iniciada en los portales con los términos del CV activo.");
+      // Consulta inmediata tras iniciar
+      setTimeout(() => pollSearchStatus(), 800);
+    } catch (e: any) {
+      alert(`Error al iniciar búsqueda: ${e.message}`);
+      setSearching(false);
+    }
+  };
+
   useEffect(() => {
     loadFacets();
     api.getActiveCV().then((cv) => {
-      setHasActiveCv(Boolean(cv && cv.type !== "none" && cv.filename && cv.filename !== "Ninguno"));
+      setHasActiveCv(Boolean(cv && cv.type !== "none" && cv.filename && cv.filename !== "Ninguno" && cv.filename !== "none"));
     }).catch(() => setHasActiveCv(false));
+
+    // Comprobación inicial y monitorización del estado de búsqueda
+    pollSearchStatus();
+    const interval = setInterval(async () => {
+      const isRunning = await pollSearchStatus();
+      if (!isRunning) {
+        fetchJobs();
+      }
+    }, 4000);
+    return () => clearInterval(interval);
   }, []);
 
   const fetchJobs = async () => {
@@ -97,6 +136,8 @@ export function ApplicationsView() {
       if (res.has_cv !== undefined) {
         setHasActiveCv(res.has_cv);
       }
+      // Sincronizar facetas con el total de ofertas devuelto
+      loadFacets();
     } catch (err: any) {
       console.error("[ApplicationsView] Error obteniendo ofertas:", err);
     } finally {
@@ -157,7 +198,7 @@ export function ApplicationsView() {
       const exclusiones = exclusionTerm.split(",").map((e) => e.trim()).filter(Boolean);
 
       await api.updateSearchConfig({
-        terminos: terminos.length > 0 ? terminos : ["Desarrollador Junior", "Full Stack"],
+        terminos: terminos,
         ubicaciones: !isAllLocations ? [locationName] : ["Spain", "Remoto"],
         filtros_exclusion: exclusiones,
         antiguedad_horas: 48,
@@ -210,7 +251,13 @@ export function ApplicationsView() {
           {/* Bloque en una sola línea del CV Activo: Currículum Activo, ?, Desplegable, Ojo, Subir, Borrar */}
           <CvManager
             onCvChanged={(activeInfo) => {
-              const hasCv = Boolean(activeInfo && activeInfo.type !== "none" && activeInfo.filename && activeInfo.filename !== "Ninguno");
+              const hasCv = Boolean(
+                activeInfo &&
+                activeInfo.type !== "none" &&
+                activeInfo.filename &&
+                activeInfo.filename !== "Ninguno" &&
+                activeInfo.filename !== "none"
+              );
               setHasActiveCv(hasCv);
               loadFacets();
               fetchJobs();
@@ -223,6 +270,19 @@ export function ApplicationsView() {
           <ServiceToolbarActions />
 
           <div className="h-5 w-px bg-border/60 mx-1 hidden sm:block" />
+
+          {/* Botón Buscar Ofertas Ahora (visible solo si hay CV activo y NO se está buscando ofertas) */}
+          {hasActiveCv && !searching && (
+            <Button
+              size="sm"
+              onClick={handleTriggerSearch}
+              className="flex items-center gap-1.5 h-8 text-xs bg-primary text-primary-foreground hover:bg-primary/90 font-medium shadow-sm transition-all"
+              title="Buscar nuevas ofertas en portales globales con los términos de tu CV activo"
+            >
+              <Sparkles className="h-3.5 w-3.5 text-primary-foreground" />
+              <span>Buscar Ofertas Ahora</span>
+            </Button>
+          )}
 
           {/* Botón Actualizar */}
           <Button
@@ -342,7 +402,54 @@ export function ApplicationsView() {
         <section className={`${hasActiveCv && showCvPanel ? "lg:col-span-8 xl:col-span-9" : "lg:col-span-12"} space-y-4`}>
           {/* Listado de Ofertas en cuadrícula */}
           <div className="space-y-3">
-            {loading ? (
+            {searching ? (
+              <div className="space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-lg border border-primary/30 bg-primary/5">
+                  <div className="flex items-center gap-2 text-xs font-semibold text-primary">
+                    <Sparkles className="h-4 w-4 animate-spin text-primary" />
+                    <span>Buscando ofertas compatibles en portales de empleo y evaluando con IA...</span>
+                  </div>
+                  <span className="text-[11px] text-muted-foreground animate-pulse">
+                    Rastreando Indeed, LinkedIn y Glassdoor...
+                  </span>
+                </div>
+
+                <div
+                  className={`grid grid-cols-1 sm:grid-cols-2 ${
+                    showCvPanel
+                      ? "lg:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-4"
+                      : "lg:grid-cols-3 xl:grid-cols-5 2xl:grid-cols-5"
+                  } gap-3 sm:gap-3.5`}
+                >
+                  {[...Array(8)].map((_, i) => (
+                    <Card
+                      key={i}
+                      className="border border-border/60 bg-card/60 backdrop-blur-xs p-3.5 space-y-3 animate-pulse overflow-hidden relative shadow-xs"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="h-4 w-16 bg-primary/20 rounded-full" />
+                        <div className="h-3.5 w-12 bg-muted rounded" />
+                      </div>
+                      <div className="space-y-1.5 pt-1">
+                        <div className="h-4 bg-muted/80 rounded w-4/5" />
+                        <div className="h-3 bg-muted/50 rounded w-3/5" />
+                      </div>
+                      <div className="pt-2 border-t border-border/30 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="h-3 bg-muted/40 rounded w-1/3" />
+                          <div className="h-3 bg-muted/40 rounded w-1/4" />
+                        </div>
+                        <div className="h-1.5 bg-primary/20 rounded-full w-full" />
+                      </div>
+                      <div className="flex items-center justify-center pt-2 text-[11px] text-muted-foreground/80 gap-1.5">
+                        <RefreshCw className="h-3 w-3 animate-spin text-primary" />
+                        <span>Cargando oferta {i + 1}...</span>
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+              </div>
+            ) : loading ? (
               <div className="flex flex-col items-center justify-center py-16 text-muted-foreground space-y-2">
                 <RefreshCw className="h-6 w-6 animate-spin text-primary" />
                 <p className="text-xs">Consultando candidaturas en base de datos local...</p>
@@ -358,7 +465,7 @@ export function ApplicationsView() {
                   </p>
                   <p className="text-xs max-w-md text-muted-foreground">
                     {!hasActiveCv
-                      ? "Selecciona o sube un currículum en la barra superior para contrastarlo con las vacantes disponibles y visualizar únicamente las ofertas compatibles."
+                      ? "Sube o selecciona un currículum en la barra superior para activar los filtros y la búsqueda personalizada de ofertas."
                       : "No hay ofertas que coincidan con los filtros aplicados o aún no has lanzado una búsqueda."}
                   </p>
                 </CardContent>

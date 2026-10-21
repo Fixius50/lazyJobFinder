@@ -49,6 +49,41 @@ export const SALARY_STEPS = [
   { step: 8, value: 80000, label: "≥ 80.000+ / año" },
 ];
 
+export const DEFAULT_MODALITIES: FacetItem[] = [
+  { id: "presencial", label: "On-site / Presencial", count: 0 },
+  { id: "teletrabajo", label: "Remote / Teletrabajo", count: 0 },
+  { id: "hibrido", label: "Híbrido", count: 0 },
+];
+
+export const DEFAULT_CATEGORIES: FacetItem[] = [
+  { id: "logistica", label: "Logística y Almacén", count: 0 },
+  { id: "operaciones", label: "Producción y Operaciones", count: 0 },
+  { id: "mantenimiento", label: "Mantenimiento y Oficios", count: 0 },
+  { id: "administracion", label: "Administración y Gestión", count: 0 },
+];
+
+export const DEFAULT_EDUCATIONS: FacetItem[] = [
+  { id: "sin estudios requeridos", label: "Sin estudios específicos", count: 0 },
+  { id: "educación secundaria obligatoria / eso", label: "Educación Secundaria (ESO)", count: 0 },
+  { id: "bachillerato", label: "Bachillerato", count: 0 },
+  { id: "fp / ciclo formativo", label: "FP / Ciclo Formativo", count: 0 },
+  { id: "grado / universidad", label: "Grado / Universidad", count: 0 },
+];
+
+export const DEFAULT_SCHEDULES: FacetItem[] = [
+  { id: "jornada completa", label: "Jornada Completa", count: 0 },
+  { id: "media jornada", label: "Media Jornada", count: 0 },
+  { id: "horario flexible", label: "Horario Flexible", count: 0 },
+  { id: "turnos", label: "Turnos rotativos", count: 0 },
+];
+
+export const DEFAULT_CONTRACTS: FacetItem[] = [
+  { id: "indefinido", label: "Indefinido", count: 0 },
+  { id: "contrato temporal", label: "Contrato Temporal", count: 0 },
+  { id: "prácticas / beca", label: "Prácticas / Formación", count: 0 },
+  { id: "autónomo / freelance", label: "Autónomo / Freelance", count: 0 },
+];
+
 export interface JobFiltersProps {
   facets?: FilterFacetsResponse | null;
   searchTerm: string;
@@ -106,8 +141,6 @@ function FacetSection({
   isOpen: boolean;
   onToggleOpen: () => void;
 }) {
-  if (items.length === 0) return null;
-
   return (
     <div className="space-y-1.5 pt-2 border-t border-border/30">
       <div
@@ -143,30 +176,38 @@ function FacetSection({
 
       {isOpen && (
         <div className="space-y-1 pl-1 max-h-44 overflow-y-auto pr-1">
-          {items.map((item) => {
-            const isChecked = selected.includes(item.id);
-            return (
-              <label
-                key={item.id}
-                className="flex items-center justify-between text-xs cursor-pointer select-none py-0.5 text-muted-foreground hover:text-foreground transition-colors group"
-              >
-                <div className="flex items-center gap-2 min-w-0 pr-1">
-                  <input
-                    type="checkbox"
-                    checked={isChecked}
-                    onChange={() => onToggleItem(item.id)}
-                    className="accent-primary h-3.5 w-3.5 rounded shrink-0 cursor-pointer"
-                  />
-                  <span className={`truncate ${isChecked ? "font-semibold text-foreground" : ""}`}>
-                    {item.label}
-                  </span>
-                </div>
-                <span className="text-[10px] font-mono text-muted-foreground/70 shrink-0 px-1 rounded bg-muted/40 group-hover:bg-muted/80">
-                  {item.count}
-                </span>
-              </label>
-            );
-          })}
+          {items.length === 0 ? (
+            <div className="text-[11px] text-muted-foreground/60 py-1 pl-1 italic">
+              Sin opciones registradas aún
+            </div>
+          ) : (
+            items.map((item) => {
+              const isChecked = selected.includes(item.id);
+              return (
+                <label
+                  key={item.id}
+                  className="flex items-center justify-between text-xs cursor-pointer select-none py-0.5 text-muted-foreground hover:text-foreground transition-colors group"
+                >
+                  <div className="flex items-center gap-2 min-w-0 pr-1">
+                    <input
+                      type="checkbox"
+                      checked={isChecked}
+                      onChange={() => onToggleItem(item.id)}
+                      className="accent-primary h-3.5 w-3.5 rounded shrink-0 cursor-pointer"
+                    />
+                    <span className={`truncate ${isChecked ? "font-semibold text-foreground" : ""}`}>
+                      {item.label}
+                    </span>
+                  </div>
+                  {item.count !== undefined && (
+                    <span className="text-[10px] font-mono text-muted-foreground/70 shrink-0 px-1 rounded bg-muted/40 group-hover:bg-muted/80">
+                      {item.count}
+                    </span>
+                  )}
+                </label>
+              );
+            })
+          )}
         </div>
       )}
     </div>
@@ -272,13 +313,13 @@ export function JobFilters({
     );
   };
 
-  // Opciones adaptadas dinámicamente según las ofertas en SQLite
-  const dynamicSources = facets?.sources || [];
-  const dynamicModalities = facets?.modalities || [];
-  const dynamicCategories = facets?.categories || [];
-  const dynamicEducations = facets?.educations || [];
-  const dynamicSchedules = facets?.schedules || [];
-  const dynamicContracts = facets?.contract_types || [];
+  // Opciones adaptadas dinámicamente según las ofertas en SQLite con fallback a estándares universales
+  const dynamicSources = facets?.sources && facets.sources.length > 0 ? facets.sources : [];
+  const dynamicModalities = facets?.modalities && facets.modalities.length > 0 ? facets.modalities : DEFAULT_MODALITIES;
+  const dynamicCategories = facets?.categories && facets.categories.length > 0 ? facets.categories : DEFAULT_CATEGORIES;
+  const dynamicEducations = facets?.educations && facets.educations.length > 0 ? facets.educations : DEFAULT_EDUCATIONS;
+  const dynamicSchedules = facets?.schedules && facets.schedules.length > 0 ? facets.schedules : DEFAULT_SCHEDULES;
+  const dynamicContracts = facets?.contract_types && facets.contract_types.length > 0 ? facets.contract_types : DEFAULT_CONTRACTS;
   const dynamicLocations = facets?.top_locations || [];
 
   const normQuery = filterSearchQuery.trim().toLowerCase();
@@ -365,7 +406,7 @@ export function JobFilters({
           <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
           <Input
             type="text"
-            placeholder="Buscar filtros (remoto, madrid, python...)"
+            placeholder="Buscar filtros (remoto, madrid, turnos, indefinido...)"
             value={filterSearchQuery}
             onChange={(e) => setFilterSearchQuery(e.target.value)}
             className="pl-8 text-xs h-7.5 w-full bg-background border-primary/20 focus:border-primary"
@@ -388,7 +429,7 @@ export function JobFilters({
               <Search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-muted-foreground" />
               <Input
                 type="text"
-                placeholder="Puesto o habilidades (ej: Full Stack, Python...)"
+                placeholder="Puesto o habilidades (ej: Mozo de almacén, Logística...)"
                 value={searchTerm}
                 onChange={(e) => onSearchTermChange(e.target.value)}
                 className="pl-8 text-xs h-7.5 w-full bg-background"

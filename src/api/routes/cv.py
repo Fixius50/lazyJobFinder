@@ -82,21 +82,10 @@ def _sync_terms_and_update_settings(filename: str, file_path: Optional[str] = No
 
     if filename in ("none", "Ninguno", "", "default") or not file_path or not os.path.exists(file_path):
         write_active_cv_pointer("none", search_terms=[], primary_role="")
-        if os.path.exists(SETTINGS_FILE):
-            try:
-                with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
-                    settings_data = yaml.safe_load(f) or {}
-                if "busqueda" not in settings_data:
-                    settings_data["busqueda"] = {}
-                settings_data["busqueda"]["terminos"] = []
-                with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
-                    yaml.dump(settings_data, f, allow_unicode=True, sort_keys=False)
-            except Exception as se:
-                logger.debug("Error limpiando terminos en settings.yaml: %s", se)
         return {"search_terms": [], "primary_role": ""}
 
     text = extract_cv_text(file_path)
-    profile_info = extract_search_terms_from_cv(text)
+    profile_info = extract_search_terms_from_cv(text, filename=filename)
     terms = profile_info.get("search_terms", [])
     primary_role = profile_info.get("primary_role", "")
 
@@ -105,19 +94,7 @@ def _sync_terms_and_update_settings(filename: str, file_path: Optional[str] = No
         search_terms=terms,
         primary_role=primary_role,
     )
-
-    if terms and os.path.exists(SETTINGS_FILE):
-        try:
-            with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
-                settings_data = yaml.safe_load(f) or {}
-            if "busqueda" not in settings_data:
-                settings_data["busqueda"] = {}
-            settings_data["busqueda"]["terminos"] = terms
-            with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
-                yaml.dump(settings_data, f, allow_unicode=True, sort_keys=False)
-            print(f"[CV Auto-Config] Sincronizados términos para '{filename}': {terms}", flush=True)
-        except Exception as se:
-            logger.warning("No se pudo escribir terminos en settings.yaml: %s", se)
+    print(f"[CV Auto-Config] Sincronizados términos para '{filename}': {terms}", flush=True)
 
     return profile_info
 
@@ -263,6 +240,17 @@ async def upload_cv_file(file: UploadFile = File(...)) -> Dict[str, Any]:
     # Reevaluar ofertas existentes adaptándolas al nuevo CV
     re_evaluated = _reevaluate_jobs_with_active_cv(db)
 
+    # Disparar automáticamente la búsqueda de empleo en los portales con los nuevos términos
+    try:
+        from ...scheduler.runner import get_runner
+        import asyncio
+        runner = get_runner()
+        if not runner.is_running():
+            asyncio.create_task(runner.run_pipeline(is_manual=True, trigger_label="cv_upload"))
+            print(f"\n[CV Auto-Discovery] Iniciando escaneo en portales para '{safe_filename}' con términos {profile_info.get('search_terms')}...", flush=True)
+    except Exception as run_err:
+        logger.debug("No se pudo iniciar auto-discovery: %s", run_err)
+
     return {
         "success": True,
         "filename": safe_filename,
@@ -271,7 +259,7 @@ async def upload_cv_file(file: UploadFile = File(...)) -> Dict[str, Any]:
         "type": ext.lstrip(".").upper(),
         "re_evaluated_jobs": re_evaluated,
         "active_info": _get_active_cv_info(),
-        "message": f"CV '{safe_filename}' subido y activado. {re_evaluated} ofertas adaptadas a tu perfil.",
+        "message": f"CV '{safe_filename}' subido y activado. Búsqueda en portales iniciada.",
     }
 
 
@@ -338,6 +326,7 @@ def select_active_cv(req: SelectCVRequest) -> Dict[str, Any]:
     # Reevaluar ofertas adaptándolas al nuevo CV seleccionado
     re_evaluated = _reevaluate_jobs_with_active_cv(db)
 
+    # Disparar automáticamente la búsqueda de empleo en los portales si no está ya en ejecución
     return {
         "success": True,
         "selected": choice,
@@ -364,6 +353,7 @@ def reevaluate_cv_jobs() -> Dict[str, Any]:
 def delete_uploaded_cv(filename: str) -> Dict[str, Any]:
     """
     Elimina un archivo CV personalizado subido previamente en data/uploaded_cvs/.
+    Elimina en cascada todas las ofertas vinculadas a este CV en la base de datos.
     Si el archivo eliminado era el CV activo, restablece la configuración a 'none' (sin filtrado).
     """
     _ensure_upload_dir()
@@ -382,13 +372,19 @@ def delete_uploaded_cv(filename: str) -> Dict[str, Any]:
             detail=f"El archivo CV '{clean_name}' no existe en el almacenamiento local.",
         )
 
+    # 1. Eliminar ofertas asociadas a este CV en SQLite
+    db = get_db()
+    deleted_jobs = db.delete_jobs_by_cv_filename(clean_name)
+    logger.info("Eliminadas %d ofertas asociadas al CV '%s'", deleted_jobs, clean_name)
+
+    # 2. Eliminar el archivo físico del disco
     try:
         os.remove(target_path)
     except Exception as e:
         logger.error("Error al eliminar archivo CV '%s': %s", clean_name, e)
         raise HTTPException(status_code=500, detail=f"No se pudo eliminar el archivo: {str(e)}")
 
-    # Si era el CV activo seleccionado, volver a 'none'
+    # 3. Si era el CV activo seleccionado, volver a 'none'
     reverted_to_none = False
     current_pointer = read_active_cv_pointer()
     if current_pointer.get("selected_filename") == clean_name:
@@ -398,15 +394,15 @@ def delete_uploaded_cv(filename: str) -> Dict[str, Any]:
         except Exception as e:
             logger.warning("Error restableciendo active_cv.json tras borrado: %s", e)
 
-    db = get_db()
-    db.log_event("INFO", "cv", f"Archivo CV eliminado: {clean_name} (restaurado a sin CV: {reverted_to_none})")
+    db.log_event("INFO", "cv", f"Archivo CV eliminado: {clean_name} ({deleted_jobs} ofertas eliminadas, restaurado a sin CV: {reverted_to_none})")
 
     if reverted_to_none:
         _reevaluate_jobs_with_active_cv(db)
 
     return {
         "success": True,
-        "message": f"Currículum '{clean_name}' eliminado correctamente del almacenamiento local.",
+        "message": f"Currículum '{clean_name}' y sus {deleted_jobs} ofertas asociadas eliminados correctamente.",
+        "deleted_jobs": deleted_jobs,
         "reverted_to_none": reverted_to_none,
         "active_info": _get_active_cv_info(),
     }

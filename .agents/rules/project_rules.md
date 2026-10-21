@@ -74,3 +74,11 @@ Este documento establece las normas obligatorias de desarrollo, arquitectura y c
 
 ## 11. Prohibición de Testeo por Navegador
 - Queda terminantemente prohibido utilizar subagentes o herramientas automatizadas de control de navegador para realizar pruebas o testeos. Las validaciones se efectúan mediante scripts, endpoints y comandos de terminal.
+
+---
+
+## 12. Ciclo de Vida de CVs y Vinculación Estricta de Ofertas
+- **Desacoplamiento de `settings.yaml`**: `settings.yaml` no requiere términos de búsqueda fijos (`busqueda.terminos: []`). Los términos de búsqueda pertenecen a cada CV y se extraen/guardan de forma dinámica en `data/active_cv.json` sin reescribir la configuración global del sistema.
+- **Búsqueda únicamente al subir**: El rastreo automático en portales se ejecuta exclusivamente al subir un nuevo archivo CV.
+- **Cambio de CV sin re-escaneo**: Al seleccionar en el desplegable un CV ya existente, no se realiza ninguna llamada externa a portales; la interfaz filtra localmente las ofertas que ya se trajeron para ese CV (`WHERE cv_filename = :cv`).
+- **Eliminación en cascada**: Al borrar un CV, se eliminan del almacenamiento local tanto el archivo físico como todas las ofertas vinculadas a dicho CV en la base de datos SQLite.

@@ -46,8 +46,9 @@ export function LogConsole({ initialLogs = [], height = "h-80" }: LogConsoleProp
 
   // Conexión SSE para logs del sistema en tiempo real
   useEffect(() => {
+    fetchLogs();
+
     if (activeTab === "container_ollama" || activeTab === "container_app") {
-      fetchLogs();
       return;
     }
 

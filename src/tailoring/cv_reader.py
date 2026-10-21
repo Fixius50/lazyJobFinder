@@ -90,19 +90,56 @@ def extract_cv_text(file_path: str) -> str:
     return normalized.strip()
 
 
-def extract_search_terms_from_cv(cv_text: str) -> Dict[str, Any]:
+def extract_search_terms_from_cv(cv_text: str, filename: Optional[str] = None) -> Dict[str, Any]:
     """
-    Analiza el texto de cualquier CV para deducir de forma universal y sin plantillas
+    Analiza el texto de cualquier CV y su nombre de archivo para deducir de forma universal
     entre 2 y 4 términos óptimos de búsqueda en portales de empleo (InfoJobs, Indeed, LinkedIn, etc.),
     válido para cualquier profesión (mozo de almacén, fontanero, sanitario, administrativo, etc.).
     """
-    if not cv_text or len(cv_text.strip()) < 20:
+    combined_ctx = f"{filename or ''} {cv_text or ''}".lower()
+    if len(combined_ctx.strip()) < 10:
         return {
             "search_terms": [],
             "primary_role": "",
         }
 
-    # 1. Intentar inferencia abierta con Ollama adaptada estrictamente al texto del CV
+    # Heurística contextual rápida de alta fidelidad para cualquier sector laboral
+    fast_terms: List[str] = []
+    fast_role: str = ""
+
+    if any(k in combined_ctx for k in ("mozo", "carretill", "traspaleta", "almacén", "almacen", "logística", "logistica", "picking")):
+        fast_terms = ["Mozo de almacén", "Carretillero", "Operario de logística"]
+        if any(k in combined_ctx for k in ("prevención", "prevencion", "riesgos laborales", "prl")):
+            fast_terms.append("Prevención de Riesgos Laborales")
+        fast_role = "Mozo de almacén / Carretillero"
+    elif any(k in combined_ctx for k in ("camarer", "cociner", "hostelería", "hosteleria", "barista")):
+        fast_terms = ["Camarero", "Ayudante de cocina", "Personal de hostelería"]
+        fast_role = "Camarero / Hostelería"
+    elif any(k in combined_ctx for k in ("administrativ", "contab", "facturac", "recepcionista", "oficinista")):
+        fast_terms = ["Auxiliar administrativo", "Administrativo contable", "Recepcionista"]
+        fast_role = "Auxiliar administrativo"
+    elif any(k in combined_ctx for k in ("enferm", "sanitar", "auxiliar de enfermería", "tcae", "médic", "medic")):
+        fast_terms = ["Enfermero", "Auxiliar de enfermería", "Personal sanitario"]
+        fast_role = "Personal sanitario"
+    elif any(k in combined_ctx for k in ("electricis", "instalador", "fontaner", "climatizac", "mantenimiento industrial")):
+        fast_terms = ["Electricista", "Técnico instalador", "Oficial de mantenimiento"]
+        fast_role = "Electricista / Mantenimiento"
+    elif any(k in combined_ctx for k in ("dependient", "cajer", "ventas", "comercial", "atención al cliente")):
+        fast_terms = ["Dependiente", "Comercial de ventas", "Atención al cliente"]
+        fast_role = "Dependiente de comercio"
+    elif any(k in combined_ctx for k in ("programad", "desarroll", "software", "full stack", "frontend", "backend")):
+        fast_terms = ["Desarrollador Software", "Programador", "Desarrollador Web"]
+        fast_role = "Desarrollador Software"
+
+    # Si la heurística contextual directa ya detectó un rol inequívoco con alta confianza, usarlo
+    if fast_terms:
+        logger.info("Términos determinados para CV '%s': %s (Rol: %s)", filename or "cv", fast_terms, fast_role)
+        return {
+            "search_terms": fast_terms[:4],
+            "primary_role": fast_role,
+        }
+
+    # Intentar inferencia abierta con Ollama para casos no cubiertos por heurística
     try:
         from ..evaluator.ollama_client import OllamaClient
         ollama = OllamaClient()
@@ -119,9 +156,9 @@ def extract_search_terms_from_cv(cv_text: str) -> Dict[str, Any]:
                 "REGLAS OBLIGATORIAS:\n"
                 "- 'search_terms' debe contener de 2 a 4 títulos de búsqueda de empleo habituales en España que encajen estrictamente con este CV.\n"
                 "- Basa los títulos ÚNICAMENTE en la experiencia, formación o competencias descritas en el CV. No inventes oficios de otros sectores.\n\n"
-                f"TEXTO DEL CV:\n{cv_text[:3000]}"
+                f"TEXTO DEL CV:\n{cv_text[:2000]}"
             )
-            raw = ollama.generate(prompt=prompt, format_json=True, timeout=25)
+            raw = ollama.generate(prompt=prompt, format_json=True, timeout=20)
             data = json.loads(raw)
             terms = data.get("search_terms", [])
             if isinstance(terms, list) and len(terms) > 0:
@@ -133,37 +170,13 @@ def extract_search_terms_from_cv(cv_text: str) -> Dict[str, Any]:
                         "primary_role": str(data.get("primary_role", cleaned_terms[0])),
                     }
     except Exception as e:
-        logger.debug("Ollama no disponible para extracción de términos (%s), usando heurística directa", e)
-
-    # 2. Extracción semántica directa basada en palabras clave del propio texto
-    text_low = cv_text.lower()
-    terms = []
-
-    if any(k in text_low for k in ("carretill", "traspaleta", "almacén", "almacen", "logística", "logistica", "picking", "pedidos")):
-        terms = ["Mozo de almacén", "Carretillero", "Operario de logística"]
-    elif any(k in text_low for k in ("camarer", "cociner", "hostelería", "hosteleria", "barista")):
-        terms = ["Camarero", "Ayudante de cocina", "Personal de hostelería"]
-    elif any(k in text_low for k in ("administrativ", "contab", "facturac", "recepcionista", "oficinista")):
-        terms = ["Auxiliar administrativo", "Administrativo contable", "Recepcionista"]
-    elif any(k in text_low for k in ("enferm", "sanitar", "auxiliar de enfermería", "tcae", "médic", "medic")):
-        terms = ["Enfermero", "Auxiliar de enfermería", "Personal sanitario"]
-    elif any(k in text_low for k in ("electricis", "instalador", "fontaner", "climatizac", "mantenimiento industrial")):
-        terms = ["Electricista", "Técnico instalador", "Oficial de mantenimiento"]
-    elif any(k in text_low for k in ("dependient", "cajer", "ventas", "comercial", "atención al cliente")):
-        terms = ["Dependiente", "Comercial de ventas", "Atención al cliente"]
-    elif any(k in text_low for k in ("programad", "desarroll", "software", "full stack", "frontend", "backend")):
-        terms = ["Desarrollador Software", "Programador", "Desarrollador Web"]
-
-    if terms:
-        return {
-            "search_terms": terms[:4],
-            "primary_role": terms[0],
-        }
+        logger.debug("Ollama no disponible o timeout para extracción de términos (%s)", e)
 
     return {
         "search_terms": [],
         "primary_role": "",
     }
+
 
 
 def get_active_cv_text_and_meta() -> Tuple[str, Dict[str, Any]]:

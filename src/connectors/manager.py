@@ -174,8 +174,12 @@ class ConnectorManager:
         cross_portal_count = 0
         updated_count = 0
 
+        active_cv_name = cv_meta.get("filename") if cv_meta.get("has_cv") else None
+
         for offer in all_discovered:
             offer_dict = offer.to_dict()
+            if active_cv_name:
+                offer_dict["cv_filename"] = active_cv_name
             job_id, status_code = self.db.save_job(offer_dict)
 
             if status_code == "inserted" and job_id:

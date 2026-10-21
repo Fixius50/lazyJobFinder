@@ -483,16 +483,23 @@ class Database:
             elif any(k in dl for k in ["master", "máster", "postgrado"]):
                 education_level = "Máster / Postgrado"
 
+        from .storage import read_active_cv_pointer
+        cv_filename = job_data.get("cv_filename") or read_active_cv_pointer()
+        if cv_filename in ("none", "Ninguno", ""):
+            cv_filename = None
+
         with self._get_connection() as conn:
             # 1. Comprobar si ya existe por URL exacta
             cursor = conn.execute(
-                "SELECT id, description_hash, alternate_sources FROM jobs WHERE url_hash = ?",
+                "SELECT id, description_hash, alternate_sources, cv_filename FROM jobs WHERE url_hash = ?",
                 (url_hash,),
             )
             existing = cursor.fetchone()
             if existing:
                 existing_id = existing["id"]
                 old_desc_hash = existing["description_hash"]
+                if cv_filename and not existing.get("cv_filename"):
+                    conn.execute("UPDATE jobs SET cv_filename = ? WHERE id = ?", (cv_filename, existing_id))
                 # Si cambió la descripción, actualizar registro y registrar timestamp
                 if old_desc_hash and old_desc_hash != desc_hash:
                     conn.execute(
@@ -543,8 +550,9 @@ class Database:
                             url_hash, content_fingerprint, description_hash, canonical_url,
                             title, company, location, is_remote, source, description,
                             salary_min, salary_max, salary_currency, date_posted, status,
-                            duplicate_of_id, similarity_score, contract_type, schedule, education_level
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'duplicate', ?, ?, ?, ?, ?)
+                            duplicate_of_id, similarity_score, contract_type, schedule, education_level,
+                            cv_filename
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'duplicate', ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             url_hash, content_fingerprint, desc_hash, canonical_url,
@@ -552,7 +560,8 @@ class Database:
                             source, description, job_data.get("salary_min"),
                             job_data.get("salary_max"), job_data.get("salary_currency", "EUR"),
                             job_data.get("date_posted", ""), cross_dup_id, fuzzy_sim,
-                            contract_type, schedule, education_level
+                            contract_type, schedule, education_level,
+                            cv_filename
                         ),
                     )
                     dup_row_id = cursor.lastrowid
@@ -587,8 +596,8 @@ class Database:
                         url_hash, content_fingerprint, description_hash, canonical_url,
                         title, company, location, is_remote, source, description,
                         salary_min, salary_max, salary_currency, date_posted, status,
-                        contract_type, schedule, education_level
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        contract_type, schedule, education_level, cv_filename
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         url_hash,
@@ -609,11 +618,13 @@ class Database:
                         contract_type,
                         schedule,
                         education_level,
+                        cv_filename,
                     ),
                 )
                 return cursor.lastrowid, "inserted"
             except sqlite3.IntegrityError:
                 return None, "already_exists"
+
 
     def update_job_status(self, job_id: int, status: str) -> None:
         """Actualiza el estado del ciclo de vida de la oferta."""
@@ -852,6 +863,7 @@ class Database:
         geo_lon: Optional[float] = None,
         geo_radius_km: Optional[float] = None,
         only_ui_saved: bool = True,
+        cv_filename: Optional[str] = None,
         page: int = 1,
         page_size: int = 20,
         sort_by: str = "created_at",
@@ -878,6 +890,17 @@ class Database:
 
         where_clauses = ["1=1"]
         params: List[Any] = []
+
+        from .storage import read_active_cv_pointer
+        target_cv = cv_filename
+        if target_cv is None:
+            target_cv = read_active_cv_pointer()
+
+        if target_cv in ("none", "Ninguno", "") or not target_cv:
+            where_clauses.append("1=0")
+        else:
+            where_clauses.append("(j.cv_filename = ? OR j.cv_filename IS NULL)")
+            params.append(str(target_cv).strip())
 
         if only_ui_saved:
             where_clauses.append("j.ui_saved = 1")
@@ -1227,12 +1250,28 @@ class Database:
             "documents_deleted": docs_count,
         }
 
-    def get_filter_facets(self) -> Dict[str, Any]:
+    def delete_jobs_by_cv_filename(self, cv_filename: str) -> int:
+        """Elimina todas las ofertas asociadas a un archivo CV específico."""
+        if not cv_filename or cv_filename in ("none", "Ninguno"):
+            return 0
+        with self._get_connection() as conn:
+            cursor = conn.execute("DELETE FROM jobs WHERE cv_filename = ?", (str(cv_filename).strip(),))
+            deleted = cursor.rowcount
+            conn.commit()
+            logger.info("Eliminadas %d ofertas asociadas al CV '%s'", deleted, cv_filename)
+            return deleted
+
+    def get_filter_facets(self, cv_filename: Optional[str] = None) -> Dict[str, Any]:
         """
         Escanea las ofertas reales registradas en SQLite procedentes de los portales
         y extrae dinámicamente las facetas y opciones de filtro disponibles con sus conteos reales.
-        Se adapta a las ofertas visibles (no descartadas por el CV).
+        Se adapta a las ofertas visibles vinculadas al CV activo (no descartadas).
         """
+        from .storage import read_active_cv_pointer
+        target_cv = cv_filename
+        if target_cv is None:
+            target_cv = read_active_cv_pointer()
+
         with self._get_connection() as conn:
             has_evals = conn.execute("SELECT 1 FROM evaluations LIMIT 1").fetchone() is not None
             if has_evals:
@@ -1241,6 +1280,12 @@ class Database:
             else:
                 base_from = "jobs j"
                 base_where = "j.ui_saved = 1 AND j.status != 'discarded'"
+
+            if target_cv in ("none", "Ninguno", "") or not target_cv:
+                base_where += " AND 1=0"
+            else:
+                escaped_cv = str(target_cv).strip().replace("'", "''")
+                base_where += f" AND (j.cv_filename = '{escaped_cv}' OR j.cv_filename IS NULL)"
 
             constants = _load_shared_constants()
             portal_sources = constants.get("portal_sources", {})

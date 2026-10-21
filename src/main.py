@@ -212,7 +212,7 @@ if __name__ == "__main__":
     if _RELOAD_REQUESTED:
         logger.info("Recargando lazyJobFinder con el nuevo código fuente...")
         try:
-            os.execv(sys.executable, [sys.executable] + sys.argv)
+            os.execv(sys.executable, [sys.executable, "-m", "src.main"])
         except Exception as e:
             logger.warning("Fallo en execv (%s). Finalizando para que Docker reinicie el contenedor.", e)
             sys.exit(0)

@@ -23,7 +23,7 @@ import subprocess
 import sys
 import tarfile
 import time
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 import zipfile
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -72,6 +72,7 @@ class ReleaseBuilder:
         self.skip_model = skip_model
         self.build_frontend = build_frontend
         self.model_included = False
+        self._staging_model_digests: Optional[List[str]] = None
         self.manifest_data = self._load_base_manifest()
 
     def _load_base_manifest(self) -> Dict:
@@ -778,25 +779,39 @@ class ReleaseBuilder:
                         f"AUDITORÍA DE MODELO FALLIDA: Conflicto entre manifiestos '{path_3b}' y '{path_latest}'. "
                         "La etiqueta 'latest' no apunta al mismo modelo exacto que '3b-instruct'."
                     )
+                if self._staging_model_digests and digests_3b != self._staging_model_digests:
+                    raise RuntimeError(
+                        f"AUDITORÍA DE MODELO FALLIDA: Los digests de '{path_3b}' difieren de los digests de referencia auditados en staging."
+                    )
                 exact_manifest_path = path_3b
                 required_digests = digests_3b
             # Caso 2: Si solo existe '3b-instruct', es el modelo canónico exacto solicitado
             elif path_3b:
                 json_3b, required_digests = _parse_and_validate_manifest(path_3b)
+                if self._staging_model_digests and required_digests != self._staging_model_digests:
+                    raise RuntimeError(
+                        f"AUDITORÍA DE MODELO FALLIDA: Los digests de '{path_3b}' difieren de los digests de referencia auditados en staging."
+                    )
                 exact_manifest_path = path_3b
-            # Caso 3: Si solo existe 'latest', validar contra los digests canónicos de staging previamente auditados
+            # Caso 3: Si solo existe 'latest', aceptarla únicamente si sus digests coinciden con los del modelo canónico
+            # de 'qwen2.5:3b-instruct' descargado y auditado previamente durante el empaquetado.
+            # Si no se puede establecer esa referencia independiente previa, rechazarla de inmediato.
             else:
                 json_latest, digests_latest = _parse_and_validate_manifest(path_latest)
-                if hasattr(self, "_staging_model_digests") and self._staging_model_digests:
-                    if digests_latest != self._staging_model_digests:
-                        raise RuntimeError(
-                            f"AUDITORÍA DE MODELO FALLIDA: El manifiesto '{path_latest}' no coincide con los digests de referencia de 'qwen2.5:3b-instruct'."
-                        )
+                if not self._staging_model_digests:
+                    raise RuntimeError(
+                        f"AUDITORÍA DE MODELO FALLIDA: El archivo contiene únicamente '{path_latest}'. "
+                        "No se puede aceptar la etiqueta 'latest' sin una referencia independiente previa de 'qwen2.5:3b-instruct'."
+                    )
+                if digests_latest != self._staging_model_digests:
+                    raise RuntimeError(
+                        f"AUDITORÍA DE MODELO FALLIDA: El manifiesto '{path_latest}' no coincide con los digests de referencia de 'qwen2.5:3b-instruct'."
+                    )
                 exact_manifest_path = path_latest
                 required_digests = digests_latest
 
-            # Conservar referencia para validaciones cruzadas entre staging y artefactos finales
-            if not hasattr(self, "_staging_model_digests") or not self._staging_model_digests:
+            # Conservar referencia para validaciones cruzadas entre staging y artefactos finales (procedente de 3b-instruct)
+            if not self._staging_model_digests:
                 self._staging_model_digests = required_digests
 
             # 2. Resolución canónica exacta de blobs (sin coincidencias parciales ambiguas)

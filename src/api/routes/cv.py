@@ -347,6 +347,9 @@ def delete_uploaded_cv(filename: str) -> Dict[str, Any]:
     db = get_db()
     db.log_event("INFO", "cv", f"Archivo CV eliminado: {clean_name} (restaurado a sin CV: {reverted_to_none})")
 
+    if reverted_to_none:
+        _reevaluate_jobs_with_active_cv(db)
+
     return {
         "success": True,
         "message": f"Currículum '{clean_name}' eliminado correctamente del almacenamiento local.",

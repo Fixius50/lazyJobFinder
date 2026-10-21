@@ -38,10 +38,12 @@ async function request<T>(endpoint: string, options: RequestOptions = {}): Promi
   const url = `${baseUrl}${endpoint}`;
   const timeoutMs = options.timeoutMs ?? 20000; // 20 segundos de timeout por defecto
 
-  const headers = {
-    "Content-Type": "application/json",
-    ...options.headers,
+  const headers: Record<string, string> = {
+    ...((options.headers as Record<string, string>) || {}),
   };
+  if (options.body) {
+    headers["Content-Type"] = "application/json";
+  }
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => {

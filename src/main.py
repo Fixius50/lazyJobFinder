@@ -39,6 +39,54 @@ sync_secrets_to_env()
 from .scheduler.runner import JobPipelineRunner
 
 
+SRC_DIR = os.path.abspath(os.path.dirname(__file__))
+_RELOAD_REQUESTED = False
+
+
+async def _code_reload_watcher(stop_event: asyncio.Event) -> None:
+    """Monitoriza modificaciones en archivos de código (.py) y solicita reinicio automático si cambian."""
+    global _RELOAD_REQUESTED
+
+    def _get_mtimes() -> dict:
+        mtimes = {}
+        try:
+            for root, _, files in os.walk(SRC_DIR):
+                for f in files:
+                    if f.endswith(".py"):
+                        p = os.path.join(root, f)
+                        try:
+                            mtimes[p] = os.path.getmtime(p)
+                        except OSError:
+                            pass
+        except Exception:
+            pass
+        return mtimes
+
+    initial_mtimes = _get_mtimes()
+    await asyncio.sleep(2.0)
+
+    while not stop_event.is_set():
+        await asyncio.sleep(1.5)
+        current_mtimes = _get_mtimes()
+        changed = False
+        changed_name = ""
+        for path, mtime in current_mtimes.items():
+            if path in initial_mtimes and mtime > initial_mtimes[path] + 0.1:
+                changed = True
+                changed_name = os.path.basename(path)
+                break
+            elif path not in initial_mtimes:
+                changed = True
+                changed_name = os.path.basename(path)
+                break
+
+        if changed:
+            logger.info("⚡ Cambio detectado en el código fuente (%s). Reiniciando servidor automáticamente...", changed_name)
+            _RELOAD_REQUESTED = True
+            stop_event.set()
+            break
+
+
 async def main() -> None:
     logger.info("==================================================")
     logger.info("   INICIANDO lazyJobFinder (Versión 1.0.0)        ")
@@ -96,6 +144,9 @@ async def main() -> None:
         except (NotImplementedError, AttributeError):
             pass
 
+    # 6. Iniciar tarea de auto-recarga ante modificaciones en el código fuente
+    watcher_task = asyncio.create_task(_code_reload_watcher(stop_event))
+
     app_started = False
     if app:
         logger.info(
@@ -126,6 +177,9 @@ async def main() -> None:
     # Esperar señal de parada (mantiene vivos la API y el planificador)
     await stop_event.wait()
 
+    if not watcher_task.done():
+        watcher_task.cancel()
+
     # Parada limpia del bot si estaba activo
     if app_started and app and app.updater:
         logger.info("Deteniendo bot de Telegram...")
@@ -154,3 +208,11 @@ if __name__ == "__main__":
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
         logger.info("Aplicación detenida por el usuario.")
+
+    if _RELOAD_REQUESTED:
+        logger.info("Recargando lazyJobFinder con el nuevo código fuente...")
+        try:
+            os.execv(sys.executable, [sys.executable] + sys.argv)
+        except Exception as e:
+            logger.warning("Fallo en execv (%s). Finalizando para que Docker reinicie el contenedor.", e)
+            sys.exit(0)

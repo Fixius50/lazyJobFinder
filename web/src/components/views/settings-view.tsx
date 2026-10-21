@@ -115,7 +115,7 @@ export function SettingsView() {
 
   const handleClearHistory = async () => {
     try {
-      const res = await api.maintenanceClearHistory(confirmPhraseHistory);
+      const res = await api.maintenanceClearHistory(CONFIRMATION_PHRASES.clear_history);
       setModalClearHistoryOpen(false);
       setConfirmPhraseHistory("");
       setMaintActionFeedback(
@@ -379,33 +379,23 @@ export function SettingsView() {
       <Dialog
         open={modalClearHistoryOpen}
         onOpenChange={setModalClearHistoryOpen}
-        title="Confirmar Limpieza de Historial"
-        description="Esta acción eliminará todas las ofertas registradas y los PDFs de CVs/cartas generados."
+        title="¿Vaciar todo el historial de ofertas?"
+        description="Esta acción eliminará de forma irreversible todas las ofertas registradas en la base de datos y los documentos generados. Tu CV y configuración se mantendrán intactos."
       >
         <div className="space-y-4 text-xs">
           <p className="text-muted-foreground">
-            Escribe exactamente la siguiente frase para confirmar:
+            ¿Estás seguro de que deseas vaciar el historial? Una vez borrado, podrás realizar nuevas búsquedas limpias.
           </p>
-          <div className="p-2 rounded bg-muted font-mono font-bold text-center select-all">
-            {CONFIRMATION_PHRASES.clear_history}
-          </div>
-          <Input
-            value={confirmPhraseHistory}
-            onChange={(e) => setConfirmPhraseHistory(e.target.value)}
-            placeholder="Escribe la frase aquí..."
-            className="text-xs"
-          />
-          <div className="flex justify-end gap-2 pt-2">
+          <div className="flex justify-end gap-2 pt-2 border-t">
             <Button size="sm" variant="outline" onClick={() => setModalClearHistoryOpen(false)}>
               Cancelar
             </Button>
             <Button
               size="sm"
               variant="destructive"
-              disabled={confirmPhraseHistory !== CONFIRMATION_PHRASES.clear_history}
               onClick={handleClearHistory}
             >
-              Borrar Historial
+              Sí, Vaciar Historial
             </Button>
           </div>
         </div>

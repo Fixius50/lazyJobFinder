@@ -120,6 +120,18 @@ class JobPipelineRunner:
             save_ui_pref = self.settings.get("notificaciones", {}).get("guardar_en_interfaz", True)
 
             try:
+                # Recargar configuración fresca desde disco para respetar cambios recientes o del CV activo
+                import yaml
+                from ..storage import SETTINGS_FILE
+                if os.path.exists(SETTINGS_FILE):
+                    try:
+                        with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+                            fresh = yaml.safe_load(f) or {}
+                            self.settings = fresh
+                            self.connectors_mgr.settings = fresh
+                    except Exception as s_err:
+                        logger.debug("Error recargando settings en runner: %s", s_err)
+
                 # 1. Descubrimiento de ofertas y deduplicación (en worker thread)
                 new_jobs, metrics = await asyncio.to_thread(self.connectors_mgr.run_discovery)
                 total_found = metrics["total_encontradas"]

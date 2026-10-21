@@ -19,20 +19,13 @@ interface PurgeHistoryProps {
  */
 export function PurgeHistoryButton({ onHistoryCleared, className = "" }: PurgeHistoryProps) {
   const [modalOpen, setModalOpen] = useState<boolean>(false);
-  const [confirmPhrase, setConfirmPhrase] = useState<string>("");
   const [isLoading, setIsLoading] = useState<boolean>(false);
 
   const handleClearHistory = async () => {
-    if (confirmPhrase !== CONFIRMATION_PHRASES.clear_history) {
-      alert(`Frase incorrecta. Debes escribir exactamente: "${CONFIRMATION_PHRASES.clear_history}"`);
-      return;
-    }
-
     setIsLoading(true);
     try {
-      await api.maintenanceClearHistory(confirmPhrase);
+      await api.maintenanceClearHistory(CONFIRMATION_PHRASES.clear_history);
       setModalOpen(false);
-      setConfirmPhrase("");
       if (onHistoryCleared) {
         onHistoryCleared();
       }
@@ -59,37 +52,22 @@ export function PurgeHistoryButton({ onHistoryCleared, className = "" }: PurgeHi
       <Dialog
         open={modalOpen}
         onOpenChange={setModalOpen}
-        title="Confirmar vaciado de historial"
-        description="Esta acción eliminará todas las ofertas detectadas en SQLite y los PDFs/cartas generados. Tu CV y configuración se mantendrán intactos."
+        title="¿Vaciar todo el historial de ofertas?"
+        description="Esta acción eliminará de forma irreversible todas las ofertas registradas en la base de datos y los documentos generados. Tu currículum activo y tu configuración se mantendrán intactos."
       >
         <div className="space-y-4 pt-2 text-xs">
           <div className="flex items-start space-x-2 text-amber-400 bg-amber-500/10 p-3 rounded-lg border border-amber-500/20">
             <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
             <span>
-              Para evitar pérdidas involuntarias, escribe exactamente la frase de confirmación:
+              ¿Estás seguro de que deseas vaciar el historial? Una vez borrado, podrás realizar nuevas búsquedas limpias.
             </span>
           </div>
-
-          <div className="p-2 rounded bg-muted/50 border text-center font-mono font-bold tracking-wider text-xs select-all">
-            {CONFIRMATION_PHRASES.clear_history}
-          </div>
-
-          <Input
-            value={confirmPhrase}
-            onChange={(e) => setConfirmPhrase(e.target.value)}
-            placeholder={`Escribe ${CONFIRMATION_PHRASES.clear_history}`}
-            className="text-xs font-mono"
-            autoFocus
-          />
 
           <div className="flex justify-end space-x-2 pt-2 border-t">
             <Button
               variant="outline"
               size="sm"
-              onClick={() => {
-                setModalOpen(false);
-                setConfirmPhrase("");
-              }}
+              onClick={() => setModalOpen(false)}
               disabled={isLoading}
               className="text-xs h-8"
             >
@@ -99,11 +77,11 @@ export function PurgeHistoryButton({ onHistoryCleared, className = "" }: PurgeHi
               variant="destructive"
               size="sm"
               onClick={handleClearHistory}
-              disabled={confirmPhrase !== CONFIRMATION_PHRASES.clear_history || isLoading}
+              disabled={isLoading}
               className="text-xs h-8 flex items-center gap-1.5"
             >
               <Trash2 className="h-3.5 w-3.5" />
-              {isLoading ? "Vaciando..." : "Confirmar Vaciar"}
+              {isLoading ? "Vaciando..." : "Sí, Vaciar Historial"}
             </Button>
           </div>
         </div>

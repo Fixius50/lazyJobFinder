@@ -84,8 +84,26 @@ class ConnectorManager:
         Ejecuta la búsqueda en todas las fuentes configuradas, deduplica y guarda las nuevas ofertas.
         Retorna la lista de ofertas nuevas insertadas en base de datos y un resumen de métricas.
         """
+        # 1. Obtener CV activo y términos de búsqueda dinámicos adaptados
+        from ..tailoring.cv_reader import get_active_cv_text_and_meta
+        cv_text, cv_meta = get_active_cv_text_and_meta()
+
         busqueda_cfg = self.settings.get("busqueda", {})
-        search_terms = busqueda_cfg.get("terminos", ["Desarrollador Junior", "Junior Java"])
+        active_terms = cv_meta.get("search_terms") or []
+        is_tech = cv_meta.get("is_tech_role", True)
+
+        if cv_meta.get("has_cv") and active_terms:
+            search_terms = active_terms
+            logger.info(
+                "Discovery utilizando términos adaptados al CV activo '%s' (%s): %s",
+                cv_meta.get("filename"),
+                cv_meta.get("primary_role", "perfil profesional"),
+                search_terms,
+            )
+            print(f"\n[Escáner de Empleo] Buscando en portales ofertas adaptadas al CV '{cv_meta.get('filename')}': {search_terms}", flush=True)
+        else:
+            search_terms = busqueda_cfg.get("terminos", ["Desarrollador Junior", "Junior Java"])
+
         locations = busqueda_cfg.get("ubicaciones", ["Spain"])
         hours_old = busqueda_cfg.get("antiguedad_horas", 48)
         limit_per_source = busqueda_cfg.get("limite_por_fuente", 15)
@@ -94,6 +112,17 @@ class ConnectorManager:
         source_counts: Dict[str, int] = {}
 
         for connector in self.connectors:
+            # Si el CV activo NO es de informática/desarrollo, omitir portales 100% exclusivos de IT (tecnoempleo)
+            if connector.name in ("tecnoempleo", "tecnoempleo_rss") and cv_meta.get("has_cv") and not is_tech:
+                logger.info("Omitiendo conector '%s': el CV activo '%s' no es de perfil informático.", connector.name, cv_meta.get("filename"))
+                print(f"[Escáner] Omitiendo '{connector.name}' (portal exclusivo de IT) para perfil '{cv_meta.get('filename')}'.", flush=True)
+                self.source_health[connector.name] = {
+                    "status": "ok",
+                    "offers": 0,
+                    "error": None,
+                }
+                continue
+
             try:
                 logger.info("Iniciando escaneo con conector '%s'...", connector.name)
                 offers = connector.search(

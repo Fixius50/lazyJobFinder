@@ -99,16 +99,16 @@ export function ApplicationsView() {
     // Comprobación inicial y monitorización del estado de búsqueda
     pollSearchStatus();
     const interval = setInterval(async () => {
-      const isRunning = await pollSearchStatus();
-      if (!isRunning) {
-        fetchJobs();
-      }
-    }, 4000);
+      await pollSearchStatus();
+      fetchJobs(true);
+    }, 3000);
     return () => clearInterval(interval);
   }, []);
 
-  const fetchJobs = async () => {
-    setLoading(true);
+  const fetchJobs = async (silent: boolean = false) => {
+    if (!silent) {
+      setLoading(true);
+    }
     try {
       const expYears = minExperienceStep > 0 ? EXPERIENCE_STEPS[minExperienceStep]?.years : undefined;
       const minSal = minSalaryStep > 0 ? SALARY_STEPS[minSalaryStep]?.value : undefined;
@@ -141,7 +141,9 @@ export function ApplicationsView() {
     } catch (err: any) {
       console.error("[ApplicationsView] Error obteniendo ofertas:", err);
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   };
 
@@ -402,75 +404,23 @@ export function ApplicationsView() {
         <section className={`${hasActiveCv && showCvPanel ? "lg:col-span-8 xl:col-span-9" : "lg:col-span-12"} space-y-4`}>
           {/* Listado de Ofertas en cuadrícula */}
           <div className="space-y-3">
-            {searching ? (
-              <div className="space-y-3">
-                <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-lg border border-primary/30 bg-primary/5">
-                  <div className="flex items-center gap-2 text-xs font-semibold text-primary">
-                    <Sparkles className="h-4 w-4 animate-spin text-primary" />
-                    <span>Buscando ofertas compatibles en portales de empleo y evaluando con IA...</span>
-                  </div>
-                  <span className="text-[11px] text-muted-foreground animate-pulse">
-                    Rastreando Indeed, LinkedIn y Glassdoor...
-                  </span>
+            {/* Banner de progreso mientras busca o evalúa en segundo plano */}
+            {searching && (
+              <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-lg border border-primary/30 bg-primary/5">
+                <div className="flex items-center gap-2 text-xs font-semibold text-primary">
+                  <Sparkles className="h-4 w-4 animate-spin text-primary" />
+                  <span>Buscando ofertas compatibles en portales de empleo y evaluando con IA...</span>
                 </div>
+                <span className="text-[11px] text-muted-foreground animate-pulse">
+                  {jobsData && jobsData.total > 0
+                    ? `${jobsData.total} ofertas encontradas hasta el momento`
+                    : "Rastreando Indeed, LinkedIn y Glassdoor..."}
+                </span>
+              </div>
+            )}
 
-                <div
-                  className={`grid grid-cols-1 sm:grid-cols-2 ${
-                    showCvPanel
-                      ? "lg:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-4"
-                      : "lg:grid-cols-3 xl:grid-cols-5 2xl:grid-cols-5"
-                  } gap-3 sm:gap-3.5`}
-                >
-                  {[...Array(8)].map((_, i) => (
-                    <Card
-                      key={i}
-                      className="border border-border/60 bg-card/60 backdrop-blur-xs p-3.5 space-y-3 animate-pulse overflow-hidden relative shadow-xs"
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="h-4 w-16 bg-primary/20 rounded-full" />
-                        <div className="h-3.5 w-12 bg-muted rounded" />
-                      </div>
-                      <div className="space-y-1.5 pt-1">
-                        <div className="h-4 bg-muted/80 rounded w-4/5" />
-                        <div className="h-3 bg-muted/50 rounded w-3/5" />
-                      </div>
-                      <div className="pt-2 border-t border-border/30 space-y-2">
-                        <div className="flex items-center justify-between">
-                          <div className="h-3 bg-muted/40 rounded w-1/3" />
-                          <div className="h-3 bg-muted/40 rounded w-1/4" />
-                        </div>
-                        <div className="h-1.5 bg-primary/20 rounded-full w-full" />
-                      </div>
-                      <div className="flex items-center justify-center pt-2 text-[11px] text-muted-foreground/80 gap-1.5">
-                        <RefreshCw className="h-3 w-3 animate-spin text-primary" />
-                        <span>Cargando oferta {i + 1}...</span>
-                      </div>
-                    </Card>
-                  ))}
-                </div>
-              </div>
-            ) : loading ? (
-              <div className="flex flex-col items-center justify-center py-16 text-muted-foreground space-y-2">
-                <RefreshCw className="h-6 w-6 animate-spin text-primary" />
-                <p className="text-xs">Consultando candidaturas en base de datos local...</p>
-              </div>
-            ) : !jobsData || jobsData.items.length === 0 ? (
-              <Card className="border-dashed bg-card/40">
-                <CardContent className="flex flex-col items-center justify-center py-16 text-center text-muted-foreground space-y-3">
-                  <Briefcase className="h-10 w-10 text-muted-foreground/50" />
-                  <p className="text-sm font-semibold text-foreground">
-                    {!hasActiveCv
-                      ? "Sin currículum activo seleccionado"
-                      : "No se encontraron candidaturas"}
-                  </p>
-                  <p className="text-xs max-w-md text-muted-foreground">
-                    {!hasActiveCv
-                      ? "Sube o selecciona un currículum en la barra superior para activar los filtros y la búsqueda personalizada de ofertas."
-                      : "No hay ofertas que coincidan con los filtros aplicados o aún no has lanzado una búsqueda."}
-                  </p>
-                </CardContent>
-              </Card>
-            ) : (
+            {/* Cuadrícula de Ofertas: Si hay ofertas encontradas, mostrar siempre una tarjeta por cada oferta encontrada */}
+            {jobsData && jobsData.items.length > 0 ? (
               <div
                 className={`grid grid-cols-1 sm:grid-cols-2 ${
                   showCvPanel
@@ -486,6 +436,59 @@ export function ApplicationsView() {
                   />
                 ))}
               </div>
+            ) : searching || loading ? (
+              /* Si aún no hay ofertas en base de datos y está cargando/buscando, mostrar tarjetas individuales en carga */
+              <div
+                className={`grid grid-cols-1 sm:grid-cols-2 ${
+                  showCvPanel
+                    ? "lg:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-4"
+                    : "lg:grid-cols-3 xl:grid-cols-5 2xl:grid-cols-5"
+                } gap-3 sm:gap-3.5`}
+              >
+                {[...Array(8)].map((_, i) => (
+                  <Card
+                    key={i}
+                    className="border border-border/60 bg-card/60 backdrop-blur-xs p-3.5 space-y-3 animate-pulse overflow-hidden relative shadow-xs"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="h-4 w-16 bg-primary/20 rounded-full" />
+                      <div className="h-3.5 w-12 bg-muted rounded" />
+                    </div>
+                    <div className="space-y-1.5 pt-1">
+                      <div className="h-4 bg-muted/80 rounded w-4/5" />
+                      <div className="h-3 bg-muted/50 rounded w-3/5" />
+                    </div>
+                    <div className="pt-2 border-t border-border/30 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="h-3 bg-muted/40 rounded w-1/3" />
+                        <div className="h-3 bg-muted/40 rounded w-1/4" />
+                      </div>
+                      <div className="h-1.5 bg-primary/20 rounded-full w-full" />
+                    </div>
+                    <div className="flex items-center justify-center pt-2 text-[11px] text-muted-foreground/80 gap-1.5">
+                      <RefreshCw className="h-3 w-3 animate-spin text-primary" />
+                      <span>Cargando oferta {i + 1}...</span>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            ) : (
+              /* Sin ofertas */
+              <Card className="border-dashed bg-card/40">
+                <CardContent className="flex flex-col items-center justify-center py-16 text-center text-muted-foreground space-y-3">
+                  <Briefcase className="h-10 w-10 text-muted-foreground/50" />
+                  <p className="text-sm font-semibold text-foreground">
+                    {!hasActiveCv
+                      ? "Sin currículum activo seleccionado"
+                      : "No se encontraron candidaturas"}
+                  </p>
+                  <p className="text-xs max-w-md text-muted-foreground">
+                    {!hasActiveCv
+                      ? "Sube o selecciona un currículum en la barra superior para activar los filtros y la búsqueda personalizada de ofertas."
+                      : "No hay ofertas que coincidan con los filtros aplicados o aún no has lanzado una búsqueda."}
+                  </p>
+                </CardContent>
+              </Card>
             )}
 
             {/* Paginación fluida */}

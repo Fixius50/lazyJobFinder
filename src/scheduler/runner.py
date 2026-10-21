@@ -139,10 +139,15 @@ class JobPipelineRunner:
 
                 # Combinar ofertas recién descubiertas con cualquier vacante pendiente de evaluación en BD
                 pending_jobs = await asyncio.to_thread(self.db.get_unevaluated_jobs, 100)
-                job_dict = {j["id"]: j for j in pending_jobs if j.get("id")}
+                job_dict = {}
+                for j in pending_jobs:
+                    j_id = j.get("id") if isinstance(j, dict) else j["id"]
+                    if j_id:
+                        job_dict[j_id] = dict(j)
                 for j in new_jobs:
-                    if j.get("id"):
-                        job_dict[j["id"]] = j
+                    j_id = j.get("id") if isinstance(j, dict) else j["id"]
+                    if j_id:
+                        job_dict[j_id] = dict(j)
                 jobs_to_evaluate = list(job_dict.values())
 
                 if not jobs_to_evaluate:

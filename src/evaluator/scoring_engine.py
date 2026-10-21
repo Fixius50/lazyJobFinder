@@ -185,7 +185,7 @@ class ScoringEngine:
                 skill_lower = skill.lower().strip()
                 if len(skill_lower) >= 3 and re.search(r"\b" + re.escape(skill_lower) + r"\b", text):
                     matched.append(skill.title())
-        else:
+        elif not cv_text:
             terminos = self.settings.get("busqueda", {}).get("terminos", [])
             for term in terminos:
                 if term and re.search(r"\b" + re.escape(str(term).lower()) + r"\b", text):
@@ -194,7 +194,7 @@ class ScoringEngine:
         # Cálculo de afinidad proporcional real
         matches_count = len(matched)
         if matches_count == 0:
-            base_score = 25
+            base_score = 15
         elif matches_count == 1:
             base_score = 45
         elif matches_count == 2:

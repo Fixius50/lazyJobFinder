@@ -1,5 +1,6 @@
 """Módulo de persistencia local en SQLite con modo WAL y deduplicación avanzada para lazyJobFinder."""
 
+import collections
 import hashlib
 import json
 import logging
@@ -20,7 +21,32 @@ except ImportError:
 
 logger = logging.getLogger("lazyJobFinder.database")
 
-from .storage import DB_PATH as DEFAULT_DB_PATH
+from .storage import DB_PATH as DEFAULT_DB_PATH, CONSTANTS_FILE
+
+
+def _load_shared_constants() -> Dict[str, Any]:
+    """Carga dinámicamente las constantes y definiciones de filtros desde shared_constants.json sin hardcodeos."""
+    try:
+        if os.path.exists(CONSTANTS_FILE):
+            with open(CONSTANTS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception as e:
+        logger.debug("No se pudo cargar shared_constants.json: %s", e)
+    return {}
+
+
+def _decode_row_json_fields(row_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Decodifica dinámicamente cualquier campo serializado en JSON (listas o diccionarios)."""
+    for key, val in list(row_data.items()):
+        if isinstance(val, str) and len(val) >= 2:
+            first, last = val[0], val[-1]
+            if (first == "[" and last == "]") or (first == "{" and last == "}"):
+                try:
+                    row_data[key] = json.loads(val)
+                except Exception:
+                    pass
+    return row_data
+
 
 
 def canonicalize_url(raw_url: str) -> str:
@@ -766,6 +792,7 @@ class Database:
     def get_jobs_paginated(
         self,
         search: Optional[str] = None,
+        exclude: Optional[str] = None,
         location: Optional[str] = None,
         source: Optional[str] = None,
         status: Optional[str] = None,
@@ -791,6 +818,7 @@ class Database:
         """
         Recupera ofertas paginadas con soporte de filtros multicriterio,
         ordenación segura y datos consolidados de evaluación y documentos.
+        Por defecto, oculta visualmente ofertas descartadas o que no coinciden con el CV.
         """
         page = max(1, page)
         page_size = min(max(5, page_size), 100)
@@ -817,6 +845,12 @@ class Database:
             where_clauses.append("(LOWER(j.title) LIKE ? OR LOWER(j.company) LIKE ? OR LOWER(j.location) LIKE ?)")
             params.extend([search_param, search_param, search_param])
 
+        if exclude:
+            exclude_terms = [t.strip().lower() for t in exclude.split(",") if t.strip()]
+            for term in exclude_terms:
+                where_clauses.append("(LOWER(j.title) NOT LIKE ? AND LOWER(j.description) NOT LIKE ?)")
+                params.extend([f"%{term}%", f"%{term}%"])
+
         if source:
             src = str(source).strip().lower()
             if src in ("tecnoempleo", "tecnoempleo_rss"):
@@ -832,6 +866,9 @@ class Database:
         if status:
             where_clauses.append("j.status = ?")
             params.append(status)
+        else:
+            # Por defecto, ocultar visualmente ofertas que no coinciden con el CV aportado (descartadas)
+            where_clauses.append("(j.status != 'discarded' AND (e.fit_level IS NULL OR e.fit_level != 'DESCARTADO'))")
 
         if min_score is not None:
             where_clauses.append("e.score >= ?")
@@ -857,52 +894,23 @@ class Database:
             where_clauses.append("j.is_remote = ?")
             params.append(1 if is_remote else 0)
 
-        # 2. Filtro de Categoría / Funciones profesionales (Checkboxes)
-        category_keywords = {
-            "desarrollo": ["full stack", "backend", "frontend", "desarrollador", "programador", "developer", "software", "react", "python", "java", "c#", ".net", "php", "typescript", "javascript", "angular", "node"],
-            "sistemas_cloud": ["devops", "cloud", "aws", "azure", "gcp", "docker", "kubernetes", "linux", "sysadmin", "sistemas", "redes", "infraestructura", "vmware", "administrador"],
-            "datos_ia": ["data", "datos", "machine learning", "ia", "inteligencia artificial", "bi", "business intelligence", "big data", "sql", "etl", "analytics", "deep learning"],
-            "ciberseguridad": ["seguridad", "ciberseguridad", "security", "soc", "pentesting", "auditor", "firewall", "hacker", "siem"],
-            "qa_testing": ["qa", "testing", "tester", "test", "calidad", "cypress", "selenium", "automatización", "automatizacion", "junit"],
-            "soporte_helpdesk": ["soporte", "helpdesk", "microinformática", "microinformatica", "técnico", "incidencias", "cau"],
-            "gestion_consultoria": ["scrum", "agile", "product owner", "project manager", "consultor", "jefe de proyecto", "pmo", "responsable"],
-        }
+        # 2. Filtro de Categoría / Competencias profesionales (Checkboxes) - Extraídas dinámicamente de ofertas
         active_cats = [c.lower().strip() for c in (categories or []) if c and c.lower().strip() not in ("sin_especificar", "todas")]
         if active_cats:
             cat_clauses = []
             for cat in active_cats:
-                kws = category_keywords.get(cat, [cat])
-                or_parts = []
-                for kw in kws:
-                    or_parts.append("(LOWER(j.title) LIKE ? OR LOWER(j.description) LIKE ?)")
-                    params.extend([f"%{kw}%", f"%{kw}%"])
-                if or_parts:
-                    cat_clauses.append(f"({' OR '.join(or_parts)})")
-            if cat_clauses:
-                where_clauses.append(f"({' OR '.join(cat_clauses)})")
+                cat_clauses.append("(LOWER(j.title) LIKE ? OR LOWER(j.description) LIKE ? OR (e.matched_skills IS NOT NULL AND LOWER(e.matched_skills) LIKE ?))")
+                params.extend([f"%{cat}%", f"%{cat}%", f"%{cat}%"])
+            where_clauses.append(f"({' OR '.join(cat_clauses)})")
 
-        # 3. Filtro de Formación mínima (Checkboxes)
-        education_keywords = {
-            "fp_superior": ["dam", "daw", "asir", "grado superior", "ciclo formativo grado superior", "técnico superior", "fp2", "fp ii"],
-            "fp_medio": ["grado medio", "ciclo formativo grado medio", "smr", "técnico medio", "fp1", "fp i"],
-            "universidad": ["ingeniería", "ingenieria", "ingeniero", "grado universitario", "licenciatura", "grado en informática", "grado en informatica", "carrera técnica"],
-            "master": ["máster", "master", "postgrado", "posgrado"],
-            "certificaciones": ["certificación", "certificacion", "certificaciones", "certificado oficial", "aws certified", "cisco", "ccna", "itil"],
-            "sin_estudios": ["sin estudios", "no requerida", "no se requiere titulación", "no se requiere titulacion"],
-        }
+        # 3. Filtro de Formación mínima (Checkboxes) - Dinámico según descripciones de ofertas
         active_edus = [e.lower().strip() for e in (educations or []) if e and e.lower().strip() not in ("sin_especificar", "todas")]
         if active_edus:
             edu_clauses = []
             for edu in active_edus:
-                kws = education_keywords.get(edu, [edu])
-                or_parts = []
-                for kw in kws:
-                    or_parts.append("LOWER(j.description) LIKE ?")
-                    params.append(f"%{kw}%")
-                if or_parts:
-                    edu_clauses.append(f"({' OR '.join(or_parts)})")
-            if edu_clauses:
-                where_clauses.append(f"({' OR '.join(edu_clauses)})")
+                edu_clauses.append("LOWER(j.description) LIKE ?")
+                params.append(f"%{edu}%")
+            where_clauses.append(f"({' OR '.join(edu_clauses)})")
 
         # 4. Filtro de Experiencia (Deslizante / Slider)
         # 0=Sin especificar, 1=Junior/Sin experiencia, 2=1+ año, 3=2+ años, 4=3+ años, 5=5+ años
@@ -923,47 +931,23 @@ class Database:
             where_clauses.append("(j.salary_max >= ? OR j.salary_min >= ?)")
             params.extend([min_salary, min_salary])
 
-        # 6. Filtro de Jornada laboral (Checkboxes)
-        schedule_keywords = {
-            "completa": ["completa", "tiempo completo", "full time", "full-time", "40 horas", "40h"],
-            "parcial": ["media jornada", "tiempo parcial", "parcial", "part time", "part-time", "20 horas", "30 horas"],
-            "intensiva": ["intensiva", "mañanas", "jornada continua", "turno intensivo"],
-            "flexible": ["flexible", "flexibilidad horaria", "horario flexible"],
-        }
+        # 6. Filtro de Jornada laboral (Checkboxes) - Dinámico según descripciones de ofertas
         active_scheds = [s.lower().strip() for s in (schedules or []) if s and s.lower().strip() not in ("sin_especificar", "todas")]
         if active_scheds:
             sched_clauses = []
             for sc in active_scheds:
-                kws = schedule_keywords.get(sc, [sc])
-                or_parts = []
-                for kw in kws:
-                    or_parts.append("LOWER(j.description) LIKE ?")
-                    params.append(f"%{kw}%")
-                if or_parts:
-                    sched_clauses.append(f"({' OR '.join(or_parts)})")
-            if sched_clauses:
-                where_clauses.append(f"({' OR '.join(sched_clauses)})")
+                sched_clauses.append("LOWER(j.description) LIKE ?")
+                params.append(f"%{sc}%")
+            where_clauses.append(f"({' OR '.join(sched_clauses)})")
 
-        # 7. Filtro de Tipo de contrato (Checkboxes)
-        contract_keywords = {
-            "indefinido": ["indefinido", "indefinida", "fijo", "permanent", "contrato indefinido"],
-            "temporal": ["temporal", "duración determinada", "duracion determinada", "por obra", "sustitución", "sustitucion"],
-            "practicas": ["prácticas", "practicas", "beca", "formación", "formacion", "internship", "convenio universidad"],
-            "freelance": ["freelance", "autónomo", "autonomo", "b2b", "contractor", "mercantil"],
-        }
+        # 7. Filtro de Tipo de contrato (Checkboxes) - Dinámico según descripciones de ofertas
         active_contracts = [c.lower().strip() for c in (contract_types or []) if c and c.lower().strip() not in ("sin_especificar", "todas")]
         if active_contracts:
             contract_clauses = []
             for ct in active_contracts:
-                kws = contract_keywords.get(ct, [ct])
-                or_parts = []
-                for kw in kws:
-                    or_parts.append("LOWER(j.description) LIKE ?")
-                    params.append(f"%{kw}%")
-                if or_parts:
-                    contract_clauses.append(f"({' OR '.join(or_parts)})")
-            if contract_clauses:
-                where_clauses.append(f"({' OR '.join(contract_clauses)})")
+                contract_clauses.append("LOWER(j.description) LIKE ?")
+                params.append(f"%{ct}%")
+            where_clauses.append(f"({' OR '.join(contract_clauses)})")
 
         # 8. Filtro Geográfico y de Área recibido desde el mapa del Frontend
         if location and location.strip() and not any(k in location.lower() for k in ("todos", "all", "cualquiera")):
@@ -1002,7 +986,7 @@ class Database:
             cursor = conn.execute(query_sql, params + [page_size, offset])
             items = []
             for row in cursor.fetchall():
-                row_dict = dict(row)
+                row_dict = _decode_row_json_fields(dict(row))
                 row_dict["has_cv"] = bool(row_dict.get("cv_pdf_path") or row_dict.get("cv_md_path"))
                 row_dict["has_letter"] = bool(row_dict.get("letter_pdf_path") or row_dict.get("letter_md_path"))
                 items.append(row_dict)
@@ -1038,16 +1022,10 @@ class Database:
             if not row:
                 return None
 
-            data = dict(row)
-            # Decodificar JSON de habilidades y listas
-            for field in ("matched_skills", "missing_skills", "strengths", "gaps", "alternate_sources"):
-                if data.get(field):
-                    try:
-                        data[field] = json.loads(data[field])
-                    except Exception:
-                        pass
-                else:
-                    data[field] = []
+            data = _decode_row_json_fields(dict(row))
+            for list_field in ("matched_skills", "missing_skills", "strengths", "gaps", "alternate_sources"):
+                if not data.get(list_field):
+                    data[list_field] = []
 
             data["has_cv"] = bool(data.get("cv_pdf_path") or data.get("cv_md_path"))
             data["has_letter"] = bool(data.get("letter_pdf_path") or data.get("letter_md_path"))
@@ -1211,50 +1189,52 @@ class Database:
         """
         Escanea las ofertas reales registradas en SQLite procedentes de los portales
         y extrae dinámicamente las facetas y opciones de filtro disponibles con sus conteos reales.
+        Se adapta a las ofertas visibles (no descartadas por el CV).
         """
         with self._get_connection() as conn:
-            # 1. Portales / Fuentes encontradas en las ofertas
-            portal_labels = {
-                "linkedin": "LinkedIn",
-                "indeed": "Indeed",
-                "glassdoor": "Glassdoor",
-                "tecnoempleo": "Tecnoempleo",
-                "infojobs": "InfoJobs",
-                "google": "Google Jobs",
-                "jobspy": "JobSpy",
-            }
+            has_evals = conn.execute("SELECT 1 FROM evaluations LIMIT 1").fetchone() is not None
+            if has_evals:
+                base_from = "jobs j LEFT JOIN evaluations e ON j.id = e.job_id"
+                base_where = "j.ui_saved = 1 AND j.status != 'discarded' AND (e.fit_level IS NULL OR e.fit_level != 'DESCARTADO')"
+            else:
+                base_from = "jobs j"
+                base_where = "j.ui_saved = 1 AND j.status != 'discarded'"
+
+            constants = _load_shared_constants()
+            portal_sources = constants.get("portal_sources", {})
+            # 1. Portales / Fuentes encontradas en las ofertas visibles
             source_rows = conn.execute(
-                "SELECT source, COUNT(*) as c FROM jobs WHERE ui_saved = 1 GROUP BY source ORDER BY c DESC"
+                f"SELECT j.source, COUNT(*) as c FROM {base_from} WHERE {base_where} GROUP BY j.source ORDER BY c DESC"
             ).fetchall()
             sources = [
                 {
                     "id": r["source"],
-                    "label": portal_labels.get(r["source"].lower(), r["source"].capitalize()),
+                    "label": portal_sources.get(r["source"].lower(), {}).get("label") or r["source"].capitalize(),
                     "count": r["c"],
                 }
                 for r in source_rows
             ]
 
-            # 2. Modalidades encontradas en las ofertas
+            # 2. Modalidades encontradas en las ofertas visibles
             remote_count = conn.execute(
-                """SELECT COUNT(*) FROM jobs WHERE ui_saved = 1 AND (
-                    is_remote = 1 OR LOWER(location) LIKE '%remot%' OR LOWER(title) LIKE '%remot%' 
-                    OR LOWER(description) LIKE '%remot%' OR LOWER(description) LIKE '%teletrabaj%'
+                f"""SELECT COUNT(*) FROM {base_from} WHERE {base_where} AND (
+                    j.is_remote = 1 OR LOWER(j.location) LIKE '%remot%' OR LOWER(j.title) LIKE '%remot%' 
+                    OR LOWER(j.description) LIKE '%remot%' OR LOWER(j.description) LIKE '%teletrabaj%'
                 )"""
             ).fetchone()[0]
 
             hybrid_count = conn.execute(
-                """SELECT COUNT(*) FROM jobs WHERE ui_saved = 1 AND (
-                    LOWER(location) LIKE '%hibrid%' OR LOWER(location) LIKE '%hybrid%' 
-                    OR LOWER(title) LIKE '%hibrid%' OR LOWER(description) LIKE '%hibrid%' 
-                    OR LOWER(description) LIKE '%hybrid%'
+                f"""SELECT COUNT(*) FROM {base_from} WHERE {base_where} AND (
+                    LOWER(j.location) LIKE '%hibrid%' OR LOWER(j.location) LIKE '%hybrid%' 
+                    OR LOWER(j.title) LIKE '%hibrid%' OR LOWER(j.description) LIKE '%hibrid%' 
+                    OR LOWER(j.description) LIKE '%hybrid%'
                 )"""
             ).fetchone()[0]
 
             onsite_count = conn.execute(
-                """SELECT COUNT(*) FROM jobs WHERE ui_saved = 1 AND is_remote = 0 AND NOT (
-                    LOWER(location) LIKE '%remot%' OR LOWER(location) LIKE '%hibrid%' 
-                    OR LOWER(location) LIKE '%hybrid%'
+                f"""SELECT COUNT(*) FROM {base_from} WHERE {base_where} AND j.is_remote = 0 AND NOT (
+                    LOWER(j.location) LIKE '%remot%' OR LOWER(j.location) LIKE '%hibrid%' 
+                    OR LOWER(j.location) LIKE '%hybrid%'
                 )"""
             ).fetchone()[0]
 
@@ -1266,80 +1246,39 @@ class Database:
             if onsite_count > 0:
                 modalities.append({"id": "presencial", "label": "On-site / Presencial", "count": onsite_count})
 
-            # 3. Categorías profesionales encontradas en las ofertas
-            category_defs = [
-                ("desarrollo", "Software Engineering / Desarrollo", ["desarroll", "software", "programad", "developer", "frontend", "backend", "full stack", "fullstack", "react", "python", "java", "node", "c#", ".net", "php", "typescript", "golang"]),
-                ("sistemas", "Cloud, DevOps & Systems", ["sistemas", "cloud", "devops", "sysadmin", "aws", "azure", "gcp", "docker", "kubernetes", "linux", "infraestruct", "redes", "network"]),
-                ("datos", "Data, AI & Machine Learning", ["data", "datos", "inteligencia artificial", "ai", "ia", "machine learning", "deep learning", "power bi", "analytics", "sql", "big data"]),
-                ("ciberseguridad", "Cybersecurity & InfoSec", ["seguridad", "security", "ciber", "soc", "pentest", "auditor", "infosec"]),
-                ("qa", "QA & Software Testing", ["qa", "testing", "calidad", "test", "selenium", "cypress", "automation"]),
-                ("soporte", "IT Support & Helpdesk", ["soporte", "support", "helpdesk", "microinform", "mantenimiento", "incidencias"]),
-                ("gestion", "Product & Project Management", ["project", "product", "scrum", "agile", "gestor", "jefe de proyecto", "consult"]),
-                ("diseno", "UI/UX & Product Design", ["ui", "ux", "design", "diseño", "figma", "frontend design"]),
+            # 3. Categorías y competencias profesionales extraídas directamente de las ofertas visibles
+            skill_counter: collections.Counter = collections.Counter()
+            offer_rows = conn.execute(
+                f"SELECT j.title, j.description, {'e.matched_skills' if has_evals else 'NULL as matched_skills'} FROM {base_from} WHERE {base_where}"
+            ).fetchall()
+
+            geo_stop_words = {"spain", "españa", "espana", "remoto", "remote", "hibrido", "hybrid", "madrid", "barcelona", "sevilla", "valencia", "málaga", "malaga", "bilbao", "zaragoza", "coruña"}
+            for off in offer_rows:
+                raw_skills = off["matched_skills"]
+                if raw_skills:
+                    try:
+                        skills = json.loads(raw_skills) if isinstance(raw_skills, str) else raw_skills
+                        if isinstance(skills, list):
+                            for s in skills:
+                                clean_s = str(s).strip()
+                                if clean_s and len(clean_s) > 1 and clean_s.lower() not in geo_stop_words:
+                                    skill_counter[clean_s] += 1
+                    except Exception:
+                        pass
+
+            categories = [
+                {"id": name.lower(), "label": name, "count": count}
+                for name, count in skill_counter.most_common(25)
             ]
 
-            categories = []
-            for cat_id, cat_label, keywords in category_defs:
-                like_clauses = " OR ".join(f"(LOWER(title) LIKE '%{k}%' OR LOWER(description) LIKE '%{k}%')" for k in keywords)
-                cat_count = conn.execute(
-                    f"SELECT COUNT(*) FROM jobs WHERE ui_saved = 1 AND ({like_clauses})"
-                ).fetchone()[0]
-                if cat_count > 0:
-                    categories.append({"id": cat_id, "label": cat_label, "count": cat_count})
-
-            # 4. Formaciones mínimas encontradas en las ofertas
-            education_defs = [
-                ("grado", "Bachelor's / Grado / Ingeniería", ["grado", "universit", "ingenier", "licenciatura", "bachelor", "degree", "computer science"]),
-                ("fp_superior", "Vocational Degree / FP Superior (DAM/DAW/ASIR)", ["fp superior", "grado superior", "dam", "daw", "asir", "ciclo formativo", "vocational", "associate"]),
-                ("master", "Master's Degree / Postgrado", ["máster", "master", "postgrado", "posgrado"]),
-                ("fp_medio", "Technical Degree / FP Medio", ["fp medio", "grado medio"]),
-                ("eso_bachiller", "High School / Bachillerato", ["bachiller", "secundaria", "eso", "high school"]),
-                ("sin_estudios", "No degree required / Sin especificar", ["sin titulaci", "no requerida", "no degree"]),
-            ]
+            # 4. Formaciones, jornadas y tipos de contrato: sin listas hardcodeadas; solo lo que exista estructurado en el back
             educations = []
-            for edu_id, edu_label, keywords in education_defs:
-                like_clauses = " OR ".join(f"(LOWER(title) LIKE '%{k}%' OR LOWER(description) LIKE '%{k}%')" for k in keywords)
-                edu_count = conn.execute(
-                    f"SELECT COUNT(*) FROM jobs WHERE ui_saved = 1 AND ({like_clauses})"
-                ).fetchone()[0]
-                if edu_count > 0:
-                    educations.append({"id": edu_id, "label": edu_label, "count": edu_count})
-
-            # 5. Jornada laboral
-            schedule_defs = [
-                ("completa", "Full-time / Jornada Completa", ["completa", "full-time", "full time", "40h", "40 horas"]),
-                ("parcial", "Part-time / Media Jornada", ["parcial", "part-time", "part time", "media jornada", "20h"]),
-                ("intensiva", "Intensive Schedule / Intensiva", ["intensiva", "verano", "mañana"]),
-                ("flexible", "Flexible Hours / Flexible", ["flexible", "flexibilidad"]),
-            ]
             schedules = []
-            for sch_id, sch_label, keywords in schedule_defs:
-                like_clauses = " OR ".join(f"(LOWER(title) LIKE '%{k}%' OR LOWER(description) LIKE '%{k}%')" for k in keywords)
-                sch_count = conn.execute(
-                    f"SELECT COUNT(*) FROM jobs WHERE ui_saved = 1 AND ({like_clauses})"
-                ).fetchone()[0]
-                if sch_count > 0:
-                    schedules.append({"id": sch_id, "label": sch_label, "count": sch_count})
-
-            # 6. Tipos de contrato
-            contract_defs = [
-                ("indefinido", "Permanent / Indefinido", ["indefinid", "permanent", "fijo"]),
-                ("temporal", "Fixed-term / Temporal", ["temporal", "contract", "obra y servicio", "sustituci"]),
-                ("practicas", "Internship / Prácticas / Becas", ["prácticas", "practicas", "intern", "internship", "beca", "formación"]),
-                ("freelance", "Freelance / Contractor / Autónomo", ["freelance", "contractor", "autónomo", "autonomo"]),
-            ]
             contract_types = []
-            for ct_id, ct_label, keywords in contract_defs:
-                like_clauses = " OR ".join(f"(LOWER(title) LIKE '%{k}%' OR LOWER(description) LIKE '%{k}%')" for k in keywords)
-                ct_count = conn.execute(
-                    f"SELECT COUNT(*) FROM jobs WHERE ui_saved = 1 AND ({like_clauses})"
-                ).fetchone()[0]
-                if ct_count > 0:
-                    contract_types.append({"id": ct_id, "label": ct_label, "count": ct_count})
 
-            # 7. Estadísticas salariales reales
+            # 7. Estadísticas salariales reales de ofertas visibles
             sal_row = conn.execute(
-                "SELECT MIN(salary_min) as min_sal, MAX(salary_max) as max_sal, salary_currency FROM jobs WHERE ui_saved = 1 AND salary_min > 0"
+                f"SELECT MIN(j.salary_min) as min_sal, MAX(j.salary_max) as max_sal, j.salary_currency FROM {base_from} WHERE {base_where} AND j.salary_min > 0"
             ).fetchone()
             salary_stats = {
                 "min": sal_row["min_sal"] if sal_row and sal_row["min_sal"] else 15000,
@@ -1347,11 +1286,13 @@ class Database:
                 "currency": sal_row["salary_currency"] if sal_row and sal_row["salary_currency"] else "EUR",
             }
 
-            # 8. Top ubicaciones reales encontradas
+            # 8. Top ubicaciones reales encontradas en ofertas visibles
             loc_rows = conn.execute(
-                "SELECT location, COUNT(*) as c FROM jobs WHERE ui_saved = 1 AND location IS NOT NULL AND location != '' GROUP BY location ORDER BY c DESC LIMIT 15"
+                f"SELECT j.location, COUNT(*) as c FROM {base_from} WHERE {base_where} AND j.location IS NOT NULL AND j.location != '' GROUP BY j.location ORDER BY c DESC LIMIT 15"
             ).fetchall()
             top_locations = [{"name": r["location"], "count": r["c"]} for r in loc_rows]
+
+            total_visible = conn.execute(f"SELECT COUNT(*) FROM {base_from} WHERE {base_where}").fetchone()[0]
 
             return {
                 "sources": sources,
@@ -1362,5 +1303,5 @@ class Database:
                 "contract_types": contract_types,
                 "salary_stats": salary_stats,
                 "top_locations": top_locations,
-                "total_jobs": conn.execute("SELECT COUNT(*) FROM jobs WHERE ui_saved = 1").fetchone()[0],
+                "total_jobs": total_visible,
             }

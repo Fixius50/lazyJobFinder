@@ -58,26 +58,38 @@ class ProfileVerifier:
                 if not clean_line:
                     continue
                 # Detección de encabezados de sección de habilidades en cualquier profesión
-                if re.match(r"^(#+|[A-ZÁÉÍÓÚ\s]{3,}:?|\*\*).*(habilidad|competencia|conocimiento|skill|tecnolog|herramienta|aptitud|tools|idioma|destreza)", clean_line, re.IGNORECASE):
+                if re.match(r"^(#+|[A-ZÁÉÍÓÚ\s]{3,}:?|\*\*).*(habilidad|competencia|conocimiento|skill|tecnolog|herramienta|aptitud|tools|idioma|destreza|contenido|módulo|curso|formación)", clean_line, re.IGNORECASE):
                     in_skills_section = True
                     continue
-                elif re.match(r"^(#+|[A-ZÁÉÍÓÚ\s]{3,}:?|\*\*).*(experiencia|educaci|formaci|contacto|sobre m|perfil|proyectos|trayectoria|intereses)", clean_line, re.IGNORECASE):
+                elif re.match(r"^(#+|[A-ZÁÉÍÓÚ\s]{3,}:?|\*\*).*(experiencia|educaci|contacto|sobre m|perfil|proyectos|trayectoria|intereses)", clean_line, re.IGNORECASE):
                     in_skills_section = False
 
                 if in_skills_section:
-                    parts = re.split(r"[,;•|·\*\-\–/\t]", clean_line)
+                    parts = re.split(r"[,;•|·\*\-\–/\t]|\s{2,}", clean_line)
                     for p in parts:
                         cand = p.strip().lower()
+                        cand = re.sub(r"^(nivel|conocimientos en|experiencia en|avanzado|medio|básico|alto|dominio de)\s+", "", cand).strip()
                         if 2 <= len(cand) <= 35 and not cand.isdigit():
-                            cand = re.sub(r"^(nivel|conocimientos en|experiencia en|avanzado|medio|básico|alto|dominio de)\s+", "", cand).strip()
-                            if len(cand) >= 2:
-                                skills.add(cand)
+                            skills.add(cand)
                 else:
                     # Viñetas con términos concisos
                     if clean_line.startswith(("-", "*", "•")):
                         item = clean_line.lstrip("-*• ").strip().lower()
                         if 2 <= len(item) <= 30 and not any(v in item for v in ["responsable", "desarrollé", "trabajé", "durante", "gestioné", "lideré"]):
                             skills.add(item)
+                    elif ":" in clean_line:
+                        parts = clean_line.split(":")
+                        if len(parts) == 2 and 3 <= len(parts[1].strip()) <= 35:
+                            skills.add(parts[1].strip().lower())
+
+            # Si no se detectaron viñetas estructuradas, extraer términos y frases sustantivas clave
+            if len(skills) < 3:
+                key_phrases = re.findall(r"[A-Za-zÁÉÍÓÚáéíóúñÑ0-9\+\#\.\-]{3,}(?:\s+[A-Za-zÁÉÍÓÚáéíóúñÑ0-9\+\#\.\-]{3,}){0,2}", self.cv_text)
+                ignore = {"para", "como", "sobre", "este", "esta", "estos", "estas", "todos", "todas", "desde", "hasta", "entre", "según", "segun", "conforme", "artículo", "servicio", "prevención", "evaluación", "siguientes", "contenidos", "certifica", "conforme", "superado", "éxito", "mancomunado", "grupo"}
+                for phrase in key_phrases:
+                    cand = phrase.strip().lower()
+                    if 3 <= len(cand) <= 35 and cand not in ignore and not cand.isdigit():
+                        skills.add(cand)
 
         return {s for s in skills if s}
 

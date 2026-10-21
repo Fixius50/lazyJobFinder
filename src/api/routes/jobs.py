@@ -28,6 +28,7 @@ class UpdateJobChannelRequest(BaseModel):
 @router.get("")
 def list_jobs(
     search: Optional[str] = Query(None, description="Búsqueda por título, empresa o ubicación"),
+    exclude: Optional[str] = Query(None, description="Términos excluidos separados por comas"),
     location: Optional[str] = Query(None, description="Filtrar por ubicación o país"),
     source: Optional[str] = Query(None, description="Filtrar por portal fuente"),
     status: Optional[str] = Query(None, description="Filtrar por estado de candidatura"),
@@ -54,6 +55,7 @@ def list_jobs(
     db = get_db()
     return db.get_jobs_paginated(
         search=search,
+        exclude=exclude,
         location=location,
         source=source,
         status=status,

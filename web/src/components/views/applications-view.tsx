@@ -70,7 +70,8 @@ export function ApplicationsView() {
       const minSal = minSalaryStep > 0 ? SALARY_STEPS[minSalaryStep]?.value : undefined;
 
       const res = await api.listJobs({
-        search: searchTerm || undefined,
+        search: searchTerm.trim() || undefined,
+        exclude: exclusionTerm.trim() || undefined,
         location: !isAllLocations && locationName ? locationName : undefined,
         source: selectedSource || undefined,
         status: selectedStatus || undefined,
@@ -96,8 +97,13 @@ export function ApplicationsView() {
   };
 
   useEffect(() => {
-    fetchJobs();
+    const timer = setTimeout(() => {
+      fetchJobs();
+    }, 300);
+    return () => clearTimeout(timer);
   }, [
+    searchTerm,
+    exclusionTerm,
     selectedSource,
     selectedStatus,
     minScore,

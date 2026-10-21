@@ -194,6 +194,7 @@ export const api = {
   // 3. Candidaturas
   listJobs: (params: {
     search?: string;
+    exclude?: string;
     location?: string;
     source?: string;
     status?: string;
@@ -218,6 +219,7 @@ export const api = {
   }) => {
     const searchParams = new URLSearchParams();
     if (params.search) searchParams.append("search", params.search);
+    if (params.exclude) searchParams.append("exclude", params.exclude);
     if (params.location) searchParams.append("location", params.location);
     if (params.source) searchParams.append("source", params.source);
     if (params.status) searchParams.append("status", params.status);

@@ -212,7 +212,7 @@ echo   Mostrando actividad de la IA y el backend en tiempo real:
 echo   (Pulsa Ctrl+C para salir y detener los servicios)
 echo =====================================================================
 echo.
-docker compose logs -f lazyjob_app
+docker compose logs -f lazyjobfinder
 goto :STOP_AND_EXIT
 
 :: -----------------------------------------------------------------------------

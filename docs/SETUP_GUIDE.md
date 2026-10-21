@@ -125,7 +125,7 @@ docker compose exec ollama ollama pull qwen2.5:3b-instruct
 
 - **Ver logs del sistema**:
   ```bash
-  docker compose logs -f lazyjob_app
+  docker compose logs -f lazyjobfinder
   ```
 - **Detener los servicios**:
   ```bash

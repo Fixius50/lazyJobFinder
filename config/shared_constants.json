@@ -1,6 +1,8 @@
 {
   "application_statuses": {
     "discovered": { "label": "Descubierta", "badge": "secondary" },
+    "evaluating": { "label": "Evaluando...", "badge": "warning" },
+    "generating_docs": { "label": "Generando documentos...", "badge": "warning" },
     "evaluated": { "label": "Evaluada", "badge": "outline" },
     "notified": { "label": "Notificada", "badge": "warning" },
     "applied": { "label": "Postulada", "badge": "default" },

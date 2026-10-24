@@ -4,6 +4,8 @@
 
 export const APPLICATION_STATUSES = {
   discovered: { label: "Descubierta", badge: "secondary" as const },
+  evaluating: { label: "Evaluando...", badge: "warning" as const },
+  generating_docs: { label: "Generando documentos...", badge: "warning" as const },
   evaluated: { label: "Evaluada", badge: "outline" as const },
   notified: { label: "Notificada", badge: "warning" as const },
   applied: { label: "Postulada", badge: "default" as const },

@@ -181,6 +181,7 @@ class JobPipelineRunner:
                         # Ceder brevemente el control al event loop para responder peticiones HTTP (healthcheck/UI)
                         await asyncio.sleep(0.02)
                         try:
+                            self.db.update_job_status(job["id"], "evaluating")
                             eval_res = await asyncio.to_thread(self.scoring_engine.evaluate, job)
                             score = eval_res.get("score", 0)
                             telegram_status = 0
@@ -193,6 +194,7 @@ class JobPipelineRunner:
 
                                     # Si el usuario subió un CV o si tenemos el perfil cargado en profile.yaml
                                     if cv_status.get("has_cv") or bool(self.profile):
+                                        self.db.update_job_status(job["id"], "generating_docs")
                                         # 3. Adaptación honesta y validada de CV y Carta de Presentación
                                         cv_md, diff_audit = await asyncio.to_thread(self.cv_tailorer.tailor, job, eval_res)
                                         letter_md = await asyncio.to_thread(self.letter_generator.generate, job, eval_res)
@@ -249,6 +251,7 @@ class JobPipelineRunner:
                         except Exception as eval_err:
                             logger.error("Error evaluando oferta ID %d: %s", job.get("id"), eval_err)
                             self.db.log_event("ERROR", "evaluator", f"Fallo evaluando oferta ID {job.get('id')}: {str(eval_err)}")
+                            self.db.update_job_status(job.get("id"), "discovered")
                             return None
 
                 eval_tasks = [_evaluate_and_process_job(job) for job in jobs_to_evaluate]

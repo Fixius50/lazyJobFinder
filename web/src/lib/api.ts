@@ -53,6 +53,7 @@ async function request<T>(endpoint: string, options: RequestOptions = {}): Promi
   const fetchOptions: RequestInit = {
     ...options,
     headers,
+    cache: "no-store",
     signal: options.signal || controller.signal,
   };
 

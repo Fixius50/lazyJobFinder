@@ -934,9 +934,6 @@ class Database:
         if status:
             where_clauses.append("j.status = ?")
             params.append(status)
-        else:
-            # Por defecto, ocultar visualmente ofertas que no coinciden con el CV aportado (descartadas)
-            where_clauses.append("(j.status != 'discarded' AND (e.fit_level IS NULL OR e.fit_level != 'DESCARTADO'))")
 
         if min_score is not None:
             where_clauses.append("e.score >= ?")
@@ -1288,12 +1285,8 @@ class Database:
 
         with self._get_connection() as conn:
             has_evals = conn.execute("SELECT 1 FROM evaluations LIMIT 1").fetchone() is not None
-            if has_evals:
-                base_from = "jobs j LEFT JOIN evaluations e ON j.id = e.job_id"
-                base_where = "j.ui_saved = 1 AND j.status != 'discarded' AND (e.fit_level IS NULL OR e.fit_level != 'DESCARTADO')"
-            else:
-                base_from = "jobs j"
-                base_where = "j.ui_saved = 1 AND j.status != 'discarded'"
+            base_from = "jobs j LEFT JOIN evaluations e ON j.id = e.job_id" if has_evals else "jobs j"
+            base_where = "j.ui_saved = 1"
 
             clean_target_cv = str(target_cv or "").strip()
             if clean_target_cv and clean_target_cv.lower() not in ("none", "ninguno", "all", "todas", "*", ""):

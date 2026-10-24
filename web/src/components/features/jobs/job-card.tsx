@@ -8,6 +8,7 @@ import {
   ExternalLink,
   Download,
   Eye,
+  RefreshCw,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -25,8 +26,18 @@ interface JobCardProps {
 
 export function JobCard({ job, onOpenDetail }: JobCardProps) {
   const sourceMeta = PORTAL_SOURCES[job.source as keyof typeof PORTAL_SOURCES];
+  const isEvaluating = job.status === "evaluating";
+  const isGeneratingDocs = job.status === "generating_docs";
 
   const getScoreBadge = (score?: number | null) => {
+    if (isEvaluating) {
+      return (
+        <Badge variant="warning" className="text-3xs py-0 px-1.5 font-mono animate-pulse flex items-center gap-1">
+          <RefreshCw className="h-2.5 w-2.5 animate-spin" />
+          Evaluando...
+        </Badge>
+      );
+    }
     if (score === null || score === undefined) {
       return (
         <Badge variant="secondary" className="text-3xs py-0 px-1.5 font-mono">
@@ -56,6 +67,22 @@ export function JobCard({ job, onOpenDetail }: JobCardProps) {
   };
 
   const getStatusBadge = (status: string) => {
+    if (status === "evaluating") {
+      return (
+        <Badge variant="warning" className="text-3xs py-0 px-1.5 animate-pulse flex items-center gap-1">
+          <RefreshCw className="h-2.5 w-2.5 animate-spin" />
+          Evaluando...
+        </Badge>
+      );
+    }
+    if (status === "generating_docs") {
+      return (
+        <Badge variant="warning" className="text-3xs py-0 px-1.5 animate-pulse flex items-center gap-1">
+          <RefreshCw className="h-2.5 w-2.5 animate-spin" />
+          Generando docs...
+        </Badge>
+      );
+    }
     const meta = APPLICATION_STATUSES[status as ApplicationStatusKey];
     if (meta) {
       return (
@@ -131,7 +158,7 @@ export function JobCard({ job, onOpenDetail }: JobCardProps) {
         {/* Pie de la Tarjeta: Acciones de descarga de documentos y botón de detalles */}
         <div className="pt-2 border-t border-border/40 flex items-center justify-between gap-1.5">
           <div className="flex items-center gap-1">
-            {job.has_cv && (
+            {job.has_cv ? (
               <Button
                 size="sm"
                 variant="ghost"
@@ -142,8 +169,14 @@ export function JobCard({ job, onOpenDetail }: JobCardProps) {
                 <Download className="h-3 w-3" />
                 <span>CV</span>
               </Button>
-            )}
-            {job.has_letter && (
+            ) : isGeneratingDocs ? (
+              <span className="text-3xs text-amber-500/90 font-medium flex items-center gap-1 animate-pulse px-1">
+                <RefreshCw className="h-2.5 w-2.5 animate-spin" />
+                Adaptando CV...
+              </span>
+            ) : null}
+
+            {job.has_letter ? (
               <Button
                 size="sm"
                 variant="ghost"
@@ -154,7 +187,12 @@ export function JobCard({ job, onOpenDetail }: JobCardProps) {
                 <Download className="h-3 w-3" />
                 <span>Carta</span>
               </Button>
-            )}
+            ) : isGeneratingDocs ? (
+              <span className="text-3xs text-blue-400 font-medium flex items-center gap-1 animate-pulse px-1">
+                <RefreshCw className="h-2.5 w-2.5 animate-spin" />
+                Carta...
+              </span>
+            ) : null}
           </div>
 
           <Button

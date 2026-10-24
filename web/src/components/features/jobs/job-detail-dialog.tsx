@@ -31,6 +31,14 @@ export function JobDetailDialog({
   onUpdateStatus,
 }: JobDetailDialogProps) {
   const getScoreBadge = (score?: number | null) => {
+    if (jobDetail?.status === "evaluating") {
+      return (
+        <Badge variant="warning" className="animate-pulse flex items-center gap-1">
+          <RefreshCw className="h-3 w-3 animate-spin" />
+          Evaluando...
+        </Badge>
+      );
+    }
     if (score === null || score === undefined) {
       return <Badge variant="secondary">Sin evaluar</Badge>;
     }

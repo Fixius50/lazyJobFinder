@@ -317,6 +317,7 @@ class ScoringEngine:
             self.db.update_job_status(job["id"], "discovered")
             return no_cv_eval
 
+        self.db.update_job_status(job["id"], "evaluating")
         passes, reason, meta = self.prefilter(job)
         if not passes:
             logger.info("Oferta ID %d descartada en pre-filtro: %s", job["id"], reason)

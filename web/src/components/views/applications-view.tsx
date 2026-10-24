@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import {
   Briefcase,
   RefreshCw,
@@ -35,6 +35,11 @@ export function ApplicationsView() {
   const [selectedStatus, setSelectedStatus] = useState<string>("");
   const [minScore, setMinScore] = useState<number>(0);
   const [currentPage, setCurrentPage] = useState<number>(1);
+  const currentPageRef = useRef<number>(currentPage);
+
+  useEffect(() => {
+    currentPageRef.current = currentPage;
+  }, [currentPage]);
 
   // Filtros Avanzados y por Dimensiones
   const [locationName, setLocationName] = useState<string>("");
@@ -101,16 +106,20 @@ export function ApplicationsView() {
     // Comprobación inicial y monitorización del estado de búsqueda
     pollSearchStatus();
     const interval = setInterval(async () => {
-      await pollSearchStatus();
-      fetchJobs(true);
+      const isRunning = await pollSearchStatus();
+      if (isRunning) {
+        // Refrescar silenciosamente conservando exactamente la página activa en tiempo real
+        fetchJobs(true, currentPageRef.current);
+      }
     }, 3000);
     return () => clearInterval(interval);
   }, []);
 
-  const fetchJobs = async (silent: boolean = false) => {
+  const fetchJobs = async (silent: boolean = false, pageOverride?: number) => {
     if (!silent) {
       setLoading(true);
     }
+    const targetPage = pageOverride ?? currentPageRef.current;
     try {
       const expYears = minExperienceStep > 0 ? EXPERIENCE_STEPS[minExperienceStep]?.years : undefined;
       const minSal = minSalaryStep > 0 ? SALARY_STEPS[minSalaryStep]?.value : undefined;
@@ -129,7 +138,7 @@ export function ApplicationsView() {
         min_salary: minSal,
         schedules: selectedSchedules.length > 0 ? selectedSchedules : undefined,
         contract_types: selectedContractTypes.length > 0 ? selectedContractTypes : undefined,
-        page: currentPage,
+        page: targetPage,
         page_size: 20,
         sort_by: "created_at",
         sort_order: "desc",
@@ -149,6 +158,12 @@ export function ApplicationsView() {
         setLoading(false);
       }
     }
+  };
+
+  const handlePageChange = (newPage: number) => {
+    currentPageRef.current = newPage;
+    setCurrentPage(newPage);
+    fetchJobs(false, newPage);
   };
 
   useEffect(() => {
@@ -523,7 +538,7 @@ export function ApplicationsView() {
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                    onClick={() => handlePageChange(Math.max(1, currentPage - 1))}
                     disabled={currentPage <= 1 || loading}
                     className="h-8 px-2"
                   >
@@ -535,7 +550,7 @@ export function ApplicationsView() {
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() => setCurrentPage((p) => Math.min(jobsData.total_pages, p + 1))}
+                    onClick={() => handlePageChange(Math.min(jobsData.total_pages, currentPage + 1))}
                     disabled={currentPage >= jobsData.total_pages || loading}
                     className="h-8 px-2"
                   >

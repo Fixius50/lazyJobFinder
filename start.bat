@@ -95,8 +95,8 @@ if %ERRORLEVEL% neq 0 (
         docker info >nul 2>&1
         if !ERRORLEVEL! neq 0 (
             set /a DOCKER_RETRY+=1
-            if !DOCKER_RETRY! lss 25 (
-                echo       Esperando a Docker Desktop... [!DOCKER_RETRY!/25]
+            if !DOCKER_RETRY! lss 35 (
+                echo       Esperando a que el motor Docker Desktop termine de iniciar... [!DOCKER_RETRY!/35]
                 goto :WAIT_DOCKER
             ) else (
                 echo.
@@ -109,7 +109,12 @@ if %ERRORLEVEL% neq 0 (
             echo   [OK] Motor de Docker conectado y listo.
         )
     ) else (
-        echo   [ERROR] No se encontro Docker Desktop. Por favor instalalo o inicialo manualmente.
+        echo.
+        echo   [ERROR] No se encontro Docker Desktop instalado en las rutas habituales.
+        echo           lazyJobFinder ejecuta la IA y el backend dentro de Docker para que no
+        echo           tengas que configurar Python ni dependencias complejas en tu equipo.
+        echo           Por favor, instala Docker Desktop desde: https://www.docker.com/products/docker-desktop/
+        echo.
         exit /b 1
     )
 ) else (
@@ -166,6 +171,7 @@ if %ERRORLEVEL% neq 0 (
 
 :: Comprobar modelo de IA en Ollama previamente antes de descargar
 echo --^> Verificando modelo de IA en Ollama...
+timeout /t 3 /nobreak >nul
 docker exec lazyjob_ollama ollama list 2>nul | findstr /i "qwen2.5:3b-instruct" >nul 2>&1
 if %ERRORLEVEL% equ 0 (
     echo   [OK] Modelo qwen2.5:3b-instruct verificado y disponible en Ollama.
@@ -225,6 +231,15 @@ echo =====================================================================
 echo   Generando Distribucion e Instaladores (Windows y Linux)
 echo =====================================================================
 echo.
+call :CHECK_PREREQS
+if %ERRORLEVEL% neq 0 (
+    echo.
+    echo   [ERROR] No se puede empaquetar sin Docker operativo.
+    if "%CLI_INVOKED%"=="1" goto :EXIT
+    pause
+    goto :MENU
+)
+
 python packaging\build_release.py %*
 echo.
 if "%CLI_INVOKED%"=="1" goto :EXIT

@@ -82,3 +82,39 @@ Este documento establece las normas obligatorias de desarrollo, arquitectura y c
 - **Búsqueda únicamente al subir**: El rastreo automático en portales se ejecuta exclusivamente al subir un nuevo archivo CV.
 - **Cambio de CV sin re-escaneo**: Al seleccionar en el desplegable un CV ya existente, no se realiza ninguna llamada externa a portales; la interfaz filtra localmente las ofertas que ya se trajeron para ese CV (`WHERE cv_filename = :cv`).
 - **Eliminación en cascada**: Al borrar un CV, se eliminan del almacenamiento local tanto el archivo físico como todas las ofertas vinculadas a dicho CV en la base de datos SQLite.
+
+---
+
+## 13. Centralización Estricta de `__pycache__`
+- **Prefijo unificado**: Todo el bytecode de Python se centraliza obligatoriamente en `.cache/pycache/` a través de la variable de entorno `PYTHONPYCACHEPREFIX` (definida en `start.bat`, `docker-compose.yml`, `Dockerfile` y reforzada en `sitecustomize.py`).
+- **Cero subcarpetas en el árbol**: Queda terminantemente prohibido generar o commitear subdirectorios `__pycache__` dispersos en `src/`, `tests/` o cualquier otra carpeta del repositorio.
+
+---
+
+## 14. Unidades Relativas y Alias Exclusivos en la Interfaz (Frontend)
+- **Cero píxeles arbitrarios**: En CSS y Tailwind queda prohibido el uso de valores `px` fijos en tipografía y dimensiones principales (ej. `text-[10px]`, `text-[11px]`). Deben emplearse clases relativas tipadas (`text-2xs`, `text-3xs`, `rem`, `em`, `dvh`, `vw`, `clamp()`).
+- **Alias absolutos `@/...`**: Todas las importaciones dentro del frontend (`web/src`) deben realizarse mediante el alias `@/...`. Quedan terminantemente prohibidas las rutas relativas (`./` o `../`).
+
+---
+
+## 15. Prohibición de Archivos Puente, Pasarela o Redundantes
+- **Cero proxies vacíos**: No se deben crear archivos o directorios cuya única finalidad sea re-exportar símbolos, hacer de puente de transición o redirigir rutas mediante llamadas estáticas (como `redirect("/")`).
+- **Consolidación modular**: Los tipos, utilidades y componentes deben residir directamente en sus módulos funcionales (`web/src/types/index.ts`, `web/src/lib/`, `web/src/components/features/`).
+
+---
+
+## 16. CSS Moderno y Centralizado
+- **Aprovechamiento de estándares web modernos**: La hoja de estilos principal (`globals.css`) se estructura mediante variables CSS fluidas, funciones nativas (`clamp()`), mezcla de color en tiempo de ejecución (`color-mix(in srgb, ...)`), consultas de soporte condicional (`@supports (backdrop-filter: blur(...))`) y respeto por accesibilidad (`@media (prefers-reduced-motion: reduce)`).
+
+---
+
+## 17. Cero Mocks, Datos Simulados o Fallbacks Silenciosos
+- **Transparencia total**: Toda la información y estados presentados en la interfaz de usuario proceden exclusivamente de la base de datos local SQLite y de los endpoints de FastAPI en tiempo real.
+- **Prohibido enmascarar errores**: Si el backend, Docker o la red no responden, la interfaz jamás debe mostrar datos simulados o mocks; debe mostrar explícitamente el estado de error, informar del fallo de conexión y proporcionar un mecanismo de reintento.
+
+---
+
+## 18. Arquitectura de Página Única y Terminal en Ventana Modal
+- **Foco absoluto en Candidaturas**: La pantalla principal es una Single Page Application en la ruta raíz `/` orientada exclusivamente a la gestión y revisión de ofertas de empleo.
+- **Terminal en Modal**: La monitorización de logs de Docker (app y Ollama) y del pipeline de búsqueda se gestiona mediante un diálogo modal interactivo (`TerminalLogsDialog`) accesible desde la cabecera, eliminando conmutadores de páginas principales o pestañas secundarias innecesarias.
+

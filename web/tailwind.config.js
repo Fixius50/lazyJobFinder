@@ -44,6 +44,10 @@ module.exports = {
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
       },
+      fontSize: {
+        "2xs": ["0.6875rem", { lineHeight: "0.875rem" }],
+        "3xs": ["0.625rem", { lineHeight: "0.75rem" }],
+      },
     },
   },
   plugins: [],

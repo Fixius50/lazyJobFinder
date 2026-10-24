@@ -27,7 +27,7 @@ export function Tabs({ value, onValueChange, items, className }: TabsProps) {
             {tab.badge !== undefined && (
               <span
                 className={cn(
-                  "ml-1.5 rounded px-1.5 py-0.2 text-[10px]",
+                  "ml-1.5 rounded px-1.5 py-0.5 text-3xs",
                   isActive ? "bg-primary/10 text-primary" : "bg-muted-foreground/15 text-muted-foreground"
                 )}
               >

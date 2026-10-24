@@ -252,7 +252,7 @@ export function CvManager({ onCvChanged, className = "" }: CvManagerProps) {
       {/* Mensaje de confirmación o alerta tras subir o eliminar */}
       {uploadMessage && !isUploading && (
         <div
-          className={`absolute top-full left-0 right-0 mt-1 z-30 p-1.5 px-2.5 rounded-md text-[11px] flex items-center justify-between gap-1.5 shadow-md ${
+          className={`absolute top-full left-0 right-0 mt-1 z-30 p-1.5 px-2.5 rounded-md text-2xs flex items-center justify-between gap-1.5 shadow-md ${
             uploadMessage.error
               ? "bg-destructive/15 text-destructive border border-destructive/20"
               : "bg-emerald-500/15 text-emerald-400 border border-emerald-500/20"
@@ -288,12 +288,12 @@ export function CvManager({ onCvChanged, className = "" }: CvManagerProps) {
           </div>
         ) : cvPreviewData ? (
           <div className="space-y-3 max-h-[70dvh] overflow-y-auto pr-1 text-xs">
-            <div className="flex items-center justify-between p-2.5 rounded bg-muted/40 border font-mono text-[11px]">
+            <div className="flex items-center justify-between p-2.5 rounded bg-muted/40 border font-mono text-2xs">
               <span>Extensión: <strong>{cvPreviewData.extension}</strong></span>
               <span>Palabras: <strong>{cvPreviewData.word_count}</strong></span>
               <span>Caracteres: <strong>{cvPreviewData.char_count}</strong></span>
             </div>
-            <div className="p-3 rounded bg-muted/20 border font-mono text-[11px] whitespace-pre-wrap max-h-96 overflow-y-auto leading-relaxed">
+            <div className="p-3 rounded bg-muted/20 border font-mono text-2xs whitespace-pre-wrap max-h-96 overflow-y-auto leading-relaxed">
               {cvPreviewData.text_preview}
             </div>
           </div>

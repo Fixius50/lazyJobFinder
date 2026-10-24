@@ -302,7 +302,7 @@ export function LocationMap({
 
       {/* Selector de radio de distancia */}
       <div className="flex items-center gap-1.5 overflow-x-auto py-0.5 text-xs">
-        <span className="text-[11px] text-muted-foreground flex items-center gap-1 shrink-0">
+        <span className="text-2xs text-muted-foreground flex items-center gap-1 shrink-0">
           <Sliders className="h-3 w-3" /> Radio:
         </span>
         <div className="flex items-center gap-1 flex-nowrap">
@@ -316,7 +316,7 @@ export function LocationMap({
                   onRadiusChange(step.value);
                   onToggleAllLocations(false);
                 }}
-                className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors whitespace-nowrap border ${
+                className={`px-2 py-0.5 rounded text-2xs font-medium transition-colors whitespace-nowrap border ${
                   isSelected
                     ? "bg-primary text-primary-foreground border-primary shadow-sm"
                     : "bg-muted/50 hover:bg-muted border-border/40 text-muted-foreground hover:text-foreground"
@@ -335,7 +335,7 @@ export function LocationMap({
         className={`w-full ${height} rounded-lg overflow-hidden border border-border/50 relative shadow-inner z-0`}
       />
 
-      <div className="text-[10px] text-muted-foreground flex items-center justify-between px-1">
+      <div className="text-3xs text-muted-foreground flex items-center justify-between px-1">
         <span>Haz clic en cualquier punto del mundo o arrastra el marcador para definir el centro.</span>
         {!isAllLocations && radiusKm > 0 && (
           <span className="font-mono text-primary font-semibold">

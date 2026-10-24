@@ -120,15 +120,15 @@ export function InfoTooltip({ content, className = "" }: InfoTooltipProps) {
               width: `${coords.maxWidth}px`,
               zIndex: 99999,
             }}
-            className="pointer-events-none rounded-lg bg-zinc-900 border border-zinc-700 p-2.5 text-[11px] font-normal leading-relaxed text-zinc-100 shadow-2xl animate-in fade-in zoom-in-95 duration-150"
+            className="pointer-events-none rounded-lg bg-zinc-900 border border-zinc-700 p-2.5 text-2xs font-normal leading-relaxed text-zinc-100 shadow-2xl animate-in fade-in zoom-in-95 duration-150"
           >
             {content}
             <span
               style={{ left: `${coords.arrowLeft}px` }}
               className={`absolute -translate-x-1/2 border-4 border-transparent ${
                 coords.placement === "bottom"
-                  ? "bottom-full -mb-[1px] border-b-zinc-900"
-                  : "top-full -mt-[1px] border-t-zinc-900"
+                  ? "bottom-full -mb-px border-b-zinc-900"
+                  : "top-full -mt-px border-t-zinc-900"
               }`}
             />
           </div>,

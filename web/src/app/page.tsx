@@ -2,8 +2,6 @@
 
 import React, { useState, useEffect } from "react";
 import {
-  Briefcase,
-  Settings,
   Cpu,
   Database,
   Bell,
@@ -12,34 +10,19 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ApplicationsView } from "@/components/views/applications-view";
-import { SettingsAndServicesView } from "@/components/views/settings-and-services-view";
+import { TerminalLogsDialog } from "@/components/features/terminal/terminal-logs-dialog";
 import { NotificationChannelsDialog } from "@/components/features/notifications/notification-channels-dialog";
 import { StatusGuideDialog } from "@/components/features/jobs/status-guide-dialog";
 import { PreflightResponse, api } from "@/lib/api";
 
-type TabKey = "applications" | "settings";
-
 export default function UnifiedDashboard() {
-  const [activeTab, setActiveTab] = useState<TabKey>("applications");
   const [pipelineRunning, setPipelineRunning] = useState<boolean>(false);
   const [preflight, setPreflight] = useState<PreflightResponse | null>(null);
+  const [terminalOpen, setTerminalOpen] = useState<boolean>(false);
   const [notificationsOpen, setNotificationsOpen] = useState<boolean>(false);
   const [statusGuideOpen, setStatusGuideOpen] = useState<boolean>(false);
 
-  // Cargar tab desde la URL si existe (?tab=...)
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      const params = new URLSearchParams(window.location.search);
-      const tabParam = params.get("tab");
-      if (tabParam === "search" || tabParam === "applications") {
-        setActiveTab("applications");
-      } else if (tabParam === "docker" || tabParam === "settings") {
-        setActiveTab("settings");
-      }
-    }
-  }, []);
-
-  // Monitorización periódica del pipeline y preflight con aborto ante fallos
+  // Monitorización periódica del pipeline y preflight con detección de caídas
   useEffect(() => {
     let failedAttempts = 0;
     const checkPipeline = async () => {
@@ -51,7 +34,6 @@ export default function UnifiedDashboard() {
       } catch (err) {
         failedAttempts += 1;
         console.warn(`[Pipeline Monitor] Fallo al consultar estado (${failedAttempts}/2):`, err);
-        // Si hay 2 fallos consecutivos de red o socket, abortar inmediatamente cualquier animación de escaneo
         if (failedAttempts >= 2) {
           setPipelineRunning(false);
         }
@@ -62,31 +44,9 @@ export default function UnifiedDashboard() {
     return () => clearInterval(interval);
   }, []);
 
-  const handleTabChange = (tab: TabKey) => {
-    setActiveTab(tab);
-    if (typeof window !== "undefined") {
-      const url = new URL(window.location.href);
-      url.searchParams.set("tab", tab);
-      window.history.replaceState({}, "", url.toString());
-    }
-  };
-
-  const tabsConfig = [
-    {
-      key: "applications" as TabKey,
-      label: "Candidaturas",
-      icon: Briefcase,
-    },
-    {
-      key: "settings" as TabKey,
-      label: "Servicios y Logs",
-      icon: Terminal,
-    },
-  ];
-
   return (
     <div className="flex flex-col min-h-[100dvh] w-full">
-      {/* Barra de Navegación Superior Unificada (Sticky, Fluida y Separación Máxima 5vw) */}
+      {/* Barra de Navegación Superior Unificada */}
       <header className="sticky top-0 z-40 w-full border-b bg-background/80 backdrop-blur-md px-4 sm:px-[3vw] lg:px-[5vw]">
         <div className="flex h-14 sm:h-16 items-center justify-between gap-3 w-full">
           {/* Logo y Marca */}
@@ -99,36 +59,13 @@ export default function UnifiedDashboard() {
             </span>
           </div>
 
-          {/* Selector de Pestañas Central */}
-          <nav className="flex items-center gap-1 bg-muted/60 p-1 rounded-xl border max-w-full overflow-x-auto">
-            {tabsConfig.map((t) => {
-              const Icon = t.icon;
-              const isActive = activeTab === t.key;
-              return (
-                <button
-                  key={t.key}
-                  type="button"
-                  onClick={() => handleTabChange(t.key)}
-                  className={`flex items-center gap-1.5 px-3 sm:px-4 py-1.5 rounded-lg text-xs font-medium transition-all whitespace-nowrap ${
-                    isActive
-                      ? "bg-background text-foreground shadow-sm font-semibold ring-1 ring-border/50"
-                      : "text-muted-foreground hover:text-foreground hover:bg-background/40"
-                  }`}
-                >
-                  <Icon className={`h-3.5 w-3.5 shrink-0 ${isActive ? "text-primary" : "text-muted-foreground"}`} />
-                  <span>{t.label}</span>
-                </button>
-              );
-            })}
-          </nav>
-
-          {/* Diagnóstico Preflight Global y Acción de Escaneo */}
+          {/* Acciones del Header: Diagnóstico, Terminal, Notificaciones y Guía */}
           <div className="flex items-center gap-2.5 shrink-0">
             {/* Indicadores de Diagnóstico: Motor Ollama y SQLite WAL */}
             <div className="hidden lg:flex items-center gap-2">
               {/* Motor Ollama */}
               <div
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors ${
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-2xs font-medium border transition-colors ${
                   preflight?.ollama?.healthy
                     ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
                     : "bg-rose-500/10 text-rose-400 border-rose-500/20"
@@ -150,7 +87,7 @@ export default function UnifiedDashboard() {
 
               {/* SQLite WAL */}
               <div
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors ${
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-2xs font-medium border transition-colors ${
                   preflight?.database?.healthy
                     ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
                     : "bg-rose-500/10 text-rose-400 border-rose-500/20"
@@ -170,6 +107,18 @@ export default function UnifiedDashboard() {
                 />
               </div>
             </div>
+
+            {/* Botón de Terminal / Consola de Registros en Modal */}
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setTerminalOpen(true)}
+              className="h-8 px-2 sm:px-2.5 text-xs flex items-center gap-1.5 shadow-sm"
+              title="Abrir Terminal y Registros del Pipeline en Vivo"
+            >
+              <Terminal className="h-3.5 w-3.5 text-primary" />
+              <span className="hidden sm:inline">Terminal</span>
+            </Button>
 
             {/* Botón de Campana para Canales de Notificación */}
             <Button
@@ -199,6 +148,12 @@ export default function UnifiedDashboard() {
         </div>
       </header>
 
+      {/* Modal Desplegable de Terminal y Logs */}
+      <TerminalLogsDialog
+        open={terminalOpen}
+        onOpenChange={setTerminalOpen}
+      />
+
       {/* Modal Desplegable de Canales de Notificación */}
       <NotificationChannelsDialog
         open={notificationsOpen}
@@ -211,12 +166,9 @@ export default function UnifiedDashboard() {
         onOpenChange={setStatusGuideOpen}
       />
 
-      {/* Contenido Principal Fluido con Separación Máxima de 5vw de los Bordes */}
+      {/* Contenido Principal: Exclusivamente Vista de Candidaturas */}
       <main className="flex-1 w-full px-4 sm:px-[3vw] lg:px-[5vw] py-4 sm:py-6">
-        <div className="w-full transition-opacity duration-200">
-          {activeTab === "applications" && <ApplicationsView />}
-          {activeTab === "settings" && <SettingsAndServicesView />}
-        </div>
+        <ApplicationsView />
       </main>
     </div>
   );

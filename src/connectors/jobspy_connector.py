@@ -1,6 +1,7 @@
 """Conector modular con aislamiento de fallos por portal para JobSpy (Indeed, LinkedIn, Glassdoor, Google Jobs)."""
 
 import logging
+import random
 import time
 from typing import Dict, List, Tuple
 
@@ -52,8 +53,8 @@ class JobSpyConnector(BaseConnector):
             for term in search_terms:
                 try:
                     logger.debug("JobSpy consultando portal '%s' para término '%s'...", site, term)
-                    # Pausa preventiva entre peticiones para reducir la probabilidad de bloqueo
-                    time.sleep(1.5)
+                    # Pausa preventiva con jitter aleatorio para reducir la probabilidad de bloqueo anti-bot
+                    time.sleep(random.uniform(1.8, 3.2))
 
                     kwargs = {
                         "site_name": [site],

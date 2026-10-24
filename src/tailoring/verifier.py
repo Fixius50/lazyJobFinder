@@ -47,7 +47,7 @@ class ProfileVerifier:
             "como", "sobre", "entre", "desde", "hasta", "según", "segun", "conforme", "artículo", "articulo",
             "ley", "decreto", "servicio", "prevención", "evaluación", "evaluacion", "siguientes", "contenidos",
             "certifica", "certificado", "superado", "éxito", "exito", "mancomunado", "grupo", "adecco",
-            "alumno", "roberto", "monedero", "alonso", "programa", "formación", "formacion", "curso",
+            "alumno", "estudiante", "programa", "formación", "formacion", "curso",
             "genérico", "generico", "lugares", "equipos", "trabajo", "trabajos", "psicosociales", "físicos",
             "fisicos", "químicos", "quimicos", "biológicos", "biologicos", "pvd", "especialidad", "riesgos",
             "laborales", "madrid", "pozuelo", "alarcon", "alarcón", "barcelona", "valencia", "sevilla", "bilbao",

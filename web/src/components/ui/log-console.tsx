@@ -2,10 +2,10 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import { Terminal, RefreshCw, Trash2, ArrowDown, Wifi, WifiOff } from "lucide-react";
-import { Button } from "./button";
-import { Badge } from "./badge";
-import { Tabs } from "./tabs";
-import { InfoTooltip } from "./info-tooltip";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Tabs } from "@/components/ui/tabs";
+import { InfoTooltip } from "@/components/ui/info-tooltip";
 import { SystemLogItem, api } from "@/lib/api";
 
 interface LogConsoleProps {
@@ -122,12 +122,12 @@ export function LogConsole({ initialLogs = [], height = "h-80" }: LogConsoleProp
           <span className="font-semibold text-zinc-200">Consola</span>
           <InfoTooltip content="Transmisión continua de eventos del pipeline, evaluador Ollama y contenedores Docker." />
           {isConnected ? (
-            <Badge variant="outline" className="border-emerald-500/40 text-emerald-400 text-[10px] py-0 px-1.5 flex items-center gap-1">
+            <Badge variant="outline" className="border-emerald-500/40 text-emerald-400 text-3xs py-0 px-1.5 flex items-center gap-1">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
               SSE En vivo
             </Badge>
           ) : (
-            <Badge variant="outline" className="border-zinc-700 text-zinc-400 text-[10px] py-0 px-1.5 flex items-center gap-1">
+            <Badge variant="outline" className="border-zinc-700 text-zinc-400 text-3xs py-0 px-1.5 flex items-center gap-1">
               <WifiOff className="h-3 w-3" /> Polling
             </Badge>
           )}
@@ -138,7 +138,7 @@ export function LogConsole({ initialLogs = [], height = "h-80" }: LogConsoleProp
           <Tabs
             value={activeTab}
             onValueChange={setActiveTab}
-            className="h-7 bg-zinc-800/80 text-[11px]"
+            className="h-7 bg-zinc-800/80 text-2xs"
             items={[
               { label: "Todo", value: "all" },
               { label: "Pipeline", value: "pipeline" },
@@ -188,7 +188,7 @@ export function LogConsole({ initialLogs = [], height = "h-80" }: LogConsoleProp
         className={`${height} overflow-y-auto p-4 space-y-1.5 select-text leading-relaxed`}
       >
         {activeTab === "container_ollama" || activeTab === "container_app" ? (
-          <pre className="whitespace-pre-wrap text-zinc-300 font-mono text-[11px]">
+          <pre className="whitespace-pre-wrap text-zinc-300 font-mono text-2xs">
             {containerRawLogs || "Esperando registros del contenedor..."}
           </pre>
         ) : logs.length === 0 ? (
@@ -197,9 +197,9 @@ export function LogConsole({ initialLogs = [], height = "h-80" }: LogConsoleProp
           </div>
         ) : (
           logs.map((log) => (
-            <div key={log.id} className="flex items-start space-x-2 text-[11px] hover:bg-zinc-900/40 px-1 py-0.5 rounded">
+            <div key={log.id} className="flex items-start space-x-2 text-2xs hover:bg-zinc-900/40 px-1 py-0.5 rounded">
               <span className="text-zinc-500 select-none shrink-0 font-normal">{log.timestamp}</span>
-              <span className={`shrink-0 uppercase px-1 rounded text-[10px] ${getLevelColor(log.level)}`}>
+              <span className={`shrink-0 uppercase px-1 rounded text-3xs ${getLevelColor(log.level)}`}>
                 [{log.level}]
               </span>
               <span className="text-zinc-400 shrink-0 select-none">[{log.source}]</span>

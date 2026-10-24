@@ -106,7 +106,7 @@ class ScoringEngine:
         Analiza deterministamente la oferta distinguiendo:
         - Requisitos obligatorios vs deseables/valorables.
         - Indicios de seniority en título y contexto.
-        - Coincidencias de tecnologías del ciclo DAM.
+        - Coincidencias de competencias clave del perfil.
         
         SOLO descarta cuando existe una incompatibilidad manifiesta e irrecuperable.
         """
@@ -329,6 +329,14 @@ class ScoringEngine:
             f"<untrusted_job_description>\n{sanitized_description}\n</untrusted_job_description>\n\n"
             f"Evaluación objetiva en JSON según esquema:"
         )
+
+        # Si Ollama no está online, ir directo a reglas locales sin retardos
+        if not self.ollama.check_health().get("online", False):
+            eval_result = self._evaluate_with_rules_fallback(job, meta, cv_text=cv_text)
+            self.db.save_evaluation(eval_result)
+            new_status = "evaluated" if eval_result["should_apply"] else "discarded"
+            self.db.update_job_status(job["id"], new_status)
+            return eval_result
 
         try:
             print(f"\n[IA / Ollama] Evaluando oferta #{job['id']}: '{job.get('title')}' ({job.get('company')}) con modelo '{self.ollama.default_model}'...", flush=True)

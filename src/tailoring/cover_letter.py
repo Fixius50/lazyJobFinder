@@ -21,14 +21,14 @@ class CoverLetterGenerator:
     def generate(self, job: Dict[str, Any], eval_result: Dict[str, Any]) -> str:
         """Genera el texto completo de la carta de presentación en formato Markdown validando afirmaciones."""
         candidato = self.profile.get("candidato", {})
-        nombre = candidato.get("nombre_completo", "Roberto")
-        email = candidato.get("email", "tu_email@ejemplo.com")
-        telefono = candidato.get("telefono", "+34 600 000 000")
+        nombre = candidato.get("nombre_completo", "Candidato")
+        email = candidato.get("email", "contacto@candidato.com")
+        telefono = candidato.get("telefono", "")
         ciudad = candidato.get("ciudad", "España")
         fecha_actual = datetime.now().strftime("%d de %B de %Y")
 
         empresa = job.get("company", "Equipo de Selección")
-        puesto = job.get("title", "Desarrollador Junior")
+        puesto = job.get("title", "Puesto Ofertado")
         
         # Validar que solo se presuman habilidades reales
         atomic_facts = self.verifier.get_approved_atomic_facts()
@@ -84,19 +84,20 @@ class CoverLetterGenerator:
         except Exception as e:
             logger.debug("Generación de carta por LLM falló, usando plantilla determinista: %s", e)
 
-        # Plantilla determinista de respaldo 100% verídica
-        tech_ref = f"{', '.join(verified_matched[:3])}" if verified_matched else "desarrollo de software y bases de datos"
+        # Plantilla determinista de respaldo 100% verídica y adaptable a cualquier profesión
+        tech_ref = f"{', '.join(verified_matched[:3])}" if verified_matched else "las competencias requeridas"
+        perfil_desc = titulo_candidato or "mi perfil formativo y profesional"
         fallback_body = (
             f"Estimado/a responsable de selección de {empresa},\n\n"
             f"Me pongo en contacto con ustedes con motivo de la vacante de {puesto}. Tras revisar con detalle los requisitos de la oferta, "
-            f"considero que mi formación técnica en el Ciclo de Grado Superior en Desarrollo de Aplicaciones Multiplataforma (DAM) "
-            f"y los proyectos prácticos realizados con {tech_ref} me permiten ofrecer una base sólida, código ordenado y muchas ganas "
-            f"de aportar valor a su equipo de desarrollo.\n\n"
-            f"Durante mis estudios he profundizado en el diseño y construcción de aplicaciones con persistencia en bases de datos "
-            f"relacionales y NoSQL, desarrollo de APIs RESTful y trabajo colaborativo con Git, aplicando buenas prácticas y patrones de diseño.\n\n"
+            f"considero que mi preparación como {perfil_desc} "
+            f"y los proyectos prácticos realizados con {tech_ref} me permiten ofrecer una base sólida, dedicación y muchas ganas "
+            f"de aportar valor a su organización.\n\n"
+            f"A lo largo de mi trayectoria he profundizado en las metodologías, procedimientos y herramientas propias de este ámbito, "
+            f"priorizando el rigor, el trabajo bien hecho y la colaboración fluida en equipo.\n\n"
             f"Me motiva especialmente incorporarme a {empresa} por la proyección de sus proyectos y la posibilidad de seguir creciendo "
-            f"en un entorno profesional exigente. Cuento con una alta capacidad de aprendizaje, actitud proactiva y total disposición "
-            f"para dominar con rapidez las tecnologías específicas que el puesto requiera.\n\n"
+            f"en un entorno profesional de primer nivel. Cuento con una alta capacidad de aprendizaje, actitud proactiva y total disposición "
+            f"para dominar con rapidez cualquier procedimiento específico que el puesto requiera.\n\n"
             f"Agradezco de antemano el tiempo dedicado a valorar mi candidatura y quedo a su entera disposición para mantener una "
             f"entrevista en la que poder profundizar en mis motivaciones.\n\n"
             f"Atentamente,\n"

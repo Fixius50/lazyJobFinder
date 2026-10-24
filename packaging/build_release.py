@@ -244,11 +244,13 @@ class ReleaseBuilder:
         try:
             res = subprocess.run(["docker", "info"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             if res.returncode != 0:
-                log("Daemon de Docker no disponible actualmente. Omitiendo construcción de imágenes.", "WARN")
-                return
-        except Exception:
-            log("Comando docker no encontrado. Omitiendo construcción de imágenes.", "WARN")
-            return
+                raise RuntimeError(
+                    "El motor de Docker no está activo. "
+                    "Para empaquetar las imágenes Docker en la distribución, "
+                    "inicia Docker Desktop primero."
+                )
+        except FileNotFoundError:
+            raise RuntimeError("El comando 'docker' no está instalado en el sistema.")
 
         # 1. Crear contexto de compilación aislado
         isolated_context = os.path.join(PACKAGING_DIR, "staging_build_context")
@@ -316,6 +318,18 @@ class ReleaseBuilder:
         usando un volumen efímero dedicado y limpio, evitando empaquetar otros modelos
         presentes en el entorno del desarrollador.
         """
+        # Verificar disponibilidad del daemon de Docker
+        try:
+            res = subprocess.run(["docker", "info"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if res.returncode != 0:
+                raise RuntimeError(
+                    "El motor de Docker no está activo. "
+                    "Para empaquetar el modelo de IA en la distribución, "
+                    "inicia Docker Desktop primero."
+                )
+        except FileNotFoundError:
+            raise RuntimeError("El comando 'docker' no está instalado en el sistema.")
+
         log("Iniciando empaquetado aislado del modelo de IA (qwen2.5:3b-instruct)...", "INFO")
         model_tar = os.path.join(STAGING_DIR, "ollama_model.tar.gz")
         ephemeral_volume = f"lazyjob_export_model_{int(time.time())}"

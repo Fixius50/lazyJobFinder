@@ -29,27 +29,27 @@ export function JobCard({ job, onOpenDetail }: JobCardProps) {
   const getScoreBadge = (score?: number | null) => {
     if (score === null || score === undefined) {
       return (
-        <Badge variant="secondary" className="text-[10px] py-0 px-1.5 font-mono">
+        <Badge variant="secondary" className="text-3xs py-0 px-1.5 font-mono">
           Sin evaluar
         </Badge>
       );
     }
     if (score >= 80) {
       return (
-        <Badge variant="success" className="text-[10px] py-0 px-1.5 font-mono font-bold">
+        <Badge variant="success" className="text-3xs py-0 px-1.5 font-mono font-bold">
           {score} / 100
         </Badge>
       );
     }
     if (score >= 65) {
       return (
-        <Badge variant="warning" className="text-[10px] py-0 px-1.5 font-mono font-bold">
+        <Badge variant="warning" className="text-3xs py-0 px-1.5 font-mono font-bold">
           {score} / 100
         </Badge>
       );
     }
     return (
-      <Badge variant="destructive" className="text-[10px] py-0 px-1.5 font-mono font-bold">
+      <Badge variant="destructive" className="text-3xs py-0 px-1.5 font-mono font-bold">
         {score} / 100
       </Badge>
     );
@@ -59,13 +59,13 @@ export function JobCard({ job, onOpenDetail }: JobCardProps) {
     const meta = APPLICATION_STATUSES[status as ApplicationStatusKey];
     if (meta) {
       return (
-        <Badge variant={meta.badge} className="text-[10px] py-0 px-1.5">
+        <Badge variant={meta.badge} className="text-3xs py-0 px-1.5">
           {meta.label}
         </Badge>
       );
     }
     return (
-      <Badge variant="secondary" className="text-[10px] py-0 px-1.5">
+      <Badge variant="secondary" className="text-3xs py-0 px-1.5">
         {status}
       </Badge>
     );
@@ -82,11 +82,11 @@ export function JobCard({ job, onOpenDetail }: JobCardProps) {
               {getStatusBadge(job.status)}
             </div>
             <div className="flex items-center gap-1">
-              <span className="text-[10px] font-medium px-1.5 py-0.2 rounded bg-muted/90 text-muted-foreground shrink-0">
+              <span className="text-3xs font-medium px-1.5 py-0.5 rounded bg-muted/90 text-muted-foreground shrink-0">
                 {sourceMeta ? sourceMeta.label : job.source}
               </span>
               {job.is_remote ? (
-                <span className="text-[9px] font-semibold px-1 py-0.2 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20 shrink-0">
+                <span className="text-3xs font-semibold px-1 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20 shrink-0">
                   Remoto
                 </span>
               ) : null}
@@ -108,7 +108,7 @@ export function JobCard({ job, onOpenDetail }: JobCardProps) {
           </h3>
 
           {/* Metadatos esenciales: Empresa, Ubicación y Fecha */}
-          <div className="space-y-1 text-[11px] text-muted-foreground pt-0.5">
+          <div className="space-y-1 text-2xs text-muted-foreground pt-0.5">
             <div className="flex items-center gap-1.5 truncate">
               <Building className="h-3 w-3 shrink-0 text-muted-foreground/70" />
               <span className="truncate font-medium text-foreground/80" title={job.company}>
@@ -121,7 +121,7 @@ export function JobCard({ job, onOpenDetail }: JobCardProps) {
               <span className="truncate">{job.location || "España"}</span>
             </div>
 
-            <div className="flex items-center gap-1 text-[10px] text-muted-foreground/60">
+            <div className="flex items-center gap-1 text-3xs text-muted-foreground/60">
               <Calendar className="h-2.5 w-2.5 shrink-0" />
               <span>{formatDateTime(job.created_at)}</span>
             </div>
@@ -137,7 +137,7 @@ export function JobCard({ job, onOpenDetail }: JobCardProps) {
                 variant="ghost"
                 onClick={() => window.open(api.getDocumentUrl(job.id, "cv_pdf"), "_blank")}
                 title="Descargar CV adaptado en PDF"
-                className="h-7 px-1.5 text-[10px] flex items-center gap-1 text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10"
+                className="h-7 px-1.5 text-3xs flex items-center gap-1 text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10"
               >
                 <Download className="h-3 w-3" />
                 <span>CV</span>
@@ -149,7 +149,7 @@ export function JobCard({ job, onOpenDetail }: JobCardProps) {
                 variant="ghost"
                 onClick={() => window.open(api.getDocumentUrl(job.id, "letter_pdf"), "_blank")}
                 title="Descargar Carta en PDF"
-                className="h-7 px-1.5 text-[10px] flex items-center gap-1 text-blue-400 hover:text-blue-300 hover:bg-blue-500/10"
+                className="h-7 px-1.5 text-3xs flex items-center gap-1 text-blue-400 hover:text-blue-300 hover:bg-blue-500/10"
               >
                 <Download className="h-3 w-3" />
                 <span>Carta</span>

@@ -97,7 +97,7 @@ export function JobDetailDialog({
               <h4 className="font-medium text-foreground">Habilidades coincidentes:</h4>
               <div className="flex flex-wrap gap-1">
                 {jobDetail.matched_skills.map((skill: string, i: number) => (
-                  <span key={i} className="px-2 py-0.5 rounded bg-muted text-[11px] font-mono text-primary">
+                  <span key={i} className="px-2 py-0.5 rounded bg-muted text-2xs font-mono text-primary">
                     {skill}
                   </span>
                 ))}
@@ -109,7 +109,7 @@ export function JobDetailDialog({
           {jobDetail.description && (
             <div className="space-y-1.5">
               <h4 className="font-medium text-foreground">Descripción original del puesto:</h4>
-              <div className="p-3 rounded-md bg-muted/30 border text-muted-foreground leading-relaxed max-h-48 overflow-y-auto whitespace-pre-wrap font-sans text-[11px]">
+              <div className="p-3 rounded-md bg-muted/30 border text-muted-foreground leading-relaxed max-h-48 overflow-y-auto whitespace-pre-wrap font-sans text-2xs">
                 {jobDetail.description}
               </div>
             </div>

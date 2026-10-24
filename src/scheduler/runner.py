@@ -133,9 +133,11 @@ class JobPipelineRunner:
                         logger.debug("Error recargando settings en runner: %s", s_err)
 
                 # 1. Descubrimiento de ofertas y deduplicación (en worker thread)
+                self.db.log_event("INFO", "pipeline", "Iniciando rastreo de ofertas en portales...")
                 new_jobs, metrics = await asyncio.to_thread(self.connectors_mgr.run_discovery)
                 total_found = metrics["total_encontradas"]
                 new_count = metrics["nuevas_guardadas"]
+                self.db.log_event("INFO", "pipeline", f"Descubrimiento completado: {total_found} ofertas encontradas ({new_count} nuevas registradas).")
 
                 # Combinar ofertas recién descubiertas con cualquier vacante pendiente de evaluación en BD
                 pending_jobs = await asyncio.to_thread(self.db.get_unevaluated_jobs, 100)
@@ -152,6 +154,7 @@ class JobPipelineRunner:
 
                 if not jobs_to_evaluate:
                     logger.info("No hay vacantes nuevas ni pendientes de evaluación en este ciclo.")
+                    self.db.log_event("INFO", "pipeline", "No hay vacantes nuevas ni pendientes de evaluación en este ciclo.")
                     self.db.finish_pipeline_run(
                         run_id=run_id,
                         status="completed",
@@ -171,6 +174,7 @@ class JobPipelineRunner:
                 generate_docs = self.settings.get("evaluacion", {}).get("generar_documentos", True)
                 concurrency = int(self.settings.get("evaluacion", {}).get("concurrencia", 2))
                 semaphore = asyncio.Semaphore(concurrency)
+                self.db.log_event("INFO", "pipeline", f"Iniciando evaluación de {len(jobs_to_evaluate)} vacantes con IA (umbral: {min_score}%)...")
 
                 async def _evaluate_and_process_job(job: Dict[str, Any]) -> Optional[Dict[str, Any]]:
                     async with semaphore:
@@ -235,9 +239,11 @@ class JobPipelineRunner:
                                     ui_saved=ui_saved_val,
                                 )
                                 self.db.update_job_status(job["id"], "notified" if telegram_status == 1 else "evaluated")
+                                self.db.log_event("INFO", "pipeline", f"Oferta ID {job['id']} ('{job.get('title', '')[:30]}') puntuada: {score}/100 -> APTO (Documentos generados).")
                                 return job
                             else:
                                 self.db.update_job_status(job["id"], "discarded")
+                                self.db.log_event("INFO", "pipeline", f"Oferta ID {job['id']} ('{job.get('title', '')[:30]}') puntuada: {score}/100 -> Descartada (< {min_score}).")
                                 return None
 
                         except Exception as eval_err:
@@ -258,6 +264,11 @@ class JobPipelineRunner:
                     total_found=total_found,
                     new_jobs=new_count,
                     relevant_jobs=len(relevant_matches),
+                )
+                self.db.log_event(
+                    "INFO",
+                    "pipeline",
+                    f"Ciclo completado en {elapsed:.1f}s: {new_count} nuevas registradas, {len(relevant_matches)} relevantes procesadas.",
                 )
 
                 logger.info(

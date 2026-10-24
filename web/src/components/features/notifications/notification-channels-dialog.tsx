@@ -125,7 +125,7 @@ export function NotificationChannelsDialog({
                   </span>
                   <Badge
                     variant={settings?.secrets_status.telegram_configured ? "success" : "secondary"}
-                    className="text-[10px] py-0"
+                    className="text-3xs py-0"
                   >
                     {settings?.secrets_status.telegram_configured
                       ? "Configurado"
@@ -134,7 +134,7 @@ export function NotificationChannelsDialog({
                       : "Falta token .env"}
                   </Badge>
                 </div>
-                <p className="text-[11px] text-muted-foreground">
+                <p className="text-2xs text-muted-foreground">
                   Recibe resúmenes matutinos y los documentos PDF de CV y carta generados directamente en tu chat privado.
                 </p>
               </div>
@@ -153,9 +153,9 @@ export function NotificationChannelsDialog({
                     ID de Usuario de Telegram (Chat ID):
                   </label>
                   {telegramUserId ? (
-                    <span className="text-[10px] text-emerald-400 font-mono">ID: {telegramUserId}</span>
+                    <span className="text-3xs text-emerald-400 font-mono">ID: {telegramUserId}</span>
                   ) : (
-                    <span className="text-[10px] text-amber-400 font-mono">Sin configurar</span>
+                    <span className="text-3xs text-amber-400 font-mono">Sin configurar</span>
                   )}
                 </div>
                 <Input
@@ -166,7 +166,7 @@ export function NotificationChannelsDialog({
                   onChange={(e) => setTelegramUserId(e.target.value)}
                   className="text-xs h-8 font-mono bg-background"
                 />
-                <p className="text-[10px] text-muted-foreground leading-relaxed">
+                <p className="text-3xs text-muted-foreground leading-relaxed">
                   Para saber tu ID numérico, abre Telegram y pulsa Iniciar en el bot <strong>@userinfobot</strong> o envíale un mensaje a tu propio bot. Solo este ID recibirá las alertas.
                 </p>
               </div>
@@ -183,7 +183,7 @@ export function NotificationChannelsDialog({
                 </span>
                 <Badge
                   variant={settings?.secrets_status.infojobs_configured ? "success" : "secondary"}
-                  className="text-[10px] py-0"
+                  className="text-3xs py-0"
                 >
                   {settings?.secrets_status.infojobs_configured ? "API Conectada" : "Sin Claves"}
                 </Badge>
@@ -192,20 +192,20 @@ export function NotificationChannelsDialog({
                 href="https://developer.infojobs.net"
                 target="_blank"
                 rel="noreferrer"
-                className="text-[11px] text-primary hover:underline flex items-center gap-1"
+                className="text-2xs text-primary hover:underline flex items-center gap-1"
               >
                 <span>developer.infojobs.net</span>
                 <ExternalLink className="h-3 w-3" />
               </a>
             </div>
 
-            <p className="text-[11px] text-muted-foreground">
+            <p className="text-2xs text-muted-foreground">
               Introduce tus credenciales de desarrollador de InfoJobs para buscar ofertas oficiales sin restricciones de scraping.
             </p>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
               <div className="space-y-1">
-                <label className="text-[11px] font-medium text-foreground">Client ID:</label>
+                <label className="text-2xs font-medium text-foreground">Client ID:</label>
                 <Input
                   type="text"
                   placeholder="Ej: e82b13c..."
@@ -216,10 +216,10 @@ export function NotificationChannelsDialog({
               </div>
 
               <div className="space-y-1">
-                <label className="text-[11px] font-medium text-foreground">
+                <label className="text-2xs font-medium text-foreground">
                   Client Secret:
                   {settings?.secrets_status.infojobs_secret_present && !infojobsClientSecret && (
-                    <span className="text-[10px] text-emerald-400 ml-1.5 font-normal">(Configurado)</span>
+                    <span className="text-3xs text-emerald-400 ml-1.5 font-normal">(Configurado)</span>
                   )}
                 </label>
                 <Input
@@ -252,7 +252,7 @@ export function NotificationChannelsDialog({
               onChange={(e) => setUmbralMinimo(parseInt(e.target.value, 10))}
               className="w-full h-1.5 bg-muted rounded-lg appearance-none cursor-pointer accent-primary"
             />
-            <div className="flex justify-between text-[10px] text-muted-foreground font-medium">
+            <div className="flex justify-between text-3xs text-muted-foreground font-medium">
               <span>Flexible (40)</span>
               <span>Recomendado (65)</span>
               <span>Estricto (90)</span>

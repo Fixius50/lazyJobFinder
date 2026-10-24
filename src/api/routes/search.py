@@ -89,7 +89,7 @@ async def trigger_manual_search(background_tasks: BackgroundTasks) -> Dict[str, 
     if not pre["ollama"]["healthy"]:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Ollama no está disponible: {pre['ollama']['error']}. Arranca el servicio en la pestaña Control.",
+            detail=f"Ollama no está disponible: {pre['ollama']['error']}. Comprueba el servicio en la Terminal del sistema.",
         )
 
     # Iniciar pipeline de forma no bloqueante utilizando asyncio.create_task

@@ -16,15 +16,21 @@ class OllamaClient:
     def __init__(self, base_url: Optional[str] = None, default_model: Optional[str] = None):
         self.base_url = (base_url or os.getenv("OLLAMA_BASE_URL", "http://ollama:11434")).rstrip("/")
         self.default_model = default_model or os.getenv("OLLAMA_MODEL", "qwen2.5:3b-instruct")
+        self._last_health_check_time: float = 0.0
+        self._cached_health: Optional[Dict[str, Any]] = None
 
-    def check_health(self) -> Dict[str, Any]:
-        """Verifica la conectividad con Ollama y lista los modelos disponibles en el volumen."""
+    def check_health(self, force: bool = False) -> Dict[str, Any]:
+        """Verifica la conectividad con Ollama con caché rápida (15s) y timeout corto (2.5s)."""
+        now = time.time()
+        if not force and self._cached_health is not None and (now - self._last_health_check_time < 15.0):
+            return self._cached_health
+
         try:
-            resp = requests.get(f"{self.base_url}/api/tags", timeout=10)
+            resp = requests.get(f"{self.base_url}/api/tags", timeout=2.5)
             if resp.status_code == 200:
                 data = resp.json()
                 models = [m.get("name") for m in data.get("models", [])]
-                return {
+                res = {
                     "online": True,
                     "models": models,
                     "default_model": self.default_model,
@@ -32,10 +38,19 @@ class OllamaClient:
                         self.default_model.split(":")[0] in m for m in models
                     ),
                 }
-            return {"online": False, "error": f"HTTP {resp.status_code}"}
+                self._cached_health = res
+                self._last_health_check_time = now
+                return res
+            res = {"online": False, "error": f"HTTP {resp.status_code}"}
+            self._cached_health = res
+            self._last_health_check_time = now
+            return res
         except Exception as e:
             logger.debug("Ollama healthcheck falló: %s", e)
-            return {"online": False, "error": str(e)}
+            res = {"online": False, "error": str(e)}
+            self._cached_health = res
+            self._last_health_check_time = now
+            return res
 
     def generate(
         self,
@@ -76,6 +91,9 @@ class OllamaClient:
         elif format_json:
             payload["format"] = "json"
 
+        if not self.check_health().get("online"):
+            raise ConnectionError(f"Ollama no está disponible en {self.base_url}")
+
         endpoint = f"{self.base_url}/api/generate"
         max_retries = 2
         backoff = 1.0
@@ -113,6 +131,8 @@ class OllamaClient:
                     resp.text[:200],
                 )
             except requests.exceptions.RequestException as e:
+                self._cached_health = {"online": False, "error": str(e)}
+                self._last_health_check_time = time.time()
                 logger.warning("Fallo de conexión con Ollama en intento %d/%d: %s", attempt, max_retries, e)
 
             if attempt < max_retries:

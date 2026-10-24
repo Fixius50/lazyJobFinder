@@ -39,12 +39,12 @@ export function StatusGuideDialog({ open, onOpenChange }: StatusGuideDialogProps
             {/* Descubierta */}
             <div className="p-2.5 rounded-lg border bg-muted/30 space-y-1">
               <div className="flex items-center gap-2">
-                <Badge variant="secondary" className="text-[10px] py-0 px-1.5 font-medium">
+                <Badge variant="secondary" className="text-3xs py-0 px-1.5 font-medium">
                   Descubierta
                 </Badge>
-                <span className="text-[10px] text-muted-foreground font-mono">discovered</span>
+                <span className="text-3xs text-muted-foreground font-mono">discovered</span>
               </div>
-              <p className="text-muted-foreground text-[11px] leading-relaxed">
+              <p className="text-muted-foreground text-2xs leading-relaxed">
                 El conector (Tecnoempleo, InfoJobs, Indeed, etc.) acaba de registrar la oferta desde la fuente pública en la base de datos local SQLite. Aún no ha sido evaluada por la IA.
               </p>
             </div>
@@ -52,12 +52,12 @@ export function StatusGuideDialog({ open, onOpenChange }: StatusGuideDialogProps
             {/* Evaluada */}
             <div className="p-2.5 rounded-lg border bg-muted/30 space-y-1">
               <div className="flex items-center gap-2">
-                <Badge variant="outline" className="text-[10px] py-0 px-1.5 font-medium">
+                <Badge variant="outline" className="text-3xs py-0 px-1.5 font-medium">
                   Evaluada
                 </Badge>
-                <span className="text-[10px] text-muted-foreground font-mono">evaluated</span>
+                <span className="text-3xs text-muted-foreground font-mono">evaluated</span>
               </div>
-              <p className="text-muted-foreground text-[11px] leading-relaxed">
+              <p className="text-muted-foreground text-2xs leading-relaxed">
                 El modelo IA local (Ollama) evaluó la oferta contra tu CV, otorgándole una puntuación de afinidad (0 a 100) y pros/contras. Supera el umbral mínimo pero no se notificó por Telegram (ej. si Telegram está desactivado).
               </p>
             </div>
@@ -65,12 +65,12 @@ export function StatusGuideDialog({ open, onOpenChange }: StatusGuideDialogProps
             {/* Notificada */}
             <div className="p-2.5 rounded-lg border bg-amber-500/10 border-amber-500/20 space-y-1">
               <div className="flex items-center gap-2">
-                <Badge variant="warning" className="text-[10px] py-0 px-1.5 font-medium">
+                <Badge variant="warning" className="text-3xs py-0 px-1.5 font-medium">
                   Notificada
                 </Badge>
-                <span className="text-[10px] text-muted-foreground font-mono">notified</span>
+                <span className="text-3xs text-muted-foreground font-mono">notified</span>
               </div>
-              <p className="text-muted-foreground text-[11px] leading-relaxed">
+              <p className="text-muted-foreground text-2xs leading-relaxed">
                 La vacante superó el umbral de afinidad (≥65), se generaron los documentos adaptados (CV y carta en PDF) y se envió la ficha con adjuntos a tu bot de Telegram.
               </p>
             </div>
@@ -78,12 +78,12 @@ export function StatusGuideDialog({ open, onOpenChange }: StatusGuideDialogProps
             {/* Descartada */}
             <div className="p-2.5 rounded-lg border bg-destructive/10 border-destructive/20 space-y-1">
               <div className="flex items-center gap-2">
-                <Badge variant="destructive" className="text-[10px] py-0 px-1.5 font-medium">
+                <Badge variant="destructive" className="text-3xs py-0 px-1.5 font-medium">
                   Descartada
                 </Badge>
-                <span className="text-[10px] text-muted-foreground font-mono">discarded</span>
+                <span className="text-3xs text-muted-foreground font-mono">discarded</span>
               </div>
-              <p className="text-muted-foreground text-[11px] leading-relaxed">
+              <p className="text-muted-foreground text-2xs leading-relaxed">
                 Descartada automáticamente por dos posibles razones:
                 <br />• <strong>Pre-filtro:</strong> Contiene términos de exclusión (ej. Senior, 10 años experiencia...).
                 <br />• <strong>Baja afinidad:</strong> El análisis de Ollama determinó que tu perfil no encaja o la puntuación quedó bajo el umbral mínimo (&lt;65).
@@ -99,7 +99,7 @@ export function StatusGuideDialog({ open, onOpenChange }: StatusGuideDialogProps
             <span>Estados Manuales de Seguimiento (Control del Usuario)</span>
           </div>
 
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-2xs text-muted-foreground">
             Puedes cambiar manualmente estos estados desde la tarjeta pulsando en <strong>«Ver Detalles y Documentos»</strong> para llevar el control de tus candidaturas reales:
           </p>
 
@@ -107,12 +107,12 @@ export function StatusGuideDialog({ open, onOpenChange }: StatusGuideDialogProps
             {/* Postulada */}
             <div className="p-2.5 rounded-lg border bg-muted/30 space-y-1">
               <div className="flex items-center gap-2">
-                <Badge variant="default" className="text-[10px] py-0 px-1.5 font-medium">
+                <Badge variant="default" className="text-3xs py-0 px-1.5 font-medium">
                   Postulada
                 </Badge>
-                <span className="text-[10px] text-muted-foreground font-mono">applied</span>
+                <span className="text-3xs text-muted-foreground font-mono">applied</span>
               </div>
-              <p className="text-muted-foreground text-[11px] leading-relaxed">
+              <p className="text-muted-foreground text-2xs leading-relaxed">
                 Márcala cuando hayas entrado al portal o enviado tu CV a la empresa para saber que ya estás inscrito.
               </p>
             </div>
@@ -120,12 +120,12 @@ export function StatusGuideDialog({ open, onOpenChange }: StatusGuideDialogProps
             {/* Entrevista */}
             <div className="p-2.5 rounded-lg border bg-emerald-500/10 border-emerald-500/20 space-y-1">
               <div className="flex items-center gap-2">
-                <Badge variant="success" className="text-[10px] py-0 px-1.5 font-medium">
+                <Badge variant="success" className="text-3xs py-0 px-1.5 font-medium">
                   Entrevista
                 </Badge>
-                <span className="text-[10px] text-muted-foreground font-mono">interview</span>
+                <span className="text-3xs text-muted-foreground font-mono">interview</span>
               </div>
-              <p className="text-muted-foreground text-[11px] leading-relaxed">
+              <p className="text-muted-foreground text-2xs leading-relaxed">
                 Márcala cuando el equipo de selección o RRHH te contacte para concertar una entrevista telefónica o técnica.
               </p>
             </div>
@@ -133,12 +133,12 @@ export function StatusGuideDialog({ open, onOpenChange }: StatusGuideDialogProps
             {/* Rechazada */}
             <div className="p-2.5 rounded-lg border bg-destructive/10 border-destructive/20 space-y-1">
               <div className="flex items-center gap-2">
-                <Badge variant="destructive" className="text-[10px] py-0 px-1.5 font-medium">
+                <Badge variant="destructive" className="text-3xs py-0 px-1.5 font-medium">
                   Rechazada
                 </Badge>
-                <span className="text-[10px] text-muted-foreground font-mono">rejected</span>
+                <span className="text-3xs text-muted-foreground font-mono">rejected</span>
               </div>
-              <p className="text-muted-foreground text-[11px] leading-relaxed">
+              <p className="text-muted-foreground text-2xs leading-relaxed">
                 Márcala si la empresa te comunica que no continúas en el proceso o han decidido cerrar la posición.
               </p>
             </div>
@@ -146,12 +146,12 @@ export function StatusGuideDialog({ open, onOpenChange }: StatusGuideDialogProps
             {/* Archivada */}
             <div className="p-2.5 rounded-lg border bg-muted/30 space-y-1">
               <div className="flex items-center gap-2">
-                <Badge variant="secondary" className="text-[10px] py-0 px-1.5 font-medium">
+                <Badge variant="secondary" className="text-3xs py-0 px-1.5 font-medium">
                   Archivada
                 </Badge>
-                <span className="text-[10px] text-muted-foreground font-mono">archived</span>
+                <span className="text-3xs text-muted-foreground font-mono">archived</span>
               </div>
-              <p className="text-muted-foreground text-[11px] leading-relaxed">
+              <p className="text-muted-foreground text-2xs leading-relaxed">
                 Para guardar ofertas antiguas o no prioritarias fuera de la vista principal sin borrarlas de la base de datos.
               </p>
             </div>
@@ -159,12 +159,12 @@ export function StatusGuideDialog({ open, onOpenChange }: StatusGuideDialogProps
         </div>
 
         {/* Flujo Visual */}
-        <div className="p-3 rounded-lg border bg-primary/5 text-[11px] space-y-1.5">
+        <div className="p-3 rounded-lg border bg-primary/5 text-2xs space-y-1.5">
           <div className="flex items-center gap-1.5 font-semibold text-primary">
             <Sparkles className="h-3.5 w-3.5" />
             <span>Flujo habitual de una oferta:</span>
           </div>
-          <div className="flex flex-wrap items-center gap-1 text-[11px] text-muted-foreground">
+          <div className="flex flex-wrap items-center gap-1 text-2xs text-muted-foreground">
             <span className="font-medium text-foreground">Portal</span>
             <ArrowRight className="h-3 w-3" />
             <span>Descubierta</span>

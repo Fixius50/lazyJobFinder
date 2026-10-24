@@ -498,7 +498,7 @@ class Database:
             if existing:
                 existing_id = existing["id"]
                 old_desc_hash = existing["description_hash"]
-                if cv_filename and not existing.get("cv_filename"):
+                if cv_filename and not existing["cv_filename"]:
                     conn.execute("UPDATE jobs SET cv_filename = ? WHERE id = ?", (cv_filename, existing_id))
                 # Si cambió la descripción, actualizar registro y registrar timestamp
                 if old_desc_hash and old_desc_hash != desc_hash:
@@ -901,9 +901,7 @@ class Database:
                 target_cv = str(pointer or "")
 
         clean_target_cv = str(target_cv or "").strip()
-        if clean_target_cv in ("none", "Ninguno", "") or not clean_target_cv:
-            where_clauses.append("1=0")
-        else:
+        if clean_target_cv and clean_target_cv.lower() not in ("none", "ninguno", "all", "todas", "*", ""):
             where_clauses.append("(j.cv_filename = ? OR j.cv_filename IS NULL)")
             params.append(clean_target_cv)
 
@@ -1171,15 +1169,22 @@ class Database:
         source: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Recupera los logs del sistema estructurados para la consola web de administración."""
-        self.prune_old_system_logs(max_entries=limit, retention_hours=24)
+        # Mantener un histórico seguro de hasta 2000 eventos (no usar limit de la query de lectura)
+        self.prune_old_system_logs(max_entries=2000, retention_hours=48)
         where = ["1=1"]
         params: List[Any] = []
         if level:
             where.append("level = ?")
             params.append(level.upper())
         if source:
-            where.append("source = ?")
-            params.append(source.lower())
+            s_clean = source.strip().lower()
+            if s_clean == "pipeline":
+                where.append("source IN ('pipeline', 'evaluator', 'scoring', 'scheduler', 'connectors')")
+            elif s_clean in ("app", "backend"):
+                where.append("source IN ('system', 'jobs', 'cv', 'search_api', 'maintenance', 'settings', 'docker')")
+            else:
+                where.append("source = ?")
+                params.append(s_clean)
 
         sql = f"""
             SELECT id, timestamp, level, source, message, details
@@ -1291,9 +1296,7 @@ class Database:
                 base_where = "j.ui_saved = 1 AND j.status != 'discarded'"
 
             clean_target_cv = str(target_cv or "").strip()
-            if clean_target_cv in ("none", "Ninguno", "") or not clean_target_cv:
-                base_where += " AND 1=0"
-            else:
+            if clean_target_cv and clean_target_cv.lower() not in ("none", "ninguno", "all", "todas", "*", ""):
                 escaped_cv = clean_target_cv.replace("'", "''")
                 base_where += f" AND (j.cv_filename = '{escaped_cv}' OR j.cv_filename IS NULL)"
 

@@ -90,56 +90,149 @@ def extract_cv_text(file_path: str) -> str:
     return normalized.strip()
 
 
+def _extract_terms_universally_from_text(cv_text: str, filename: Optional[str] = None) -> Dict[str, Any]:
+    """Extractor universal de oficios, titulaciones y categorías profesionales directamente del texto del CV."""
+    candidates: List[str] = []
+    lines = [line.strip() for line in (cv_text or "").splitlines() if line.strip()]
+
+    profile_line_regex = re.compile(
+        r"^(?:puesto(?:\s+deseado)?|perfil(?:\s+profesional)?|título(?:\s+profesional)?|"
+        r"especialidad|titulaci[oó]n|oficio|categor[ií]a|objetivo(?:\s+profesional)?)\s*[:\-]\s*(.+)$",
+        re.IGNORECASE,
+    )
+
+    occupational_prefixes = (
+        r"t[eé]cnico(?:\s+superior|\s+especialista|\s+en|\s+medio)?|"
+        r"oficial(?:\s+de|\s+\d[ªa])?|"
+        r"auxiliar(?:\s+de)?|"
+        r"responsable(?:\s+de)?|"
+        r"coordinador(?:\s+de)?|"
+        r"especialista(?:\s+en)?|"
+        r"operario(?:\s+de)?|"
+        r"conductor(?:\s+de)?|"
+        r"ch[oó]fer(?:\s+de)?|"
+        r"profesor(?:\s+de)?|"
+        r"maestro(?:\s+de)?|"
+        r"ingeniero(?:\s+de|\s+en)?|"
+        r"licenciado(?:\s+en)?|"
+        r"graduado(?:\s+en)?|"
+        r"diseñador(?:\s+gr[aá]fico|\s+web|\s+de|\s+industrial)?|"
+        r"consultor(?:\s+de|\s+en)?|"
+        r"analista(?:\s+de|\s+en)?|"
+        r"gestor(?:\s+de)?|"
+        r"jefe(?:\s+de)?|"
+        r"encargado(?:\s+de)?|"
+        r"asistente(?:\s+de)?|"
+        r"dependiente(?:\s+de)?|"
+        r"ayudante(?:\s+de)?|"
+        r"mozo(?:\s+de)?|"
+        r"carretillero(?:\s+de)?|"
+        r"camarero(?:\s+de)?|"
+        r"cocinero(?:\s+de)?|"
+        r"m[eé]dico(?:\s+de)?|"
+        r"enfermero(?:\s+de)?|"
+        r"abogado(?:\s+de)?|"
+        r"asesor(?:\s+de)?|"
+        r"instalador(?:\s+de)?|"
+        r"mec[aá]nico(?:\s+de)?|"
+        r"electricista(?:\s+de)?|"
+        r"fontanero(?:\s+de)?|"
+        r"soldador(?:\s+de)?|"
+        r"carpintero(?:\s+de)?|"
+        r"pintor(?:\s+de)?|"
+        r"albañil(?:\s+de)?|"
+        r"vigilante(?:\s+de)?|"
+        r"socorrista(?:\s+de)?|"
+        r"veterinario(?:\s+de)?|"
+        r"farmac[eé]utico(?:\s+de)?|"
+        r"contable(?:\s+de)?|"
+        r"recepcionista(?:\s+de)?|"
+        r"comercial(?:\s+de)?|"
+        r"administrativo(?:\s+de)?|"
+        r"programador(?:\s+de)?|"
+        r"desarrollador(?:\s+de)?"
+    )
+
+    role_regex = re.compile(
+        rf"\b((?:{occupational_prefixes})\s+[a-záéíóúñA-ZÁÉÍÓÚÑ]+(?:\s+[a-záéíóúñA-ZÁÉÍÓÚÑ]+){{0,3}})\b",
+        re.IGNORECASE,
+    )
+
+    # 1. Buscar campos explícitos de perfil / objetivo en las primeras líneas
+    for line in lines[:30]:
+        m = profile_line_regex.match(line)
+        if m:
+            val = m.group(1).strip()
+            val = re.split(r"[\.,;\(\)\-–]", val)[0].strip()
+            if 3 <= len(val) <= 45:
+                candidates.append(val.title())
+
+    # 2. Buscar roles ocupacionales mediante regex en el texto
+    for line in lines[:50]:
+        if any(w in line.lower() for w in ("calle", "avda", "teléfono", "telefono", "email", "dni", "código postal", "españa")):
+            continue
+        matches = role_regex.findall(line)
+        for match in matches:
+            clean_m = re.sub(r"\s+", " ", match).strip()
+            clean_m = re.split(r"[\.,;\(\)\-–]", clean_m)[0].strip()
+            clean_m = re.sub(r"\s+(?:de|en|y|o|con|para|del|al)$", "", clean_m, flags=re.IGNORECASE).strip()
+            if 4 <= len(clean_m) <= 45:
+                candidates.append(clean_m.title())
+
+    # 3. Analizar nombre de archivo solo para términos sectoriales significativos
+    if filename:
+        clean_fn = re.sub(r"^(?:cv[_\-\s]*|curriculum[_\-\s]*|hoja[_\-\s]*de[_\-\s]*vida[_\-\s]*)", "", filename, flags=re.IGNORECASE)
+        clean_fn = re.sub(r"[\._\-]\w+$", "", clean_fn)
+        clean_fn = re.sub(r"\d+", "", clean_fn)
+        parts = [p.strip() for p in re.split(r"[_\-\s]+", clean_fn) if len(p.strip()) >= 4]
+        for part in parts:
+            if any(term in part.lower() for term in (
+                "fontaner", "electric", "mecanic", "abogad", "sanitar", "enferm",
+                "admin", "comerc", "cocin", "camarer", "mozo", "almacen",
+                "grafic", "softw", "program", "veterinar", "vigilant"
+            )):
+                candidates.append(part.title())
+
+    # 4. Deduplicar manteniendo orden
+    seen = set()
+    unique_candidates = []
+    for c in candidates:
+        norm = c.lower().strip()
+        if norm not in seen and len(norm) >= 4:
+            seen.add(norm)
+            unique_candidates.append(c)
+
+    # 5. Si aún no hay nada (formato no estándar), tomar el primer encabezado relevante
+    if not unique_candidates and lines:
+        for line in lines[:10]:
+            clean = re.split(r"[\.,;\(\)\-–]", line)[0].strip()
+            if 4 <= len(clean) <= 40 and not any(w in clean.lower() for w in ("teléfono", "email", "calle", "curriculum", "contacto")):
+                unique_candidates.append(clean.title())
+                break
+
+    primary_role = unique_candidates[0] if unique_candidates else "Profesional"
+    search_terms = unique_candidates[:4]
+
+    return {
+        "search_terms": search_terms,
+        "primary_role": primary_role,
+    }
+
+
 def extract_search_terms_from_cv(cv_text: str, filename: Optional[str] = None) -> Dict[str, Any]:
     """
     Analiza el texto de cualquier CV y su nombre de archivo para deducir de forma universal
     entre 2 y 4 términos óptimos de búsqueda en portales de empleo (InfoJobs, Indeed, LinkedIn, etc.),
-    válido para cualquier profesión (mozo de almacén, fontanero, sanitario, administrativo, etc.).
+    válido para cualquier profesión u oficio sin asumir profesiones preconcebidas.
     """
-    combined_ctx = f"{filename or ''} {cv_text or ''}".lower()
-    if len(combined_ctx.strip()) < 10:
+    combined_ctx = f"{filename or ''} {cv_text or ''}".strip()
+    if len(combined_ctx) < 10:
         return {
             "search_terms": [],
             "primary_role": "",
         }
 
-    # Heurística contextual rápida de alta fidelidad para cualquier sector laboral
-    fast_terms: List[str] = []
-    fast_role: str = ""
-
-    if any(k in combined_ctx for k in ("mozo", "carretill", "traspaleta", "almacén", "almacen", "logística", "logistica", "picking")):
-        fast_terms = ["Mozo de almacén", "Carretillero", "Operario de logística"]
-        if any(k in combined_ctx for k in ("prevención", "prevencion", "riesgos laborales", "prl")):
-            fast_terms.append("Prevención de Riesgos Laborales")
-        fast_role = "Mozo de almacén / Carretillero"
-    elif any(k in combined_ctx for k in ("camarer", "cociner", "hostelería", "hosteleria", "barista")):
-        fast_terms = ["Camarero", "Ayudante de cocina", "Personal de hostelería"]
-        fast_role = "Camarero / Hostelería"
-    elif any(k in combined_ctx for k in ("administrativ", "contab", "facturac", "recepcionista", "oficinista")):
-        fast_terms = ["Auxiliar administrativo", "Administrativo contable", "Recepcionista"]
-        fast_role = "Auxiliar administrativo"
-    elif any(k in combined_ctx for k in ("enferm", "sanitar", "auxiliar de enfermería", "tcae", "médic", "medic")):
-        fast_terms = ["Enfermero", "Auxiliar de enfermería", "Personal sanitario"]
-        fast_role = "Personal sanitario"
-    elif any(k in combined_ctx for k in ("electricis", "instalador", "fontaner", "climatizac", "mantenimiento industrial")):
-        fast_terms = ["Electricista", "Técnico instalador", "Oficial de mantenimiento"]
-        fast_role = "Electricista / Mantenimiento"
-    elif any(k in combined_ctx for k in ("dependient", "cajer", "ventas", "comercial", "atención al cliente")):
-        fast_terms = ["Dependiente", "Comercial de ventas", "Atención al cliente"]
-        fast_role = "Dependiente de comercio"
-    elif any(k in combined_ctx for k in ("programad", "desarroll", "software", "full stack", "frontend", "backend")):
-        fast_terms = ["Desarrollador Software", "Programador", "Desarrollador Web"]
-        fast_role = "Desarrollador Software"
-
-    # Si la heurística contextual directa ya detectó un rol inequívoco con alta confianza, usarlo
-    if fast_terms:
-        logger.info("Términos determinados para CV '%s': %s (Rol: %s)", filename or "cv", fast_terms, fast_role)
-        return {
-            "search_terms": fast_terms[:4],
-            "primary_role": fast_role,
-        }
-
-    # Intentar inferencia abierta con Ollama para casos no cubiertos por heurística
+    # 1. Intentar inferencia abierta con Ollama si está disponible en Docker
     try:
         from ..evaluator.ollama_client import OllamaClient
         ollama = OllamaClient()
@@ -158,19 +251,31 @@ def extract_search_terms_from_cv(cv_text: str, filename: Optional[str] = None) -
                 "- Basa los títulos ÚNICAMENTE en la experiencia, formación o competencias descritas en el CV. No inventes oficios de otros sectores.\n\n"
                 f"TEXTO DEL CV:\n{cv_text[:2000]}"
             )
-            raw = ollama.generate(prompt=prompt, format_json=True, timeout=20)
+            raw = ollama.generate(prompt=prompt, format_json=True, timeout=15)
             data = json.loads(raw)
             terms = data.get("search_terms", [])
             if isinstance(terms, list) and len(terms) > 0:
                 cleaned_terms = [str(t).strip() for t in terms if str(t).strip()]
                 if cleaned_terms:
-                    logger.info("Términos de búsqueda extraídos del CV con Ollama: %s", cleaned_terms)
+                    role = str(data.get("primary_role", cleaned_terms[0]))
+                    logger.info("Términos de búsqueda extraídos del CV con Ollama: %s (Rol: %s)", cleaned_terms, role)
                     return {
                         "search_terms": cleaned_terms[:4],
-                        "primary_role": str(data.get("primary_role", cleaned_terms[0])),
+                        "primary_role": role,
                     }
     except Exception as e:
-        logger.debug("Ollama no disponible o timeout para extracción de términos (%s)", e)
+        logger.debug("Ollama no disponible para extracción de términos (%s). Usando extractor universal de texto.", e)
+
+    # 2. Extractor universal adaptativo basado en NLP y patrones ocupacionales reales
+    fallback = _extract_terms_universally_from_text(cv_text, filename)
+    if fallback.get("search_terms"):
+        logger.info(
+            "Términos universales determinados para CV '%s': %s (Rol: %s)",
+            filename or "cv",
+            fallback["search_terms"],
+            fallback["primary_role"],
+        )
+        return fallback
 
     return {
         "search_terms": [],

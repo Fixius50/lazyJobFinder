@@ -8,11 +8,12 @@ import {
   ChevronRight,
   FileCheck,
   Sparkles,
+  AlertTriangle,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { InfoTooltip } from "@/components/ui/info-tooltip";
-import { CvManager } from "@/components/views/cv-manager";
+import { CvManager } from "@/components/features/cv/cv-manager";
 import { JobCard } from "@/components/features/jobs/job-card";
 import { JobFilters, EXPERIENCE_STEPS, SALARY_STEPS } from "@/components/features/jobs/job-filters";
 import { JobDetailDialog } from "@/components/features/jobs/job-detail-dialog";
@@ -23,6 +24,7 @@ import { JobListItem, JobDetail, PaginatedJobsResponse, FilterFacetsResponse, ap
 export function ApplicationsView() {
   const [jobsData, setJobsData] = useState<PaginatedJobsResponse | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
+  const [apiError, setApiError] = useState<string | null>(null);
   const [showCvPanel, setShowCvPanel] = useState<boolean>(true);
   const [facets, setFacets] = useState<FilterFacetsResponse | null>(null);
 
@@ -133,6 +135,7 @@ export function ApplicationsView() {
         sort_order: "desc",
       });
       setJobsData(res);
+      setApiError(null);
       if (res.has_cv !== undefined) {
         setHasActiveCv(res.has_cv);
       }
@@ -140,6 +143,7 @@ export function ApplicationsView() {
       loadFacets();
     } catch (err: any) {
       console.error("[ApplicationsView] Error obteniendo ofertas:", err);
+      setApiError(err.message || "Error al conectar con la API local de lazyJobFinder.");
     } finally {
       if (!silent) {
         setLoading(false);
@@ -411,11 +415,29 @@ export function ApplicationsView() {
                   <Sparkles className="h-4 w-4 animate-spin text-primary" />
                   <span>Buscando ofertas compatibles en portales de empleo y evaluando con IA...</span>
                 </div>
-                <span className="text-[11px] text-muted-foreground animate-pulse">
+                <span className="text-2xs text-muted-foreground animate-pulse">
                   {jobsData && jobsData.total > 0
                     ? `${jobsData.total} ofertas encontradas hasta el momento`
                     : "Rastreando Indeed, LinkedIn y Glassdoor..."}
                 </span>
+              </div>
+            )}
+
+            {/* Banner de error explícito de comunicación sin fallbacks engañosos */}
+            {apiError && (
+              <div className="p-3 rounded-lg border border-destructive/30 bg-destructive/10 text-destructive text-xs flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="h-4 w-4 shrink-0" />
+                  <span>Error de comunicación directa con el backend: {apiError}</span>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => fetchJobs()}
+                  className="h-7 text-xs border-destructive/30 hover:bg-destructive/15 text-destructive"
+                >
+                  Reintentar
+                </Button>
               </div>
             )}
 
@@ -465,7 +487,7 @@ export function ApplicationsView() {
                       </div>
                       <div className="h-1.5 bg-primary/20 rounded-full w-full" />
                     </div>
-                    <div className="flex items-center justify-center pt-2 text-[11px] text-muted-foreground/80 gap-1.5">
+                    <div className="flex items-center justify-center pt-2 text-2xs text-muted-foreground/80 gap-1.5">
                       <RefreshCw className="h-3 w-3 animate-spin text-primary" />
                       <span>Cargando oferta {i + 1}...</span>
                     </div>

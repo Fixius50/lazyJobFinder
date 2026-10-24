@@ -154,7 +154,7 @@ function FacetSection({
         <div className="flex items-center gap-1.5">
           {selected.length > 0 && (
             <div className="flex items-center gap-1">
-              <span className="text-[10px] font-mono px-1.5 py-0.2 rounded-full bg-primary/20 text-primary font-bold">
+              <span className="text-3xs font-mono px-1.5 py-0.5 rounded-full bg-primary/20 text-primary font-bold">
                 {selected.length}
               </span>
               <button
@@ -163,7 +163,7 @@ function FacetSection({
                   e.stopPropagation();
                   onClear();
                 }}
-                className="text-[10px] text-muted-foreground hover:text-foreground px-1"
+                className="text-3xs text-muted-foreground hover:text-foreground px-1"
                 title={`Limpiar filtro de ${title}`}
               >
                 ×
@@ -177,7 +177,7 @@ function FacetSection({
       {isOpen && (
         <div className="space-y-1 pl-1 max-h-44 overflow-y-auto pr-1">
           {items.length === 0 ? (
-            <div className="text-[11px] text-muted-foreground/60 py-1 pl-1 italic">
+            <div className="text-2xs text-muted-foreground/60 py-1 pl-1 italic">
               Sin opciones registradas aún
             </div>
           ) : (
@@ -200,7 +200,7 @@ function FacetSection({
                     </span>
                   </div>
                   {item.count !== undefined && (
-                    <span className="text-[10px] font-mono text-muted-foreground/70 shrink-0 px-1 rounded bg-muted/40 group-hover:bg-muted/80">
+                    <span className="text-3xs font-mono text-muted-foreground/70 shrink-0 px-1 rounded bg-muted/40 group-hover:bg-muted/80">
                       {item.count}
                     </span>
                   )}
@@ -380,7 +380,7 @@ export function JobFilters({
             <SlidersHorizontal className="h-4 w-4 text-primary" />
             <CardTitle className="text-xs sm:text-sm font-semibold">Filtros Dinámicos</CardTitle>
             {facets?.total_jobs !== undefined && (
-              <span className="text-[10px] font-mono text-muted-foreground">({facets.total_jobs} ofertas)</span>
+              <span className="text-3xs font-mono text-muted-foreground">({facets.total_jobs} ofertas)</span>
             )}
           </div>
 
@@ -390,7 +390,7 @@ export function JobFilters({
               variant="ghost"
               size="sm"
               onClick={onResetFilters}
-              className="h-6 px-1.5 text-[11px] text-muted-foreground hover:text-foreground flex items-center gap-1"
+              className="h-6 px-1.5 text-2xs text-muted-foreground hover:text-foreground flex items-center gap-1"
               title="Restablecer todos los filtros"
             >
               <RotateCcw className="h-3 w-3" />
@@ -440,7 +440,7 @@ export function JobFilters({
           {/* LUGAR Y UBICACIÓN INTEGRADA */}
           <div className="space-y-1.5 pt-1">
             <div className="flex items-center justify-between">
-              <label className="text-[11px] font-semibold text-foreground flex items-center gap-1.5">
+              <label className="text-2xs font-semibold text-foreground flex items-center gap-1.5">
                 <MapPin className="h-3.5 w-3.5 text-primary" />
                 <span>Ubicación</span>
               </label>
@@ -452,7 +452,7 @@ export function JobFilters({
                     onToggleAllLocations(true);
                     onLocationChange("");
                   }}
-                  className={`text-[10px] px-1.5 py-0.5 rounded border transition-colors flex items-center gap-1 ${
+                  className={`text-3xs px-1.5 py-0.5 rounded border transition-colors flex items-center gap-1 ${
                     isAllLocations
                       ? "bg-primary/15 border-primary/40 text-primary font-medium"
                       : "text-muted-foreground hover:text-foreground border-transparent hover:bg-muted/50"
@@ -466,7 +466,7 @@ export function JobFilters({
                   type="button"
                   onClick={handleDetectCurrentLocation}
                   disabled={isLocating}
-                  className="text-[10px] px-1.5 py-0.5 rounded border border-border/50 text-muted-foreground hover:text-foreground hover:bg-muted/50 flex items-center gap-1 transition-colors"
+                  className="text-3xs px-1.5 py-0.5 rounded border border-border/50 text-muted-foreground hover:text-foreground hover:bg-muted/50 flex items-center gap-1 transition-colors"
                   title="Detectar mi ubicación actual vía GPS"
                 >
                   <Crosshair className={`h-3 w-3 text-primary ${isLocating ? "animate-spin" : ""}`} />
@@ -507,14 +507,14 @@ export function JobFilters({
                           onToggleAllLocations(false);
                         }
                       }}
-                      className={`text-[10px] px-2 py-0.5 rounded-full border transition-all flex items-center gap-1 ${
+                      className={`text-3xs px-2 py-0.5 rounded-full border transition-all flex items-center gap-1 ${
                         isSelected
                           ? "bg-primary text-primary-foreground border-primary font-medium shadow-xs"
                           : "bg-muted/40 hover:bg-muted border-border/40 text-muted-foreground hover:text-foreground"
                       }`}
                     >
                       <span>{loc.name}</span>
-                      <span className="text-[9px] opacity-70">({loc.count})</span>
+                      <span className="text-3xs opacity-70">({loc.count})</span>
                     </button>
                   );
                 })}
@@ -530,7 +530,7 @@ export function JobFilters({
                 <span>Experiencia:</span>
               </div>
               <span
-                className={`text-[10px] font-mono font-bold px-1.5 py-0.2 rounded border ${
+                className={`text-3xs font-mono font-bold px-1.5 py-0.5 rounded border ${
                   minExperienceStep === 0
                     ? "text-muted-foreground bg-muted border-border/50"
                     : "text-primary bg-primary/10 border-primary/30"
@@ -558,7 +558,7 @@ export function JobFilters({
                 <span>Salario mínimo:</span>
               </div>
               <span
-                className={`text-[10px] font-mono font-bold px-1.5 py-0.2 rounded border ${
+                className={`text-3xs font-mono font-bold px-1.5 py-0.5 rounded border ${
                   minSalaryStep === 0
                     ? "text-muted-foreground bg-muted border-border/50"
                     : "text-emerald-400 bg-emerald-500/10 border-emerald-500/20"
@@ -646,7 +646,7 @@ export function JobFilters({
               </div>
               <div className="flex items-center gap-1">
                 {(selectedSource || selectedStatus || minScore > 0 || exclusionTerm) && (
-                  <span className="text-[10px] font-mono px-1.5 py-0.2 rounded-full bg-primary/20 text-primary font-bold">
+                  <span className="text-3xs font-mono px-1.5 py-0.5 rounded-full bg-primary/20 text-primary font-bold">
                     activo
                   </span>
                 )}
@@ -658,7 +658,7 @@ export function JobFilters({
               <div className="space-y-2.5 pt-2 pl-1 pr-1">
                 {/* Portal Fuente dinámico */}
                 <div className="space-y-1">
-                  <label className="text-[11px] font-medium text-muted-foreground">Portal de origen:</label>
+                  <label className="text-2xs font-medium text-muted-foreground">Portal de origen:</label>
                   <Select
                     value={selectedSource}
                     onChange={(e) => onSourceChange(e.target.value)}
@@ -675,7 +675,7 @@ export function JobFilters({
 
                 {/* Estado de la candidatura */}
                 <div className="space-y-1">
-                  <label className="text-[11px] font-medium text-muted-foreground">Estado:</label>
+                  <label className="text-2xs font-medium text-muted-foreground">Estado:</label>
                   <Select
                     value={selectedStatus}
                     onChange={(e) => onStatusChange(e.target.value)}
@@ -692,7 +692,7 @@ export function JobFilters({
 
                 {/* Score Mínimo ATS */}
                 <div className="space-y-1">
-                  <div className="flex justify-between text-[11px] font-medium text-muted-foreground">
+                  <div className="flex justify-between text-2xs font-medium text-muted-foreground">
                     <span>Afinidad ATS mínima:</span>
                     <span className="font-mono text-primary font-semibold">{minScore > 0 ? `≥ ${minScore}%` : "Cualquiera"}</span>
                   </div>
@@ -710,7 +710,7 @@ export function JobFilters({
                 {/* Palabras a excluir */}
                 {onExclusionTermChange && (
                   <div className="space-y-1">
-                    <label className="text-[11px] font-medium text-muted-foreground flex items-center gap-1">
+                    <label className="text-2xs font-medium text-muted-foreground flex items-center gap-1">
                       <Ban className="h-3 w-3 text-destructive" />
                       <span>Excluir términos:</span>
                     </label>
@@ -731,7 +731,7 @@ export function JobFilters({
                     variant="outline"
                     size="sm"
                     onClick={onSaveCriteria}
-                    className="w-full text-[11px] h-7 flex items-center justify-center gap-1.5 border-dashed border-primary/30 text-primary hover:bg-primary/10"
+                    className="w-full text-2xs h-7 flex items-center justify-center gap-1.5 border-dashed border-primary/30 text-primary hover:bg-primary/10"
                     title="Guardar estos criterios para las búsquedas automáticas en segundo plano"
                   >
                     <Save className="h-3 w-3" />

@@ -52,9 +52,9 @@ def list_jobs(
     sort_order: str = Query("desc", pattern="^(asc|desc)$"),
 ) -> Dict[str, Any]:
     """Lista las ofertas de empleo de SQLite con soporte de filtros multicriterio avanzados, mapa y paginación."""
-    from ...tailoring.cv_reader import get_active_cv_text_and_meta
-    cv_text, cv_meta = get_active_cv_text_and_meta()
-    has_active_cv = bool(cv_meta.get("has_cv") and cv_text.strip())
+    from ...tailoring.cv_reader import get_active_cv_status
+    cv_status = get_active_cv_status()
+    has_active_cv = cv_status.get("has_cv", False)
 
     if not has_active_cv:
         return {
@@ -102,9 +102,9 @@ def get_job_filter_facets() -> Dict[str, Any]:
     Devuelve dinámicamente las opciones y conteos reales de filtros (portales, modalidades,
     categorías, formación, salarios, etc.) presentes en las ofertas extraídas de los portales.
     """
-    from ...tailoring.cv_reader import get_active_cv_text_and_meta
-    cv_text, cv_meta = get_active_cv_text_and_meta()
-    has_active_cv = bool(cv_meta.get("has_cv") and cv_text.strip())
+    from ...tailoring.cv_reader import get_active_cv_status
+    cv_status = get_active_cv_status()
+    has_active_cv = cv_status.get("has_cv", False)
 
     if not has_active_cv:
         return {

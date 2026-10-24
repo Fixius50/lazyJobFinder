@@ -1,8 +1,13 @@
 """Aplicación FastAPI principal para la interfaz de administración local de lazyJobFinder."""
 
 import logging
+import mimetypes
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+# Garantizar tipos MIME correctos para hojas de estilo y scripts estáticos
+mimetypes.add_type("text/css", ".css")
+mimetypes.add_type("application/javascript", ".js")
 
 from .routes import cv, jobs, maintenance, search, settings, system
 

@@ -5,7 +5,10 @@ import logging
 import os
 import time
 from typing import Any, Dict, List, Optional
-import requests
+try:
+    import requests
+except ImportError:
+    requests = None
 
 logger = logging.getLogger("lazyJobFinder.evaluator.ollama")
 

@@ -377,12 +377,18 @@ def delete_uploaded_cv(filename: str) -> Dict[str, Any]:
     deleted_jobs = db.delete_jobs_by_cv_filename(clean_name)
     logger.info("Eliminadas %d ofertas asociadas al CV '%s'", deleted_jobs, clean_name)
 
-    # 2. Eliminar el archivo físico del disco
+    # 2. Eliminar el archivo físico del disco y su caché
     try:
         os.remove(target_path)
     except Exception as e:
         logger.error("Error al eliminar archivo CV '%s': %s", clean_name, e)
         raise HTTPException(status_code=500, detail=f"No se pudo eliminar el archivo: {str(e)}")
+
+    try:
+        from ...tailoring.cv_reader import invalidate_cv_cache
+        invalidate_cv_cache(clean_name)
+    except Exception as inv_err:
+        logger.debug("Error invalidando cache de CV: %s", inv_err)
 
     # 3. Si era el CV activo seleccionado, volver a 'none'
     reverted_to_none = False

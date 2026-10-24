@@ -82,6 +82,7 @@ Este documento establece las normas obligatorias de desarrollo, arquitectura y c
 - **Búsqueda únicamente al subir**: El rastreo automático en portales se ejecuta exclusivamente al subir un nuevo archivo CV.
 - **Cambio de CV sin re-escaneo**: Al seleccionar en el desplegable un CV ya existente, no se realiza ninguna llamada externa a portales; la interfaz filtra localmente las ofertas que ya se trajeron para ese CV (`WHERE cv_filename = :cv`).
 - **Eliminación en cascada**: Al borrar un CV, se eliminan del almacenamiento local tanto el archivo físico como todas las ofertas vinculadas a dicho CV en la base de datos SQLite.
+- **Extracción única y caché multinivel (Cero re-parseos)**: El archivo físico del CV (PDF, MD, TXT) se parsea una única vez cuando se sube o se modifica. Su texto se almacena en caché en memoria RAM (`_CV_TEXT_CACHE`) y en disco (`.extracted_<cv>.txt`). Queda terminantemente prohibido re-parsear el documento en consultas de listado/filtrado de ofertas (`/jobs`), cálculo de facetas o iteraciones de evaluación. Las consultas de interfaz utilizan comprobaciones ultraligeras de puntero (`get_active_cv_status()`) y el motor de scoring reutiliza la instancia de `ProfileVerifier` y el texto en memoria para todo el lote de vacantes.
 
 ---
 
@@ -117,4 +118,11 @@ Este documento establece las normas obligatorias de desarrollo, arquitectura y c
 ## 18. Arquitectura de Página Única y Terminal en Ventana Modal
 - **Foco absoluto en Candidaturas**: La pantalla principal es una Single Page Application en la ruta raíz `/` orientada exclusivamente a la gestión y revisión de ofertas de empleo.
 - **Terminal en Modal**: La monitorización de logs de Docker (app y Ollama) y del pipeline de búsqueda se gestiona mediante un diálogo modal interactivo (`TerminalLogsDialog`) accesible desde la cabecera, eliminando conmutadores de páginas principales o pestañas secundarias innecesarias.
+
+---
+
+## 19. Notificaciones Flotantes y Cero Popups Nativos de Navegador
+- **Prohibido `window.alert` invasivo**: Queda prohibido bloquear la navegación con cuadros de diálogo modales nativos del navegador.
+- **Recepción unificada abajo a la derecha**: Todos los avisos, confirmaciones y mensajes del sistema fluyen a través del componente unificado `Toaster` (`web/src/components/ui/toast.tsx`), renderizándose como tarjetas estilizadas flotantes en la esquina inferior derecha (`fixed bottom-4 right-4`), con auto-clasificación visual por tipo (éxito, error, advertencia, información), cierre automático y soporte para descarte manual.
+
 

@@ -188,11 +188,11 @@ class JobPipelineRunner:
                             if score >= min_score and eval_res.get("should_apply"):
                                 doc_paths = None
                                 if generate_docs:
-                                    from ..tailoring.cv_reader import get_active_cv_text_and_meta
-                                    _, cv_meta = get_active_cv_text_and_meta()
+                                    from ..tailoring.cv_reader import get_active_cv_status
+                                    cv_status = get_active_cv_status()
 
                                     # Si el usuario subió un CV o si tenemos el perfil cargado en profile.yaml
-                                    if cv_meta.get("has_cv") or bool(self.profile):
+                                    if cv_status.get("has_cv") or bool(self.profile):
                                         # 3. Adaptación honesta y validada de CV y Carta de Presentación
                                         cv_md, diff_audit = await asyncio.to_thread(self.cv_tailorer.tailor, job, eval_res)
                                         letter_md = await asyncio.to_thread(self.letter_generator.generate, job, eval_res)

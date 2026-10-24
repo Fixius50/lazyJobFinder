@@ -19,11 +19,13 @@ Si eres un modelo de Inteligencia Artificial que trabaja en este repositorio, co
 8. UX Fluida y Mantenimiento Directo: Controles de CV unificados en una sola línea en la cabecera. El vaciado de historial opera con modal directo de confirmación (sin requerir escribir frases de texto).
 9. Auto-Recarga en Caliente: El backend vigila cambios en `src/` y reinicia el proceso automáticamente.
 10. Prohibición de Testeo por Navegador: Jamás utilizar subagentes de navegador automatizado para testeo del sistema.
-11. Ciclo de Vida de CVs Desacoplado: Búsqueda únicamente al subir nuevo CV; cambio de CV en el desplegable no relanza llamadas externas; eliminación en cascada de ofertas en SQLite.
+11. Ciclo de Vida de CVs y Extracción Única: Búsqueda únicamente al subir nuevo CV; cambio de CV en el desplegable no relanza llamadas externas; eliminación en cascada de ofertas en SQLite; extracción y parseo del documento una sola vez con caché multinivel (RAM y `.extracted_<cv>.txt`); comprobaciones ligeras en UI sin re-parsear PDF.
 12. Centralización Estricta de `__pycache__`: Todo el bytecode reside exclusivamente en `.cache/pycache/` (`PYTHONPYCACHEPREFIX` y `sitecustomize.py`). Cero carpetas `__pycache__` en el árbol de código.
 13. UI con Unidades Relativas y Alias `@/...`: En Tailwind/CSS solo unidades relativas (`text-2xs`, `text-3xs`, `rem`, `em`, `clamp()`). Cero `px` arbitrarios (`text-[10px]`, `text-[11px]`). Importaciones frontend exclusivamente con alias `@/...` sin rutas relativas (`./`, `../`).
 14. Cero Archivos Puente o Redundantes: Prohibidos archivos pasarela dedicados a re-exportar, re-importar o redirigir rutas estáticamente.
 15. CSS Moderno y Centralizado: `globals.css` utiliza variables fluidas, `clamp()`, `color-mix()`, `@supports (backdrop-filter: ...)` y `@media (prefers-reduced-motion)`.
 16. Cero Mocks o Fallbacks Silenciosos: Comunicación directa y verídica con FastAPI y SQLite local. Si un servicio cae, mostrar el error real de forma transparente para permitir reintento.
 17. SPA de Página Única y Terminal en Modal: La app se centra exclusivamente en "Candidaturas" en `/`. El monitoreo de contenedores Docker y pipeline se abre mediante modal interactivo (`TerminalLogsDialog`) desde la cabecera.
+18. Notificaciones Flotantes Abajo a la Derecha: Cero popups modales nativos (`window.alert`). Todos los avisos se canalizan a través de `Toaster` en la esquina inferior derecha con auto-clasificación visual por tipo.
+
 

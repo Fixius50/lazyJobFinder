@@ -65,11 +65,79 @@ def extract_text_from_pdf(pdf_path: str) -> str:
     return "\n\n".join(text_parts)
 
 
-def extract_cv_text(file_path: str) -> str:
-    """Extrae y normaliza el texto de cualquier archivo CV admitido (.pdf, .md, .txt)."""
+# =============================================================================
+# CACHÉ EN DOS NIVELES DE TEXTO DE CV (MEMORIA RAM + TEXTO EN DISCO)
+# =============================================================================
+
+# Estructura en memoria: file_path -> (mtime, size_bytes, extracted_text)
+_CV_TEXT_CACHE: Dict[str, Tuple[float, int, str]] = {}
+
+
+def _get_extracted_cache_path(file_path: str) -> str:
+    """Devuelve la ruta del archivo de texto plano extraído (.txt) para evitar re-parseos de PDF."""
+    dirname = os.path.dirname(os.path.abspath(file_path))
+    basename = os.path.basename(file_path)
+    return os.path.join(dirname, f".extracted_{basename}.txt")
+
+
+def invalidate_cv_cache(filename_or_path: Optional[str] = None) -> None:
+    """Invalida la caché en memoria y elimina archivos temporales de texto extraído."""
+    global _CV_TEXT_CACHE
+    if not filename_or_path:
+        _CV_TEXT_CACHE.clear()
+        logger.debug("Caché de texto de CVs en memoria vaciada por completo.")
+        return
+
+    clean_name = os.path.basename(filename_or_path)
+    # 1. Limpiar entradas en memoria que coincidan
+    keys_to_del = [k for k in _CV_TEXT_CACHE if os.path.basename(k) == clean_name or k == filename_or_path]
+    for k in keys_to_del:
+        _CV_TEXT_CACHE.pop(k, None)
+
+    # 2. Limpiar archivo de caché en disco si existe
+    disk_cache_file = os.path.join(UPLOAD_DIR, f".extracted_{clean_name}.txt")
+    if os.path.exists(disk_cache_file):
+        try:
+            os.remove(disk_cache_file)
+            logger.debug("Caché persistente de texto eliminada: %s", disk_cache_file)
+        except OSError:
+            pass
+
+
+def extract_cv_text(file_path: str, force_refresh: bool = False) -> str:
+    """Extrae y normaliza el texto de cualquier archivo CV admitido (.pdf, .md, .txt).
+    
+    Implementa caché en dos niveles (memoria RAM y texto plano en disco):
+    1. Si ya se extrajo en memoria y el archivo físico no cambió (mtime/size), retorna en 0 ms.
+    2. Si el proceso se reinició pero ya existía la extracción previa en disco, lee el .txt directo en <1 ms.
+    3. Solo si es la primera vez que se sube o si el archivo fue modificado, parsea el binario PDF con pypdf.
+    """
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"Archivo no encontrado: {file_path}")
 
+    mtime = os.path.getmtime(file_path)
+    size = os.path.getsize(file_path)
+    cache_path = _get_extracted_cache_path(file_path)
+
+    # Nivel 1: Caché en memoria RAM (ultra-rápido, 0 I/O)
+    if not force_refresh and file_path in _CV_TEXT_CACHE:
+        cached_mtime, cached_size, cached_text = _CV_TEXT_CACHE[file_path]
+        if cached_mtime == mtime and cached_size == size:
+            return cached_text
+
+    # Nivel 2: Caché persistente en disco (sin pasar por pypdf)
+    if not force_refresh and os.path.exists(cache_path):
+        try:
+            if os.path.getmtime(cache_path) >= mtime:
+                with open(cache_path, "r", encoding="utf-8") as f:
+                    text = f.read().strip()
+                if text:
+                    _CV_TEXT_CACHE[file_path] = (mtime, size, text)
+                    return text
+        except Exception as read_err:
+            logger.debug("Error leyendo caché persistente de CV: %s", read_err)
+
+    # Nivel 3: Extracción real del documento
     ext = os.path.splitext(file_path)[1].lower()
 
     if ext == ".pdf":
@@ -86,8 +154,49 @@ def extract_cv_text(file_path: str) -> str:
 
     # Normalizar espacios y saltos de línea excesivos
     normalized = re.sub(r"\r\n|\r", "\n", raw_text)
-    normalized = re.sub(r"\n{3,}", "\n\n", normalized)
-    return normalized.strip()
+    normalized = re.sub(r"\n{3,}", "\n\n", normalized).strip()
+
+    # Guardar en memoria
+    _CV_TEXT_CACHE[file_path] = (mtime, size, normalized)
+
+    # Persistir en disco para futuros arranques
+    try:
+        with open(cache_path, "w", encoding="utf-8") as f:
+            f.write(normalized)
+    except Exception as save_err:
+        logger.debug("Error escribiendo caché persistente de CV: %s", save_err)
+
+    return normalized
+
+
+def get_active_cv_status() -> Dict[str, Any]:
+    """Devuelve el estado y metadatos del CV activo sin parsear el archivo (operación ultraligera O(1)).
+    
+    Usar esta función en endpoints de listado, filtros o comprobaciones de salud para evitar
+    el coste innecesario de abrir y procesar archivos PDF en cada interacción.
+    """
+    pointer = read_active_cv_pointer()
+    selected_filename = pointer.get("selected_filename", "none")
+
+    if selected_filename and selected_filename not in ("none", "default"):
+        custom_path = os.path.join(UPLOAD_DIR, os.path.basename(selected_filename))
+        if os.path.exists(custom_path) and os.path.getsize(custom_path) > 0:
+            return {
+                "has_cv": True,
+                "filename": os.path.basename(custom_path),
+                "path": custom_path,
+                "search_terms": pointer.get("search_terms", []),
+                "primary_role": pointer.get("primary_role", ""),
+            }
+
+    return {
+        "has_cv": False,
+        "filename": "Ninguno",
+        "path": "",
+        "search_terms": [],
+        "primary_role": "",
+    }
+
 
 
 def _extract_terms_universally_from_text(cv_text: str, filename: Optional[str] = None) -> Dict[str, Any]:
@@ -284,12 +393,11 @@ def extract_search_terms_from_cv(cv_text: str, filename: Optional[str] = None) -
 
 
 
-def get_active_cv_text_and_meta() -> Tuple[str, Dict[str, Any]]:
+def get_active_cv_text_and_meta(force_refresh: bool = False) -> Tuple[str, Dict[str, Any]]:
     """
     Recupera el texto y los metadatos del CV actualmente configurado como activo,
     incluyendo sus términos de búsqueda adaptados universalmente.
-    Si se ha subido y seleccionado un archivo en data/uploaded_cvs/, lee ese archivo.
-    Si no hay archivos subidos o está en 'none', devuelve texto vacío con has_cv=False (sin filtrado de CV).
+    Aprovecha la caché en dos niveles para evitar re-parseos innecesarios.
     """
     pointer = read_active_cv_pointer()
     selected_filename = pointer.get("selected_filename", "none")
@@ -298,7 +406,7 @@ def get_active_cv_text_and_meta() -> Tuple[str, Dict[str, Any]]:
         custom_path = os.path.join(UPLOAD_DIR, os.path.basename(selected_filename))
         if os.path.exists(custom_path):
             try:
-                text = extract_cv_text(custom_path)
+                text = extract_cv_text(custom_path, force_refresh=force_refresh)
                 cached_terms = pointer.get("search_terms") or []
                 primary_role = pointer.get("primary_role", "")
 

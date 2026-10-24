@@ -92,6 +92,40 @@ class ScoringEngine:
         self.profile = self._load_profile(profile_path)
         self.verifier = ProfileVerifier(self.profile)
         self.min_score = settings.get("evaluacion", {}).get("umbral_minimo_puntuacion", 65)
+        self._cached_cv_filename: Optional[str] = None
+        self._cached_cv_text: str = ""
+        self._cached_cv_meta: Dict[str, Any] = {}
+        self._cached_verifier: Optional[ProfileVerifier] = None
+
+    def get_active_cv_context(self) -> Tuple[str, Dict[str, Any], Optional[ProfileVerifier]]:
+        """Recupera el texto del CV y el ProfileVerifier reutilizándolos en memoria durante todo el lote.
+        
+        Garantiza que el documento CV solo se procese una única vez y que el conjunto de competencias
+        y reglas se mantenga en memoria RAM para todas las evaluaciones consecutivas.
+        """
+        from ..tailoring.cv_reader import get_active_cv_status, get_active_cv_text_and_meta
+        status = get_active_cv_status()
+        active_fn = status.get("filename", "none")
+
+        if not status.get("has_cv"):
+            self._cached_cv_filename = active_fn
+            self._cached_cv_text = ""
+            self._cached_cv_meta = status
+            self._cached_verifier = None
+            return "", status, None
+
+        if self._cached_cv_filename == active_fn and self._cached_verifier is not None:
+            return self._cached_cv_text, self._cached_cv_meta, self._cached_verifier
+
+        text, meta = get_active_cv_text_and_meta()
+        verifier = ProfileVerifier(self.profile if not text else {}, cv_text=text)
+
+        self._cached_cv_filename = active_fn
+        self._cached_cv_text = text
+        self._cached_cv_meta = meta
+        self._cached_verifier = verifier
+
+        return text, meta, verifier
 
     def _load_profile(self, path: str) -> Dict[str, Any]:
         try:
@@ -168,7 +202,13 @@ class ScoringEngine:
 
         return True, "Apta para evaluación completa.", analysis_meta
 
-    def _evaluate_with_rules_fallback(self, job: Dict[str, Any], meta: Dict[str, Any], cv_text: str = "") -> Dict[str, Any]:
+    def _evaluate_with_rules_fallback(
+        self,
+        job: Dict[str, Any],
+        meta: Dict[str, Any],
+        cv_text: str = "",
+        verifier: Optional[ProfileVerifier] = None,
+    ) -> Dict[str, Any]:
         """Cálculo estructurado por reglas locales neutral para cualquier profesión y CV."""
         job_title = (job.get("title") or "").lower()
         job_desc = (job.get("description") or "").lower()
@@ -176,8 +216,8 @@ class ScoringEngine:
         matched = []
         missing = []
 
-        verifier = ProfileVerifier(self.profile if not cv_text else {}, cv_text=cv_text)
-        candidate_skills = list(verifier.allowed_skills)
+        active_verifier = verifier or self._cached_verifier or ProfileVerifier(self.profile if not cv_text else {}, cv_text=cv_text)
+        candidate_skills = list(active_verifier.allowed_skills)
 
         # Contrastar competencias del CV o perfil contra la oferta
         if candidate_skills:
@@ -243,7 +283,7 @@ class ScoringEngine:
             "job_id": job["id"],
             "score": final_score,
             "fit_level": fit_level,
-            "matched_skills": verifier.validate_matched_skills(matched),
+            "matched_skills": active_verifier.validate_matched_skills(matched),
             "missing_skills": missing,
             "strengths": [f"Coincidencias clave detectadas: {', '.join(matched)}."] if matched else ["Sin coincidencias técnicas directas con el CV."],
             "gaps": ["No se encontraron competencias obligatorias suficientes."] if matches_count == 0 else [],
@@ -258,10 +298,9 @@ class ScoringEngine:
         Si no hay ningún CV activo (has_cv=False), no filtra ni descarta:
         acepta y conserva la oferta directamente para que el usuario no pierda vacantes.
         """
-        from ..tailoring.cv_reader import get_active_cv_text_and_meta
-        cv_text, cv_meta = get_active_cv_text_and_meta()
+        cv_text, cv_meta, verifier = self.get_active_cv_context()
 
-        if not cv_meta.get("has_cv") or not cv_text.strip():
+        if not cv_meta.get("has_cv") or not cv_text.strip() or verifier is None:
             logger.info("Oferta ID %d sin evaluar: no hay CV activo configurado", job["id"])
             no_cv_eval = {
                 "job_id": job["id"],
@@ -295,8 +334,6 @@ class ScoringEngine:
             self.db.save_evaluation(discarded_eval)
             self.db.update_job_status(job["id"], "discarded")
             return discarded_eval
-
-        verifier = ProfileVerifier(self.profile if not cv_text else {}, cv_text=cv_text)
 
         system_prompt = (
             "Eres un evaluador y seleccionador profesional de empleo independiente y riguroso. "
@@ -332,7 +369,7 @@ class ScoringEngine:
 
         # Si Ollama no está online, ir directo a reglas locales sin retardos
         if not self.ollama.check_health().get("online", False):
-            eval_result = self._evaluate_with_rules_fallback(job, meta, cv_text=cv_text)
+            eval_result = self._evaluate_with_rules_fallback(job, meta, cv_text=cv_text, verifier=verifier)
             self.db.save_evaluation(eval_result)
             new_status = "evaluated" if eval_result["should_apply"] else "discarded"
             self.db.update_job_status(job["id"], new_status)
@@ -379,7 +416,7 @@ class ScoringEngine:
                 job.get("title"),
                 e,
             )
-            eval_result = self._evaluate_with_rules_fallback(job, meta, cv_text=cv_text)
+            eval_result = self._evaluate_with_rules_fallback(job, meta, cv_text=cv_text, verifier=verifier)
 
         self.db.save_evaluation(eval_result)
         new_status = "evaluated" if eval_result["should_apply"] else "discarded"

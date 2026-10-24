@@ -121,27 +121,33 @@ if %ERRORLEVEL% neq 0 (
     echo   [OK] Motor de Docker operativo.
 )
 
-:: 3. Compilacion automatica del panel web estatico si no existe o hubo cambios
-if exist "%~dp0web\out\index.html" goto :WEB_OK
-echo   [i] Compilando panel web estatico unificado (Next.js)...
-if exist "%~dp0web\node_modules" goto :DO_BUILD
-pushd "%~dp0web"
-call npm install
-popd
+:: 3. Verificacion y compilacion automatica del panel web estatico
+set "NEED_BUILD=0"
+if not exist "%~dp0web\out\index.html" set "NEED_BUILD=1"
+if not exist "%~dp0web\out\_next" set "NEED_BUILD=1"
 
-:DO_BUILD
-pushd "%~dp0web"
-call npm run build
-popd
-if %ERRORLEVEL% equ 0 (
-    echo   [OK] Panel web compilado correctamente.
-) else (
-    echo   [!] Advertencia en la compilacion web. Se intentara continuar.
+if "!NEED_BUILD!"=="0" (
+    for /f %%i in ('powershell -NoProfile -Command "if ((Get-ChildItem -Path '%~dp0web\src' -Recurse | Measure-Object -Property LastWriteTime -Maximum).Maximum -gt (Get-Item '%~dp0web\out\index.html').LastWriteTime) { Write-Output '1' } else { Write-Output '0' }" 2^>nul') do set "NEED_BUILD=%%i"
 )
-goto :CHECK_DONE
 
-:WEB_OK
-echo   [OK] Panel web estatico verificado en web\out.
+if "!NEED_BUILD!"=="1" (
+    echo   [i] Actualizando panel web estatico unificado (Next.js)...
+    if not exist "%~dp0web\node_modules" (
+        pushd "%~dp0web"
+        call npm install
+        popd
+    )
+    pushd "%~dp0web"
+    call npm run build
+    popd
+    if !ERRORLEVEL! equ 0 (
+        echo   [OK] Panel web compilado y sincronizado correctamente.
+    ) else (
+        echo   [!] Advertencia en la compilacion web. Se intentara continuar.
+    )
+) else (
+    echo   [OK] Panel web estatico sincronizado y verificado en web\out.
+)
 
 :CHECK_DONE
 exit /b 0
@@ -185,22 +191,25 @@ if %ERRORLEVEL% equ 0 (
     )
 )
 
-echo --^> Esperando a que el backend unificado responda en http://127.0.0.1:8000...
+echo --^> Esperando a que el backend y los servicios esten completamente listos en http://127.0.0.1:8000...
 set /a API_RETRY=0
 :WAIT_API
 ping -n 3 127.0.0.1 >nul 2>&1
-curl -s -f --connect-timeout 2 --max-time 3 http://127.0.0.1:8000/api/health >nul 2>&1
+curl -s -f --connect-timeout 2 --max-time 3 http://127.0.0.1:8000/api/system/status >nul 2>&1
 if !ERRORLEVEL! neq 0 (
     set /a API_RETRY+=1
     if !API_RETRY! lss 25 (
-        echo       Iniciando servicios del backend... [!API_RETRY!/25]
+        echo       Iniciando servicios del backend y estabilizando interfaz... [!API_RETRY!/25]
         goto :WAIT_API
     ) else (
         echo   [!] El backend tarda en responder. Continuando de todos modos...
     )
 ) else (
-    echo   [OK] Backend unificado conectado y respondiendo en http://127.0.0.1:8000
+    echo   [OK] Backend y servicios conectados correctamente en http://127.0.0.1:8000
 )
+
+:: Margen de estabilizacion para asegurar que la cache de static files y Docker este caliente
+timeout /t 2 /nobreak >nul
 
 echo.
 echo =====================================================================

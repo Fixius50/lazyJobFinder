@@ -9,7 +9,6 @@ import {
   Eye,
   RefreshCw,
   Trash2,
-  RotateCcw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
@@ -144,23 +143,6 @@ export function CvManager({ onCvChanged, className = "" }: CvManagerProps) {
   };
 
   const [deletingFile, setDeletingFile] = useState<string | null>(null);
-  const [isClearingCache, setIsClearingCache] = useState<boolean>(false);
-
-  const handleClearCache = async () => {
-    setIsClearingCache(true);
-    try {
-      const res = await api.clearCvCache();
-      setUploadMessage({
-        text: res.message || "Caché de CV eliminada y re-sincronizada.",
-        error: false,
-      });
-      await loadData(true);
-    } catch (err: any) {
-      alert(`Error al limpiar caché: ${err.message}`);
-    } finally {
-      setIsClearingCache(false);
-    }
-  };
 
   const handleDeleteCV = async (filename: string) => {
     if (!window.confirm(`¿Eliminar definitivamente "${filename}" del almacenamiento local?`)) {
@@ -245,19 +227,6 @@ export function CvManager({ onCvChanged, className = "" }: CvManagerProps) {
           title="Subir nuevo currículum (PDF, Markdown o TXT)"
         >
           <Upload className={`h-4 w-4 ${isUploading ? "animate-bounce text-amber-400" : ""}`} />
-        </Button>
-
-        {/* Limpiar caché y forzar re-análisis limpio */}
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          onClick={handleClearCache}
-          disabled={!activeCV || activeCV.type === "none" || isClearingCache}
-          className="h-8 w-8 p-0 shrink-0 text-amber-500 hover:text-amber-400 hover:border-amber-500/50"
-          title={activeCV?.type !== "none" ? `Borrar caché de "${activeCV?.filename}" y re-analizar con IA` : "Sin CV seleccionado"}
-        >
-          <RotateCcw className={`h-4 w-4 ${isClearingCache ? "animate-spin text-amber-400" : ""}`} />
         </Button>
 
         {/* Papelera: eliminar CV seleccionado */}

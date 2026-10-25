@@ -133,6 +133,8 @@ class OllamaClient:
                     resp.status_code,
                     resp.text[:200],
                 )
+            except requests.exceptions.Timeout as e:
+                logger.warning("Ollama ocupado procesando tokens en CPU (intento %d/%d superó los %ss): %s", attempt, max_retries, timeout, e)
             except requests.exceptions.RequestException as e:
                 self._cached_health = {"online": False, "error": str(e)}
                 self._last_health_check_time = time.time()

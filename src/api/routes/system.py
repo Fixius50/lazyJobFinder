@@ -684,8 +684,15 @@ def shutdown_system() -> Dict[str, Any]:
 
     # Detener el runner y la API local en un hilo desacoplado para responder a la petición HTTP
     def _delayed_exit():
-        time.sleep(0.4)
+        time.sleep(0.5)
         logger.info("Apagando backend de lazyJobFinder...")
+        if client:
+            try:
+                me = client.containers.get("lazyjob_app")
+                me.stop(timeout=3)
+                return
+            except Exception as e:
+                logger.debug("Error deteniendo contenedor propio vía Docker: %s", e)
         if not trigger_shutdown():
             import sys
             sys.exit(0)

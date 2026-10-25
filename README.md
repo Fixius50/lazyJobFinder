@@ -28,33 +28,30 @@
 
 ---
 
-## 📦 Dónde están los Instaladores y Paquetes de Distribución
+## 📦 Dónde Descargar los Instaladores y Cómo Generarlos
 
-El proyecto incluye instaladores empaquetados y scripts de despliegue listos para distribuir en las siguientes ubicaciones del repositorio:
+Los instaladores finales compilados pesan varios cientos de megabytes (incluyendo imágenes Docker y el modelo de IA local) y **están excluidos de Git en `.gitignore`** para mantener el repositorio limpio y ágil.
 
-* 📂 **Carpeta de Paquetes Generados (`dist/`):**  
-  [Ver carpeta de instaladores generados (`dist/`)](./dist) *(se crea al compilar releases)*.
-  - **Windows (Instalador Guiado):** `dist/lazyJobFinder-Setup-v1.0.0.exe` (asistente de instalación gráfica con Inno Setup).
-  - **Windows (Portable):** `dist/lazyJobFinder-Portable-v1.0.0.zip` (descomprimir y ejecutar con `install.bat` o `launch.bat`).
-  - **GNU/Linux (Autoextraíble):** `dist/lazyJobFinder-1.0.0-linux.run` (instalador binario ejecutable).
-  - **GNU/Linux (Tarball):** `dist/lazyJobFinder-1.0.0-linux.tar.gz` (con `installer.sh` interactivo).
-  - **Verificación:** `dist/SHA256SUMS.txt` con los hashes criptográficos de cada binario.
+* 🌐 **Descarga de Releases Oficiales:**  
+  Puedes descargar directamente los ejecutables listos para usar desde la sección oficial de [GitHub Releases](https://github.com/Fixius50/lazyJobFinder/releases):
+  - **Windows:** Instalador asistido `.exe` (Inno Setup) y paquete portable `.zip`.
+  - **GNU/Linux:** Instalador autoextraíble `.run` y tarball `.tar.gz`.
 
-* 🛠️ **Herramientas y Fuentes de Empaquetado (`packaging/`):**  
-  [Ver carpeta de configuración de empaquetado (`packaging/`)](./packaging).
-  - [`packaging/build_release.py`](./packaging/build_release.py): Orquestador maestro que audita el código contra fugas de datos personales, valida las capas Docker, compila el instalador de Windows/Linux y genera los paquetes finales en `./dist/`.
-  - [`packaging/windows/`](./packaging/windows): Scripts de instalación por lotes (`install.bat`, `installer.iss`, `launch.bat`, `stop.bat`).
-  - [`packaging/linux/`](./packaging/linux): Scripts de instalación Bash (`installer.sh`, `launch.sh`, `stop.sh`).
+* 🛠️ **Cómo generar los instaladores tú mismo:**  
+  Todo el código y las herramientas para compilar tus propios paquetes están disponibles en el directorio [`packaging/`](./packaging):
+  - [`packaging/build_release.py`](./packaging/build_release.py): Orquestador maestro que audita el código contra fugas de datos personales, valida las capas Docker y genera los paquetes finales.
+  - [`packaging/windows/`](./packaging/windows): Scripts de Windows (`installer.iss`, `install.bat`, `launch.bat`, `stop.bat`).
+  - [`packaging/linux/`](./packaging/linux): Scripts de GNU/Linux (`installer.sh`, `launch.sh`, `stop.sh`).
 
-### ¿Cómo generar los instaladores tú mismo?
-Puedes generar los instaladores de release con un solo comando:
-```cmd
-# Desde Windows con start.bat (Opción 2 del menú)
-.\start.bat --package
+  Para compilar los instaladores localmente:
+  ```cmd
+  # Desde Windows usando el menú de start.bat (Opción [2]):
+  .\start.bat --package
 
-# O invocando directamente el orquestador Python:
-python packaging/build_release.py --platform all --skip-model
-```
+  # O invocando directamente el orquestador Python:
+  python packaging/build_release.py --platform all --skip-model
+  ```
+  *(Al compilar, los ejecutables e instaladores resultantes se depositan automáticamente en la carpeta local `dist/` junto con sus hashes `SHA256SUMS.txt`).*
 
 ---
 
@@ -159,7 +156,7 @@ lazyJobFinder/
 │   ├── compose.release.yaml  # Docker Compose de producción para distribución
 │   ├── windows/              # Scripts e instalador Inno Setup para Windows (.exe, .zip)
 │   └── linux/                # Scripts e instalador autoextraíble para Linux (.run, .tar.gz)
-├── dist/                     # Carpeta de salida con los instaladores y paquetes generados
+├── dist/                     # Carpeta de salida con los instaladores generados localmente (excluida de git)
 ├── src/                      # Código fuente del backend Python (FastAPI, conectores, IA)
 │   ├── api/                  # Endpoints REST (jobs, cv, settings, system)
 │   ├── connectors/           # Conectores multi-portal (LinkedIn, Indeed, InfoJobs, Glassdoor, etc.)

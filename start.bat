@@ -279,8 +279,4 @@ echo.
 echo --^> Deteniendo servicios Docker ordenadamente...
 docker compose stop >nul 2>&1
 echo   [OK] Servicios detenidos. Datos y configuracion conservados intactos.
-goto :EXIT
-
-:EXIT
-echo.
-echo Finalizado.
+exit 0

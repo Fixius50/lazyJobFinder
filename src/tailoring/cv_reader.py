@@ -375,7 +375,7 @@ def extract_search_terms_from_cv(cv_text: str, filename: Optional[str] = None) -
                 "- Basa los títulos ÚNICAMENTE en la experiencia, formación o competencias descritas en el CV. No inventes oficios de otros sectores.\n\n"
                 f"TEXTO DEL CV:\n{cv_text[:2000]}"
             )
-            raw = ollama.generate(prompt=prompt, format_json=True, timeout=15)
+            raw = ollama.generate(prompt=prompt, format_json=True, timeout=60)
             data = json.loads(raw)
             terms = data.get("search_terms", [])
             if isinstance(terms, list) and len(terms) > 0:

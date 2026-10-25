@@ -98,7 +98,15 @@ class ConnectorManager:
             }
 
         active_terms = cv_meta.get("search_terms") or []
-        if not active_terms:
+        configured_terms = busqueda_cfg.get("terminos") or []
+
+        combined_terms: List[str] = []
+        for t in list(active_terms) + list(configured_terms):
+            clean_t = str(t).strip()
+            if clean_t and clean_t.lower() not in [x.lower() for x in combined_terms]:
+                combined_terms.append(clean_t)
+
+        if not combined_terms:
             logger.info("El CV activo '%s' no tiene términos de búsqueda válidos. Omitiendo escaneo.", cv_meta.get("filename"))
             return [], {
                 "total_encontradas": 0,
@@ -106,7 +114,7 @@ class ConnectorManager:
                 "fuentes": {c.name: 0 for c in self.connectors},
             }
 
-        search_terms = active_terms
+        search_terms = combined_terms[:6]
         logger.info(
             "Discovery utilizando términos adaptados al CV activo '%s' (%s): %s",
             cv_meta.get("filename"),

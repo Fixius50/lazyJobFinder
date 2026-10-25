@@ -215,3 +215,18 @@ def clear_applications_history(req: ClearHistoryRequest) -> Dict[str, Any]:
         "message": "Historial de candidaturas y ejecuciones eliminado por completo.",
         "details": stats,
     }
+
+
+@router.post("/clear-cache")
+def clear_all_system_caches() -> Dict[str, Any]:
+    """Invalida todas las cachés del sistema: texto de CVs, SQLite cv_cache y cachés internas."""
+    from ...tailoring.cv_reader import invalidate_cv_cache
+    invalidate_cv_cache(None)
+
+    db = get_db()
+    db.log_event("INFO", "maintenance", "Todas las cachés del sistema han sido purgadas.")
+
+    return {
+        "success": True,
+        "message": "Cachés de CV y memoria del sistema vaciadas correctamente.",
+    }

@@ -190,6 +190,13 @@ export const api = {
       active_info: ActiveCVInfo;
       message: string;
     }>("/cv/reevaluate", { method: "POST" }),
+  clearCvCache: () =>
+    request<{
+      success: boolean;
+      message: string;
+      active_info: ActiveCVInfo;
+      recalculated: boolean;
+    }>("/cv/cache/clear", { method: "POST" }),
   getPreflight: () => request<PreflightResponse>("/search/preflight"),
   triggerSearch: () => request<{ success: boolean; message: string }>("/search/run", { method: "POST" }),
   getSearchStatus: () => request<any>("/search/status"),
@@ -331,5 +338,9 @@ export const api = {
     request<{ success: boolean; message: string; details: any }>("/maintenance/clear-history", {
       method: "POST",
       body: JSON.stringify({ confirmation_phrase: confirmationPhrase }),
+    }),
+  maintenanceClearCache: () =>
+    request<{ success: boolean; message: string }>("/maintenance/clear-cache", {
+      method: "POST",
     }),
 };

@@ -1,15 +1,18 @@
 # =============================================================================
-# Dockerfile para lazyJobFinder (Python 3.11 Slim)
+# Dockerfile para lazyJobFinder (Debian GNU/Linux 12 'Bookworm' Slim + Python 3.11)
 # =============================================================================
+# Base Linux oficial ultra-optimizada para inferencia nativa en CPU y bajo consumo de memoria.
 
-FROM python:3.11-slim
+FROM python:3.11-slim-bookworm
 
-# Evitar prompts interactivos y buffers de Python
+# Evitar prompts interactivos, buffers y optimizar subprocesos CPU
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPYCACHEPREFIX=/app/src/__pycache__ \
     PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    OMP_NUM_THREADS=4 \
+    MKL_NUM_THREADS=4
 
 WORKDIR /app
 

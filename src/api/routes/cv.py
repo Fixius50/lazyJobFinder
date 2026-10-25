@@ -416,3 +416,37 @@ def delete_uploaded_cv(filename: str) -> Dict[str, Any]:
     }
 
 
+@router.post("/cache/clear")
+def clear_cv_cache() -> Dict[str, Any]:
+    """Invalida todas las cachés de CV (memoria RAM y SQLite cv_cache) y recalcula los términos del CV activo."""
+    from ...tailoring.cv_reader import invalidate_cv_cache, get_active_cv_text_and_meta, extract_search_terms_from_cv
+    invalidate_cv_cache(None)
+
+    pointer = read_active_cv_pointer()
+    sel_name = pointer.get("selected_filename", "none")
+    recalculated = False
+
+    if sel_name and sel_name not in ("none", "default"):
+        try:
+            cv_text, _ = get_active_cv_text_and_meta(force_refresh=True)
+            new_info = extract_search_terms_from_cv(cv_text, sel_name)
+            write_active_cv_pointer(
+                sel_name,
+                search_terms=new_info.get("search_terms", []),
+                primary_role=new_info.get("primary_role", ""),
+            )
+            recalculated = True
+        except Exception as e:
+            logger.warning("Error recalculando términos de CV tras limpiar caché: %s", e)
+
+    db = get_db()
+    db.log_event("INFO", "cv", "Caché de currículums invalidada y términos sincronizados.")
+
+    return {
+        "success": True,
+        "message": "Caché de CVs eliminada y términos del perfil re-sincronizados correctamente.",
+        "recalculated": recalculated,
+        "active_info": _get_active_cv_info(),
+    }
+
+

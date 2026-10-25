@@ -78,7 +78,13 @@ def invalidate_cv_cache(filename_or_path: Optional[str] = None) -> None:
     global _CV_TEXT_CACHE
     if not filename_or_path:
         _CV_TEXT_CACHE.clear()
-        logger.debug("Caché de texto de CVs en memoria vaciada por completo.")
+        try:
+            from ..database import Database
+            with Database()._get_connection() as conn:
+                conn.execute("DELETE FROM cv_cache;")
+        except Exception as e:
+            logger.debug("Error vaciando cv_cache en SQLite: %s", e)
+        logger.info("Caché de CVs (memoria RAM y SQLite cv_cache) vaciada por completo.")
         return
 
     clean_name = os.path.basename(filename_or_path)
@@ -217,7 +223,32 @@ def get_active_cv_status() -> Dict[str, Any]:
 def _extract_terms_universally_from_text(cv_text: str, filename: Optional[str] = None) -> Dict[str, Any]:
     """Extractor universal de oficios, titulaciones y categorías profesionales directamente del texto del CV."""
     candidates: List[str] = []
-    lines = [line.strip() for line in (cv_text or "").splitlines() if line.strip()]
+    raw_lines = [line.strip() for line in (cv_text or "").splitlines() if line.strip()]
+
+    # Unwrapping: unir líneas partidas a mitad de oración o título en el PDF
+    lines: List[str] = []
+    for l in raw_lines:
+        if lines and not lines[-1].endswith((".", ":", ";", "!", "?")) and (
+            re.match(r"^(?:de|en|y|o|con|para|del|al|a|la|el|los|las|\()\b", l, re.IGNORECASE)
+            or l[0].islower()
+        ):
+            lines[-1] += " " + l
+        else:
+            lines.append(l)
+
+    joined_text = " ".join(lines)
+
+    # 1. Detección universal de titulaciones, certificados y oficios (cualquier sector)
+    cert_pattern = re.compile(
+        r"(?:t[eé]cnico(?:\s+superior|\s+especialista|\s+medio)?|grado(?:\s+superior)?|licenciatura|ingenier[ií]a|diplomatura|ciclo\s+formativo|fp\s*(?:ii|2)?|oficial|operario|especialista|auxiliar|responsable|coordinador|analista|consultor|diseñador|maestro|profesor)\s+(?:en|de)?\s+([^,\.\n\(\):;]{3,50})",
+        re.IGNORECASE,
+    )
+    for m in cert_pattern.finditer(joined_text):
+        raw_val = m.group(1).strip()
+        raw_val = re.sub(r"\s+(?:de|en|y|o|con|para|del|al)$", "", raw_val, flags=re.IGNORECASE).strip()
+        if 3 <= len(raw_val) <= 45 and not any(w in raw_val.lower() for w in ("calle", "avda", "teléfono", "telefono", "email", "contacto", "dni")):
+            clean_spec = raw_val.title()
+            candidates.append(clean_spec)
 
     profile_line_regex = re.compile(
         r"^(?:puesto(?:\s+deseado)?|perfil(?:\s+profesional)?|título(?:\s+profesional)?|"
@@ -282,7 +313,7 @@ def _extract_terms_universally_from_text(cv_text: str, filename: Optional[str] =
         re.IGNORECASE,
     )
 
-    # 1. Buscar campos explícitos de perfil / objetivo en las primeras líneas
+    # 3. Buscar campos explícitos de perfil / objetivo en las primeras líneas
     for line in lines[:30]:
         m = profile_line_regex.match(line)
         if m:
@@ -291,7 +322,7 @@ def _extract_terms_universally_from_text(cv_text: str, filename: Optional[str] =
             if 3 <= len(val) <= 45:
                 candidates.append(val.title())
 
-    # 2. Buscar roles ocupacionales mediante regex en el texto
+    # 4. Buscar roles ocupacionales mediante regex en el texto
     for line in lines[:50]:
         if any(w in line.lower() for w in ("calle", "avda", "teléfono", "telefono", "email", "dni", "código postal", "españa")):
             continue
@@ -303,21 +334,18 @@ def _extract_terms_universally_from_text(cv_text: str, filename: Optional[str] =
             if 4 <= len(clean_m) <= 45:
                 candidates.append(clean_m.title())
 
-    # 3. Analizar nombre de archivo solo para términos sectoriales significativos
+    # 5. Analizar nombre de archivo para términos sectoriales o profesionales
     if filename:
         clean_fn = re.sub(r"^(?:cv[_\-\s]*|curriculum[_\-\s]*|hoja[_\-\s]*de[_\-\s]*vida[_\-\s]*)", "", filename, flags=re.IGNORECASE)
         clean_fn = re.sub(r"[\._\-]\w+$", "", clean_fn)
         clean_fn = re.sub(r"\d+", "", clean_fn)
         parts = [p.strip() for p in re.split(r"[_\-\s]+", clean_fn) if len(p.strip()) >= 4]
+        stop_fn_words = {"curriculum", "resume", "nombre", "fecha", "version", "final", "nuevo", "actualizado", "copia"}
         for part in parts:
-            if any(term in part.lower() for term in (
-                "fontaner", "electric", "mecanic", "abogad", "sanitar", "enferm",
-                "admin", "comerc", "cocin", "camarer", "mozo", "almacen",
-                "grafic", "softw", "program", "veterinar", "vigilant"
-            )):
+            if part.lower() not in stop_fn_words:
                 candidates.append(part.title())
 
-    # 4. Deduplicar manteniendo orden
+    # 6. Deduplicar manteniendo orden
     seen = set()
     unique_candidates = []
     for c in candidates:
@@ -326,7 +354,7 @@ def _extract_terms_universally_from_text(cv_text: str, filename: Optional[str] =
             seen.add(norm)
             unique_candidates.append(c)
 
-    # 5. Si aún no hay nada (formato no estándar), tomar el primer encabezado relevante
+    # 7. Si aún no hay nada (formato no estándar), tomar el primer encabezado relevante
     if not unique_candidates and lines:
         for line in lines[:10]:
             clean = re.split(r"[\.,;\(\)\-–]", line)[0].strip()

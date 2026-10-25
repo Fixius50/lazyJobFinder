@@ -55,12 +55,7 @@ export const DEFAULT_MODALITIES: FacetItem[] = [
   { id: "hibrido", label: "Híbrido", count: 0 },
 ];
 
-export const DEFAULT_CATEGORIES: FacetItem[] = [
-  { id: "logistica", label: "Logística y Almacén", count: 0 },
-  { id: "operaciones", label: "Producción y Operaciones", count: 0 },
-  { id: "mantenimiento", label: "Mantenimiento y Oficios", count: 0 },
-  { id: "administracion", label: "Administración y Gestión", count: 0 },
-];
+export const DEFAULT_CATEGORIES: FacetItem[] = [];
 
 export const DEFAULT_EDUCATIONS: FacetItem[] = [
   { id: "sin estudios requeridos", label: "Sin estudios específicos", count: 0 },

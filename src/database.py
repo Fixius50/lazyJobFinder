@@ -1571,6 +1571,24 @@ class Database:
                                     skill_counter[clean_s] += 1
                     except Exception:
                         pass
+            if not skill_counter and offer_rows:
+                title_stop_words = {
+                    "para", "con", "del", "las", "los", "por", "una", "uno", "unos", "unas", "sobre",
+                    "entre", "hacia", "hasta", "desde", "según", "sin", "tras", "durante", "mediante",
+                    "oferta", "puesto", "vacante", "trabajo", "empleo", "sector", "perfil", "urgente",
+                    "incorporación", "inmediata", "experiencia", "contrato", "jornada", "completa",
+                    "junior", "senior", "spain", "españa", "espana", "remoto", "madrid", "barcelona"
+                }
+                title_counter: collections.Counter = collections.Counter()
+                for off in offer_rows:
+                    t = str(off["title"] or "")
+                    tokens = [re.sub(r"[^\wáéíóúñÁÉÍÓÚÑ]", "", w) for w in t.split()]
+                    for tok in tokens:
+                        if len(tok) >= 4 and tok.lower() not in title_stop_words and not tok.isdigit():
+                            title_counter[tok.capitalize()] += 1
+                for name, count in title_counter.most_common(15):
+                    if count >= 2:
+                        skill_counter[name] = count
 
             categories = [
                 {"id": name.lower(), "label": name, "count": count}

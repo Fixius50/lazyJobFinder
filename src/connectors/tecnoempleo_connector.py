@@ -249,7 +249,7 @@ class TecnoempleoConnector(BaseConnector):
                             source="tecnoempleo",
                             location=loc,
                             is_remote=is_remote,
-                            description=clean_desc or f"Oferta de {title} en {company} ({loc})",
+                            description=desc or f"Oferta de {title} en {company} ({loc})",
                             date_posted=pub_date,
                             contract_type=contract_type,
                             schedule=schedule,

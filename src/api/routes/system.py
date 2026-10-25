@@ -6,6 +6,8 @@ import logging
 import os
 import re
 import subprocess
+import threading
+import time
 from typing import Any, AsyncGenerator, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
@@ -655,3 +657,39 @@ async def stream_logs_sse(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.post("/heartbeat")
+def heartbeat_ping() -> Dict[str, Any]:
+    """Latido enviado por la pestaña web abierta para confirmar presencia del usuario."""
+    return {"status": "alive", "timestamp": time.time()}
+
+
+@router.post("/shutdown")
+def shutdown_system() -> Dict[str, Any]:
+    """
+    Ordena la detención inmediata de lazyJobFinder al cerrar el navegador o la pestaña.
+    Detiene lazyjob_ollama y finaliza el proceso de lazyJobFinder, lo que causa la
+    parada automática de Docker en el host.
+    """
+    from ..deps import trigger_shutdown
+    client = _get_docker_client()
+    if client:
+        try:
+            ollama_c = client.containers.get("lazyjob_ollama")
+            ollama_c.stop(timeout=5)
+            logger.info("lazyjob_ollama detenido inmediatamente por cierre de aplicación.")
+        except Exception as e:
+            logger.debug("Error deteniendo lazyjob_ollama en shutdown: %s", e)
+
+    # Detener el runner y la API local en un hilo desacoplado para responder a la petición HTTP
+    def _delayed_exit():
+        time.sleep(0.4)
+        logger.info("Apagando backend de lazyJobFinder...")
+        if not trigger_shutdown():
+            import sys
+            sys.exit(0)
+
+    threading.Thread(target=_delayed_exit, daemon=True).start()
+    return {"success": True, "message": "Apagado del sistema iniciado inmediatamente."}
+

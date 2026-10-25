@@ -1110,8 +1110,11 @@ class Database:
 
         clean_target_cv = str(target_cv or "").strip()
         if clean_target_cv and clean_target_cv.lower() not in ("none", "ninguno", "all", "todas", "*", ""):
-            where_clauses.append("(j.cv_filename = ? OR j.cv_filename IS NULL)")
+            where_clauses.append("j.cv_filename = ?")
             params.append(clean_target_cv)
+        else:
+            # Si no hay CV activo, no mostrar ninguna oferta (estado limpio)
+            where_clauses.append("1=0")
 
         if only_ui_saved:
             where_clauses.append("j.ui_saved = 1")
@@ -1499,7 +1502,9 @@ class Database:
             clean_target_cv = str(target_cv or "").strip()
             if clean_target_cv and clean_target_cv.lower() not in ("none", "ninguno", "all", "todas", "*", ""):
                 escaped_cv = clean_target_cv.replace("'", "''")
-                base_where += f" AND (j.cv_filename = '{escaped_cv}' OR j.cv_filename IS NULL)"
+                base_where += f" AND j.cv_filename = '{escaped_cv}'"
+            else:
+                base_where += " AND 1=0"
 
             constants = _load_shared_constants()
             portal_sources = constants.get("portal_sources", {})

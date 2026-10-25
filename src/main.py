@@ -133,6 +133,11 @@ async def main() -> None:
     app = runner.telegram_bot.build_application()
 
     stop_event = asyncio.Event()
+    try:
+        import src.api.deps as api_deps
+        api_deps.set_stop_event(stop_event)
+    except Exception:
+        pass
 
     def _signal_handler():
         logger.info("Señal de detención recibida. Finalizando tareas limpiamente...")

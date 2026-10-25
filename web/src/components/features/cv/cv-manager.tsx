@@ -102,6 +102,7 @@ export function CvManager({ onCvChanged, className = "" }: CvManagerProps) {
       setUploadProgress(0);
       setUploadStage("");
       setUploadMessage({ text: err.message || "Error al subir el archivo.", error: true });
+      await loadData(true);
     } finally {
       setTimeout(() => {
         setIsUploading(false);

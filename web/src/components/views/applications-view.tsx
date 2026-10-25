@@ -18,7 +18,6 @@ import { JobCard } from "@/components/features/jobs/job-card";
 import { JobFilters, EXPERIENCE_STEPS, SALARY_STEPS } from "@/components/features/jobs/job-filters";
 import { JobDetailDialog } from "@/components/features/jobs/job-detail-dialog";
 import { PurgeHistoryButton } from "@/components/features/maintenance/purge-history-card";
-import { ServiceToolbarActions } from "@/components/features/services/service-toolbar-actions";
 import { JobListItem, JobDetail, PaginatedJobsResponse, FilterFacetsResponse, api } from "@/lib/api";
 
 export function ApplicationsView() {
@@ -287,11 +286,6 @@ export function ApplicationsView() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {/* Servicios Docker y Acciones Globales */}
-          <ServiceToolbarActions />
-
-          <div className="h-5 w-px bg-border/60 mx-1 hidden sm:block" />
-
           {/* Botón Buscar Ofertas Ahora (visible solo si hay CV activo y NO se está buscando ofertas) */}
           {hasActiveCv && !searching && (
             <Button

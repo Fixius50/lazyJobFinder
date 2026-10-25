@@ -89,27 +89,31 @@ class ConnectorManager:
         cv_text, cv_meta = get_active_cv_text_and_meta()
 
         busqueda_cfg = self.settings.get("busqueda", {})
-        active_terms = cv_meta.get("search_terms") or []
-
-        if cv_meta.get("has_cv") and active_terms:
-            search_terms = active_terms
-            logger.info(
-                "Discovery utilizando términos adaptados al CV activo '%s' (%s): %s",
-                cv_meta.get("filename"),
-                cv_meta.get("primary_role", "perfil profesional"),
-                search_terms,
-            )
-            print(f"\n[Escáner de Empleo] Buscando en portales ofertas para el CV '{cv_meta.get('filename')}': {search_terms}", flush=True)
-        else:
-            search_terms = busqueda_cfg.get("terminos", [])
-
-        if not search_terms:
-            logger.info("Sin términos de búsqueda configurados ni CV activo. Omitiendo escaneo en portales.")
+        if not cv_meta.get("has_cv"):
+            logger.info("Sin CV activo seleccionado. Omitiendo escaneo en portales.")
             return [], {
                 "total_encontradas": 0,
                 "nuevas_guardadas": 0,
                 "fuentes": {c.name: 0 for c in self.connectors},
             }
+
+        active_terms = cv_meta.get("search_terms") or []
+        if not active_terms:
+            logger.info("El CV activo '%s' no tiene términos de búsqueda válidos. Omitiendo escaneo.", cv_meta.get("filename"))
+            return [], {
+                "total_encontradas": 0,
+                "nuevas_guardadas": 0,
+                "fuentes": {c.name: 0 for c in self.connectors},
+            }
+
+        search_terms = active_terms
+        logger.info(
+            "Discovery utilizando términos adaptados al CV activo '%s' (%s): %s",
+            cv_meta.get("filename"),
+            cv_meta.get("primary_role", "perfil profesional"),
+            search_terms,
+        )
+        print(f"\n[Escáner de Empleo] Buscando en portales ofertas para el CV '{cv_meta.get('filename')}': {search_terms}", flush=True)
 
         locations = busqueda_cfg.get("ubicaciones", ["Spain"])
         hours_old = busqueda_cfg.get("antiguedad_horas", 48)

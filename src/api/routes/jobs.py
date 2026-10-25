@@ -67,6 +67,7 @@ def list_jobs(
         }
 
     db = get_db()
+    active_filename = cv_status.get("filename")
     result = db.get_jobs_paginated(
         search=search,
         exclude=exclude,
@@ -87,6 +88,7 @@ def list_jobs(
         geo_lon=geo_lon,
         geo_radius_km=geo_radius_km,
         only_ui_saved=only_ui_saved,
+        cv_filename=active_filename,
         page=page,
         page_size=page_size,
         sort_by=sort_by,
@@ -121,7 +123,8 @@ def get_job_filter_facets() -> Dict[str, Any]:
         }
 
     db = get_db()
-    return db.get_filter_facets()
+    active_filename = cv_status.get("filename")
+    return db.get_filter_facets(cv_filename=active_filename)
 
 
 @router.get("/{job_id}")

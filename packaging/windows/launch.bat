@@ -192,9 +192,16 @@ echo.
 echo Abriendo el panel en tu navegador...
 start http://localhost:8000
 
+echo =====================================================================
+echo   lazyJobFinder en ejecucion.
+echo   - Al cerrar el navegador o esta ventana, los servicios se detendran solos.
+echo   - Tambien puedes pulsar Ctrl+C para salir inmediatamente.
+echo =====================================================================
 echo.
-echo Para detener la aplicacion, ejecuta stop.bat o pulsa cualquier tecla en esta ventana.
-pause >nul
+
+:: Iniciar monitor vigilante en segundo plano para asegurar que si la ventana se cierra o el contenedor para, se detenga Compose
+start /b cmd /c "docker wait lazyjob_app >nul 2>&1 & cd /d "%~dp0" & docker compose stop >nul 2>&1"
+docker compose logs -f lazyjobfinder
 call "%~dp0stop.bat"
 exit /b 0
 

@@ -41,4 +41,3 @@ data/active_cv.json
 # Empaquetado y artefactos de distribución
 dist/
 packaging/staging/
-

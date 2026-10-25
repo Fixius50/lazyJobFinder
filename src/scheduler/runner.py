@@ -99,6 +99,14 @@ class JobPipelineRunner:
                 await self.telegram_bot.send_message("⏳ Ya hay un escaneo de empleo en curso. Por favor espera a que finalice.")
             return
 
+        from ..tailoring.cv_reader import get_active_cv_status
+        cv_status = get_active_cv_status()
+        if not cv_status.get("has_cv"):
+            logger.info("Pipeline omitido: no hay ningún CV activo configurado en el sistema.")
+            if is_manual and self.telegram_bot.is_configured():
+                await self.telegram_bot.send_message("ℹ️ No hay ningún CV activo seleccionado. Sube o activa un CV en el panel para buscar ofertas.")
+            return
+
         async with self._async_lock:
             start_time = time.time()
             trigger_type = trigger_label or ("manual" if is_manual else "scheduled")
@@ -331,6 +339,13 @@ class JobPipelineRunner:
         """
         # Registrar explícitamente días omitidos previos en el histórico
         self.db.record_skipped_days()
+
+        # Si no hay CV activo, omitir catch-up en el arranque
+        from ..tailoring.cv_reader import get_active_cv_status
+        cv_status = get_active_cv_status()
+        if not cv_status.get("has_cv"):
+            logger.info("Sin CV activo configurado en el sistema. Omitiendo catch-up de ejecución diaria en el arranque.")
+            return
 
         hora = self.settings.get("horario", {}).get("hora", 8)
         minuto = self.settings.get("horario", {}).get("minuto", 30)

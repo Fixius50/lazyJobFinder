@@ -117,6 +117,7 @@ echo "====================================================================="
 echo "  [SISTEMA LISTO] lazyJobFinder está activo:"
 echo "    - Panel Web:    http://localhost:8000"
 echo "    - Motor Ollama: http://localhost:11434"
+echo "  (Al cerrar el navegador o esta terminal, los servicios se detendrán solos)"
 echo "====================================================================="
 echo ""
 
@@ -125,8 +126,18 @@ if command -v xdg-open &>/dev/null; then
     xdg-open "http://localhost:8000" &>/dev/null &
 fi
 
-echo "Para detener la aplicación, ejecuta: ./stop.sh"
-echo "Pulsa [ENTER] para detener los servicios ahora..."
-read -r
-./stop.sh
+# Configurar trampa de salida limpia para cualquier interrupción o cierre de shell
+cleanup() {
+    echo ""
+    echo "--> Deteniendo servicios Docker ordenadamente..."
+    docker compose stop >/dev/null 2>&1
+    exit 0
+}
+trap cleanup SIGINT SIGTERM SIGHUP EXIT
+
+# Monitor vigilante en background: si el contenedor lazyjob_app se apaga (ej. cierre de navegador), detener compose
+(docker wait lazyjob_app >/dev/null 2>&1 && docker compose stop >/dev/null 2>&1) &
+
+docker compose logs -f lazyjobfinder
+
 

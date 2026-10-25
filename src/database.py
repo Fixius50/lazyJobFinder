@@ -1030,7 +1030,7 @@ class Database:
             query = """
                 SELECT j.* FROM jobs j
                 LEFT JOIN evaluations e ON j.id = e.job_id
-                WHERE e.id IS NULL OR j.status = 'discovered'
+                WHERE e.id IS NULL AND j.status NOT IN ('evaluated', 'discarded', 'notified', 'rejected')
                 ORDER BY j.created_at DESC
                 LIMIT ?
             """
@@ -1083,6 +1083,7 @@ class Database:
         geo_radius_km: Optional[float] = None,
         only_ui_saved: bool = True,
         cv_filename: Optional[str] = None,
+        time_range: Optional[str] = "all",
         page: int = 1,
         page_size: int = 20,
         sort_by: str = "created_at",
@@ -1241,6 +1242,16 @@ class Database:
             loc_val = location.strip()
             where_clauses.append("(LOWER(j.location) LIKE ? OR j.is_remote = 1 OR LOWER(j.location) LIKE '%remot%' OR LOWER(j.location) LIKE '%teletrabaj%')")
             params.append(f"%{loc_val.lower()}%")
+
+        # 9. Filtro de Antigüedad / Fecha de publicación (all, 24h, 7d, 30d)
+        if time_range and str(time_range).strip().lower() not in ("all", "todas", "todos", "cualquiera", ""):
+            tr = str(time_range).strip().lower()
+            if tr in ("24h", "1d", "hoy", "today"):
+                where_clauses.append("(j.created_at >= datetime('now', '-1 day', 'localtime') OR j.date_posted >= date('now', '-1 day', 'localtime'))")
+            elif tr in ("7d", "week", "semana", "7_dias"):
+                where_clauses.append("(j.created_at >= datetime('now', '-7 days', 'localtime') OR j.date_posted >= date('now', '-7 days', 'localtime'))")
+            elif tr in ("30d", "month", "mes", "30_dias"):
+                where_clauses.append("(j.created_at >= datetime('now', '-30 days', 'localtime') OR j.date_posted >= date('now', '-30 days', 'localtime'))")
 
         where_str = " AND ".join(where_clauses)
 

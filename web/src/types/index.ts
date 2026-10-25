@@ -117,6 +117,7 @@ export interface JobFilterParams {
   min_score?: number;
   is_remote?: boolean;
   modality?: "all" | "presencial" | "teletrabajo" | "hibrido" | string;
+  time_range?: "all" | "24h" | "7d" | "30d" | string;
   only_ui_saved?: boolean;
   page?: number;
   page_size?: number;

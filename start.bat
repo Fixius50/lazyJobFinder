@@ -242,7 +242,7 @@ start http://localhost:8000
 echo.
 echo =====================================================================
 echo   lazyJobFinder en ejecucion.
-echo   - Al cerrar el navegador o esta terminal, los servicios se detendran solos.
+echo   - Se detiene ordenadamente al cerrar la terminal o si no hay conexiones al puerto.
 echo   - Tambien puedes pulsar Ctrl+C para salir inmediatamente.
 echo =====================================================================
 echo.

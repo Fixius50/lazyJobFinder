@@ -55,7 +55,7 @@ class TecnoempleoConnector(BaseConnector):
 
         for term in search_terms:
             encoded_term = urllib.parse.quote_plus(term)
-            search_url = f"https://www.tecnoempleo.com/busqueda-empleo.php?te={encoded_term}"
+            search_url = f"https://www.tecnoempleo.com/busqueda-empleo.php?te={encoded_term}&ord=1"
 
             try:
                 logger.debug("Consultando Tecnoempleo para '%s': %s", term, search_url)

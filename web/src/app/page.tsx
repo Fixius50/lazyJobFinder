@@ -44,25 +44,6 @@ export default function UnifiedDashboard() {
     return () => clearInterval(interval);
   }, []);
 
-  // Apagado instantáneo al cerrar la pestaña o el navegador
-  useEffect(() => {
-    const handleBeforeUnload = () => {
-      try {
-        if (navigator.sendBeacon) {
-          navigator.sendBeacon("/api/system/shutdown");
-        } else {
-          fetch("/api/system/shutdown", { method: "POST", keepalive: true });
-        }
-      } catch {
-        // Ignorar si el navegador ya ha cancelado la red
-      }
-    };
-
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    return () => {
-      window.removeEventListener("beforeunload", handleBeforeUnload);
-    };
-  }, []);
 
   return (
     <div className="flex flex-col min-h-[100dvh] w-full">

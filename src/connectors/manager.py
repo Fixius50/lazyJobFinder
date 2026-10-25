@@ -114,12 +114,23 @@ class ConnectorManager:
                 "fuentes": {c.name: 0 for c in self.connectors},
             }
 
-        search_terms = combined_terms[:6]
+        # Mantener los 2 términos principales del CV y rotar/muestrear los términos secundarios
+        # para que cada ciclo de búsqueda descubra ofertas distintas y no siempre las mismas
+        import random
+        if len(combined_terms) > 8:
+            primary_terms = combined_terms[:2]
+            secondary_terms = combined_terms[2:]
+            random.shuffle(secondary_terms)
+            search_terms = primary_terms + secondary_terms[:6]
+        else:
+            search_terms = list(combined_terms)
+
         logger.info(
-            "Discovery utilizando términos adaptados al CV activo '%s' (%s): %s",
+            "Discovery utilizando términos adaptados al CV activo '%s' (%s): %s (de %d términos posibles)",
             cv_meta.get("filename"),
             cv_meta.get("primary_role", "perfil profesional"),
             search_terms,
+            len(combined_terms),
         )
         print(f"\n[Escáner de Empleo] Buscando en portales ofertas para el CV '{cv_meta.get('filename')}': {search_terms}", flush=True)
 

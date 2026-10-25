@@ -222,6 +222,7 @@ export const api = {
     geo_lon?: number;
     geo_radius_km?: number;
     only_ui_saved?: boolean;
+    time_range?: string;
     page?: number;
     page_size?: number;
     sort_by?: string;
@@ -233,6 +234,9 @@ export const api = {
     if (params.location) searchParams.append("location", params.location);
     if (params.source) searchParams.append("source", params.source);
     if (params.status) searchParams.append("status", params.status);
+    if (params.time_range && params.time_range !== "all") {
+      searchParams.append("time_range", params.time_range);
+    }
     if (params.min_score !== undefined && params.min_score !== null)
       searchParams.append("min_score", params.min_score.toString());
     if (params.is_remote !== undefined) searchParams.append("is_remote", params.is_remote ? "true" : "false");

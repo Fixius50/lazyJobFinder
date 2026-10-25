@@ -33,6 +33,7 @@ export function ApplicationsView() {
   const [selectedSource, setSelectedSource] = useState<string>("");
   const [selectedStatus, setSelectedStatus] = useState<string>("");
   const [minScore, setMinScore] = useState<number>(0);
+  const [timeRange, setTimeRange] = useState<string>("all");
   const [currentPage, setCurrentPage] = useState<number>(1);
   const currentPageRef = useRef<number>(currentPage);
 
@@ -104,6 +105,7 @@ export function ApplicationsView() {
     selectedSource,
     selectedStatus,
     minScore,
+    timeRange,
     selectedModalities,
     selectedCategories,
     selectedEducations,
@@ -122,6 +124,7 @@ export function ApplicationsView() {
       selectedSource,
       selectedStatus,
       minScore,
+      timeRange,
       selectedModalities,
       selectedCategories,
       selectedEducations,
@@ -138,6 +141,7 @@ export function ApplicationsView() {
     selectedSource,
     selectedStatus,
     minScore,
+    timeRange,
     selectedModalities,
     selectedCategories,
     selectedEducations,
@@ -189,6 +193,7 @@ export function ApplicationsView() {
         min_salary: minSal,
         schedules: current.selectedSchedules.length > 0 ? current.selectedSchedules : undefined,
         contract_types: current.selectedContractTypes.length > 0 ? current.selectedContractTypes : undefined,
+        time_range: current.timeRange !== "all" ? current.timeRange : undefined,
         page: targetPage,
         page_size: 20,
         sort_by: "created_at",
@@ -228,6 +233,7 @@ export function ApplicationsView() {
     selectedSource,
     selectedStatus,
     minScore,
+    timeRange,
     selectedModalities,
     selectedCategories,
     selectedEducations,
@@ -252,6 +258,7 @@ export function ApplicationsView() {
     setSelectedSource("");
     setSelectedStatus("");
     setMinScore(0);
+    setTimeRange("all");
     setIsAllLocations(true);
     setLocationName("");
     setSelectedModalities([]);
@@ -457,6 +464,11 @@ export function ApplicationsView() {
               minScore={minScore}
               onMinScoreChange={(score) => {
                 setMinScore(score);
+                setCurrentPage(1);
+              }}
+              timeRange={timeRange}
+              onTimeRangeChange={(tr) => {
+                setTimeRange(tr);
                 setCurrentPage(1);
               }}
               onSubmitSearch={handleSearchSubmit}

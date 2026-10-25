@@ -111,6 +111,8 @@ export interface JobFiltersProps {
   onStatusChange: (status: string) => void;
   minScore: number;
   onMinScoreChange: (score: number) => void;
+  timeRange?: string;
+  onTimeRangeChange?: (range: string) => void;
   onSubmitSearch: (e: React.FormEvent) => void;
   onResetFilters?: () => void;
   onSaveCriteria?: () => void;
@@ -239,6 +241,8 @@ export function JobFilters({
   onStatusChange,
   minScore,
   onMinScoreChange,
+  timeRange = "all",
+  onTimeRangeChange,
   onSubmitSearch,
   onResetFilters,
   onSaveCriteria,
@@ -515,6 +519,55 @@ export function JobFilters({
                 })}
               </div>
             )}
+          </div>
+
+          {/* FILTRO DE ANTIGÜEDAD DE LA OFERTA */}
+          <div className="space-y-1.5 pt-2 border-t border-border/30">
+            <div className="flex items-center justify-between text-xs font-semibold text-foreground">
+              <div className="flex items-center gap-1.5">
+                <Clock className="h-3.5 w-3.5 text-primary" />
+                <span>Antigüedad de la oferta:</span>
+              </div>
+              <span
+                className={`text-3xs font-mono font-bold px-1.5 py-0.5 rounded border ${
+                  timeRange === "all"
+                    ? "text-muted-foreground bg-muted border-border/50"
+                    : "text-primary bg-primary/10 border-primary/30"
+                }`}
+              >
+                {timeRange === "24h"
+                  ? "24 horas"
+                  : timeRange === "7d"
+                  ? "1 semana"
+                  : timeRange === "30d"
+                  ? "1 mes"
+                  : "Todas"}
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-1 pt-0.5">
+              {[
+                { id: "all", label: "Todas en el tiempo" },
+                { id: "24h", label: "Últimas 24h" },
+                { id: "7d", label: "Última semana" },
+                { id: "30d", label: "Último mes" },
+              ].map((opt) => {
+                const isSelected = (timeRange || "all") === opt.id;
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => onTimeRangeChange && onTimeRangeChange(opt.id)}
+                    className={`text-2xs py-1 px-1.5 rounded-md border text-center transition-all font-medium ${
+                      isSelected
+                        ? "bg-primary text-primary-foreground border-primary shadow-xs"
+                        : "bg-muted/30 hover:bg-muted border-border/40 text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           {/* DESLIZANTE DE EXPERIENCIA INTEGRADO */}

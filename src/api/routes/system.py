@@ -224,7 +224,7 @@ def get_services_status() -> Dict[str, Any]:
     - error
     Utiliza resolución 100% dinámica por etiquetas de Compose y aislamiento por proyecto.
     """
-    cancel_pending_shutdown()
+    record_activity()
     client = _get_docker_client()
     services_status = {}
     current_project = _resolve_current_project(client)
@@ -660,71 +660,133 @@ async def stream_logs_sse(
     )
 
 
-_pending_shutdown_timer: Optional[threading.Timer] = None
-_shutdown_lock = threading.Lock()
+_last_activity_time: float = time.time()
+_server_start_time: float = time.time()
+_idle_watchdog_started: bool = False
 
 
-def cancel_pending_shutdown():
-    """Cancela cualquier apagado programado si la interfaz web sigue viva."""
-    global _pending_shutdown_timer
-    with _shutdown_lock:
-        if _pending_shutdown_timer and _pending_shutdown_timer.is_alive():
-            _pending_shutdown_timer.cancel()
-            _pending_shutdown_timer = None
-            logger.info("Cancelada solicitud de apagado: la interfaz web sigue activa (pestaña reconectada o recargada).")
+def record_activity() -> None:
+    """Registra actividad de red o petición en el puerto 8000."""
+    global _last_activity_time
+    _last_activity_time = time.time()
+
+
+# Alias de retrocompatibilidad
+cancel_pending_shutdown = record_activity
+
+
+def count_active_port_connections(port: int = 8000) -> int:
+    """
+    Cuenta las conexiones TCP activas (ESTABLISHED o SYN_RECV) hacia el puerto indicado.
+    Lee directamente /proc/net/tcp y /proc/net/tcp6 en Linux / contenedor Docker.
+    """
+    hex_port = f"{port:04X}"
+    active_count = 0
+    for tcp_file in ("/proc/net/tcp", "/proc/net/tcp6"):
+        if not os.path.exists(tcp_file):
+            continue
+        try:
+            with open(tcp_file, "r") as f:
+                lines = f.readlines()
+                for line in lines[1:]:
+                    parts = line.strip().split()
+                    if len(parts) >= 4:
+                        local_addr = parts[1]
+                        state = parts[3]
+                        if local_addr.endswith(f":{hex_port}") and state in ("01", "02", "03"):
+                            active_count += 1
+        except Exception:
+            pass
+    return active_count
+
+
+def _execute_shutdown() -> None:
+    """Apagado limpio y ordenado de los servicios locales y contenedores Docker."""
+    logger.info("Procediendo al apagado ordenado de servicios...")
+    client = _get_docker_client()
+    if client:
+        try:
+            ollama_c = client.containers.get("lazyjob_ollama")
+            ollama_c.stop(timeout=5)
+            logger.info("lazyjob_ollama detenido limpiamente.")
+        except Exception as e:
+            logger.debug("Error deteniendo lazyjob_ollama en shutdown: %s", e)
+
+    time.sleep(0.5)
+    logger.info("Apagando backend de lazyJobFinder...")
+    if client:
+        try:
+            me = client.containers.get("lazyjob_app")
+            me.stop(timeout=3)
+            return
+        except Exception as e:
+            logger.debug("Error deteniendo contenedor propio vía Docker: %s", e)
+    from ..deps import trigger_shutdown
+    if not trigger_shutdown():
+        import sys
+        sys.exit(0)
+
+
+def start_port_activity_watchdog(idle_seconds: int = 180, startup_grace_seconds: int = 180) -> None:
+    """
+    Vigila el puerto 8000 y la red. Si no hay conexiones activas ni peticiones HTTP
+    durante el periodo configurado, y el pipeline de búsqueda/evaluación no está en marcha,
+    procede a apagar ordenadamente los servicios.
+    """
+    global _idle_watchdog_started
+    if _idle_watchdog_started:
+        return
+    _idle_watchdog_started = True
+
+    def _watchdog_loop():
+        from ..deps import get_runner
+        time.sleep(10)
+        while True:
+            time.sleep(15)
+            now = time.time()
+
+            # 1. Margen de gracia inicial tras arranque (dar tiempo a abrir navegador y estabilizar)
+            if (now - _server_start_time) < startup_grace_seconds:
+                continue
+
+            # 2. Si el pipeline está en ejecución (buscando o evaluando con IA), no detener
+            try:
+                runner = get_runner()
+                if runner and runner.is_running:
+                    record_activity()
+                    continue
+            except Exception:
+                pass
+
+            # 3. Comprobar si existen conexiones TCP activas hacia el puerto 8000
+            active_conns = count_active_port_connections(8000)
+            if active_conns > 0:
+                record_activity()
+                continue
+
+            # 4. Comprobar tiempo de inactividad desde la última petición en la red del puerto
+            idle_elapsed = now - _last_activity_time
+            if idle_elapsed >= idle_seconds:
+                logger.info(
+                    "Sin conexiones activas ni actividad en el puerto 8000 tras %ds. Procediendo al apagado ordenado de servicios...",
+                    int(idle_elapsed),
+                )
+                _execute_shutdown()
+                break
+
+    threading.Thread(target=_watchdog_loop, daemon=True, name="PortActivityWatchdog").start()
 
 
 @router.post("/heartbeat")
 def heartbeat_ping() -> Dict[str, Any]:
-    """Latido enviado por la pestaña web abierta para confirmar presencia del usuario."""
-    cancel_pending_shutdown()
+    """Latido opcional para registrar presencia activa de usuario o cliente."""
+    record_activity()
     return {"status": "alive", "timestamp": time.time()}
 
 
 @router.post("/shutdown")
 def shutdown_system(force: bool = False) -> Dict[str, Any]:
-    """
-    Ordena la detención de lazyJobFinder al cerrar el navegador o la pestaña.
-    Aplica un margen de gracia de 4 segundos para evitar apagados accidentales por recarga de página (F5).
-    """
-    global _pending_shutdown_timer
-    from ..deps import trigger_shutdown
-
-    def _execute_shutdown():
-        logger.info("Margen de gracia cumplido sin reconexión. Procediendo al apagado ordenado de servicios...")
-        client = _get_docker_client()
-        if client:
-            try:
-                ollama_c = client.containers.get("lazyjob_ollama")
-                ollama_c.stop(timeout=5)
-                logger.info("lazyjob_ollama detenido inmediatamente por cierre de aplicación.")
-            except Exception as e:
-                logger.debug("Error deteniendo lazyjob_ollama en shutdown: %s", e)
-
-        time.sleep(0.5)
-        logger.info("Apagando backend de lazyJobFinder...")
-        if client:
-            try:
-                me = client.containers.get("lazyjob_app")
-                me.stop(timeout=3)
-                return
-            except Exception as e:
-                logger.debug("Error deteniendo contenedor propio vía Docker: %s", e)
-        if not trigger_shutdown():
-            import sys
-            sys.exit(0)
-
-    with _shutdown_lock:
-        if _pending_shutdown_timer and _pending_shutdown_timer.is_alive():
-            _pending_shutdown_timer.cancel()
-
-        if force:
-            threading.Thread(target=_execute_shutdown, daemon=True).start()
-            return {"success": True, "message": "Apagado forzado iniciado inmediatamente."}
-
-        _pending_shutdown_timer = threading.Timer(4.0, _execute_shutdown)
-        _pending_shutdown_timer.daemon = True
-        _pending_shutdown_timer.start()
-
-    return {"success": True, "message": "Apagado programado en 4 segundos si no hay reconexión de pestaña."}
+    """Ordena el apagado limpio inmediato de los servicios cuando se solicita explícitamente."""
+    threading.Thread(target=_execute_shutdown, daemon=True).start()
+    return {"success": True, "message": "Apagado ordenado de servicios iniciado."}
 

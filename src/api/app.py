@@ -22,6 +22,19 @@ app = FastAPI(
     openapi_url="/api/openapi.json",
 )
 
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+
+
+class ActivityMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        system.record_activity()
+        return await call_next(request)
+
+
+# Registrar actividad en cada petición recibida en el puerto 8000
+app.add_middleware(ActivityMiddleware)
+
 # Permitir CORS únicamente para orígenes locales del panel frontend (Next.js)
 app.add_middleware(
     CORSMiddleware,
@@ -36,6 +49,13 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
+
+
+@app.on_event("startup")
+def on_app_startup():
+    idle_sec = int(os.getenv("IDLE_SHUTDOWN_SECONDS", "180"))
+    if idle_sec > 0:
+        system.start_port_activity_watchdog(idle_seconds=idle_sec, startup_grace_seconds=180)
 
 # Montar routers bajo el prefijo /api
 app.include_router(system.router, prefix="/api")

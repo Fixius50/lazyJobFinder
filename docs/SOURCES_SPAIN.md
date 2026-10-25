@@ -1,14 +1,14 @@
 # Análisis y Verificación de Fuentes de Empleo en España
 
-Este documento detalla la verificación individual de las bolsas de empleo en España para perfiles de **Desarrollo de Aplicaciones Multiplataforma (DAM)** y desarrollo junior de software, junto con las condiciones de acceso, limitaciones reales y la estrategia de aislamiento de fallos.
+Este documento detalla la verificación individual de las bolsas de empleo en España para **cualquier disciplina o perfil profesional**, junto con las condiciones de acceso, limitaciones reales y la estrategia de aislamiento de fallos.
 
 ---
 
 ## 1. Verificación Individual de Fuentes
 
-### A. Tecnoempleo (Canales RSS Sindicados)
+### A. Tecnoempleo (Canales RSS Sindicados - Opcional / Especializado)
 - **Mecanismo de acceso**: Peticiones HTTP a `https://www.tecnoempleo.com/busqueda-empleo.php?te={termino}&en=rss`.
-- **Viabilidad real**: **Alta**. Es un portal vertical especializado exclusivamente en tecnología en España. El formato RSS es abierto y público por diseño.
+- **Viabilidad real**: **Alta**. Es un portal vertical especializado en tecnología en España. Permanece desactivado por defecto para no contaminar búsquedas generales de otras profesiones (logística, administración, sanidad, hostelería, etc.), pero puede activarse si el usuario lo requiere.
 - **Riesgos y mitigación**:
   - Si Tecnoempleo devuelve un error temporal (HTTP 500/503), el conector captura la excepción, registra un aviso en la base de datos `system_logs` y permite que los demás conectores prosigan.
 - **Coste**: 0 €/mes. Cero credenciales requeridas.

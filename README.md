@@ -1,52 +1,82 @@
 # lazyJobFinder
 
-> **Buscador autónomo, local y gratuito (0 €/mes) de ofertas de empleo con IA y Telegram para cualquier profesional.**
+> **Buscador autónomo, local y gratuito (0 €/mes) de ofertas de empleo con IA local y alertas opcionales para cualquier perfil profesional.**
 
-**lazyJobFinder** se ejecuta de forma autónoma en tu propio ordenador mediante contenedores Docker. Escanea múltiples portales de empleo en España (Tecnoempleo, InfoJobs, Indeed, LinkedIn, Glassdoor y Google Jobs), deduplica ofertas repetidas, evalúa su afinidad mediante un modelo de lenguaje local (Ollama) sin enviar datos personales a APIs externas de pago, adapta cartas de presentación y centraliza todo en un panel web moderno con notificaciones opcionales por Telegram.
+**lazyJobFinder** se ejecuta de forma autónoma en tu propio equipo mediante contenedores Docker. Escanea múltiples portales de empleo en España (LinkedIn, Indeed, Glassdoor, Google Jobs, InfoJobs y Tecnoempleo), deduplica vacantes repetidas, evalúa su afinidad mediante un modelo de lenguaje local (Ollama) sin enviar jamás tus datos personales a servicios cloud de pago, redacta cartas de presentación a medida y centraliza todo en un panel web moderno con notificaciones opcionales por Telegram.
 
 ---
 
 ## ✨ Características Principales
 
-- **Inferencia IA 100% Local (Coste 0 €/mes):** Evaluación, scoring y redacción procesados íntegramente en tu equipo con Ollama (`qwen2.5:3b-instruct` en CPU Q4_K_M). Cero dependencias de OpenAI, Anthropic o servicios cloud de pago.
-- **Universal para Cualquier Profesión (100% Global):** Admite cualquier tipo de currículum y oficio (mozo de almacén, carretillero, logística, sanitario, administración, hostelería, mantenimiento, educación, tecnología, etc.). Prohibido cualquier sesgo o categorización artificial por sectores.
-- **Sin Plantillas ni Datos Prefijados:** El sistema no impone perfiles de muestra ni términos fijos en `profile.yaml` o `settings.yaml`. Opera de forma totalmente limpia y autónoma.
-- **Dinamismo Inteligente según CV Activo:**
-  - **Sin CV activo:** La pantalla de candidaturas permanece limpia con un mensaje orientativo, los filtros laterales se ocultan y no se lanzan búsquedas en portales.
-  - **Con CV activo (PDF, Markdown o TXT):** La IA analiza el texto de tu currículum, extrae automáticamente los términos de búsqueda laboral reales (ej. "Mozo de almacén", "Carretillero"), sincroniza la búsqueda en los portales y evalúa la afinidad contra tu experiencia real sin inventar datos.
-- **Portales Globales Activos por Defecto:** Escaneo en las mayores plataformas de empleo del mercado (Indeed España, LinkedIn, Glassdoor, Google Jobs e InfoJobs API). Los portales exclusivos de un único nicho (como Tecnoempleo) permanecen desactivados por defecto para no contaminar búsquedas generales.
-- **Deduplicación Inteligente:** Algoritmo difuso basado en RapidFuzz (`url_hash` y `content_fingerprint`) que detecta y agrupa vacantes idénticas publicadas en diferentes portales.
-- **Garantía Anti-Alucinación:** Valida objetivamente los requisitos contra el CV aportado. No inventa empresas ni competencias inexistentes. Si faltan requisitos, los expone transparentemente.
-- **Panel Web Unificado en http://localhost:8000:** Interfaz fluida desarrollada en Next.js servida por FastAPI:
-  - Barra de CV compacta integrada en una sola línea en la cabecera (selector, previsualización, subida y borrado).
-  - Vaciado de historial ágil mediante modal de confirmación directo (sin requerir escribir frases de texto).
-  - Filtros interactivos de afinidad y modalidad (Remoto, Híbrido, Presencial).
-  - Monitorización en vivo de servicios y consola de logs vía SSE.
-- **Auto-Recarga en Caliente:** El backend vigila cambios en el código fuente Python (`src/`) y reinicia el proceso automáticamente sin esperas ni comandos manuales.
-- **Canal Telegram Desacoplado:** Alertas opcionales en el móvil con los documentos adjuntos, sin ser obligatorio para operar el sistema.
-- **Sistema de Empaquetado y Distribución:** Generador automatizado de instaladores para **Windows** (`.exe` y `.zip` portable) y **GNU/Linux** (`.run` ejecutable y `.tar.gz`) con auditoría de seguridad previa y verificación SHA-256.
+- 🤖 **Inteligencia Artificial 100% Local (0 €/mes sin costes ocultos)**: Todo el procesamiento (análisis del CV, puntuación de afinidad laboral y redacción de cartas de presentación) se ejecuta directamente en tu ordenador con Ollama (`qwen2.5:3b-instruct` cuantizado en CPU Q4_K_M). Cero suscripciones mensuales, cero claves de pago (OpenAI, Claude o Gemini) y cero fugas de datos personales a la nube.
+- 🎯 **Universal para Cualquier Sector y Profesión**: 100% neutral y sin sesgos artificiales. Diseñado tanto para logística, almacén, transporte, sanidad, administración y hostelería, como para diseño, educación, ventas, oficios técnicos o tecnología. La IA analiza las competencias reales que figuren en tu currículum sin encasillarte.
+- ⚡ **Extracción Única y Caché en SQLite (`cv_cache`)**: Sube tu currículum en formato PDF, TXT o Markdown. El texto se extrae e indexa una única vez y queda persistido en la base de datos local SQLite (`data/lazyjobfinder.db`). Sin archivos residuales en disco, con previsualización inmediata y comprobaciones de afinidad instantáneas.
+- 🔄 **Dinamismo Inteligente según tu CV**:
+  - **Sin CV activo:** El panel se mantiene limpio y ordenado con una guía orientativa, ocultando filtros irrelevantes y sin lanzar búsquedas a ciegas.
+  - **Con CV activo:** El sistema extrae automáticamente las palabras clave de empleo adecuadas a tu perfil y contrasta las vacantes contra tu experiencia y formación real.
+- 🔍 **Rastreo Multi-Portal con Deduplicación Inteligente**: Explora las plataformas de empleo más utilizadas del mercado (Indeed España, LinkedIn, Glassdoor, Google Jobs e InfoJobs API). Su algoritmo difuso (RapidFuzz) detecta y unifica ofertas idénticas publicadas a la vez en varios sitios para que nunca veas vacantes repetidas.
+- ⚖️ **Scoring Objetivo y Garantía Anti-Alucinaciones**: Evalúa de 0 a 100 la compatibilidad del puesto respecto a los requisitos obligatorios y valorables de la oferta. No inventa empresas ni competencias que no tengas; si faltan requisitos, te lo indica con total transparencia.
+- ✍️ **Cartas de Presentación y Documentación Adaptada**: Genera automáticamente cartas de motivación personalizadas para cada vacante, respetando tus fortalezas reales y listas para descargar en Markdown o PDF profesional limpio.
+- 💻 **Panel Web Todo-en-Uno (http://localhost:8000)**: Interfaz gráfica ágil desarrollada en Next.js y servida por FastAPI:
+  - Barra de control de CV compacta e integrada en la cabecera (selector rápido, previsualizador de texto, subida y eliminación).
+  - Vaciado de historial rápido con modal de confirmación directo.
+  - Filtros instantáneos por afinidad (Excelente, Buena, Media) y modalidad laboral (Remoto, Híbrido, Presencial).
+  - Consola de logs y monitor de salud de servicios en tiempo real vía Server-Sent Events (SSE).
+- 🔥 **Auto-Recarga en Caliente (Hot-Reload)**: Modifica código en `src/` y el backend se reinicia automáticamente en memoria en milisegundos sin reiniciar contenedores Docker.
+- 📱 **Canal Telegram Desacoplado**: Recibe opcionalmente un resumen matutino con las mejores ofertas del día y los documentos adjuntos en tu teléfono móvil.
+- 📦 **Instaladores Autónomos y Portabilidad**: Paquetes de instalación listos para usar en **Windows** e instaladores ejecutables para **GNU/Linux**.
+
+---
+
+## 📦 Dónde están los Instaladores y Paquetes de Distribución
+
+El proyecto incluye instaladores empaquetados y scripts de despliegue listos para distribuir en las siguientes ubicaciones del repositorio:
+
+* 📂 **Carpeta de Paquetes Generados (`dist/`):**  
+  [Ver carpeta de instaladores generados (`dist/`)](./dist) *(se crea al compilar releases)*.
+  - **Windows (Instalador Guiado):** `dist/lazyJobFinder-Setup-v1.0.0.exe` (asistente de instalación gráfica con Inno Setup).
+  - **Windows (Portable):** `dist/lazyJobFinder-Portable-v1.0.0.zip` (descomprimir y ejecutar con `install.bat` o `launch.bat`).
+  - **GNU/Linux (Autoextraíble):** `dist/lazyJobFinder-1.0.0-linux.run` (instalador binario ejecutable).
+  - **GNU/Linux (Tarball):** `dist/lazyJobFinder-1.0.0-linux.tar.gz` (con `installer.sh` interactivo).
+  - **Verificación:** `dist/SHA256SUMS.txt` con los hashes criptográficos de cada binario.
+
+* 🛠️ **Herramientas y Fuentes de Empaquetado (`packaging/`):**  
+  [Ver carpeta de configuración de empaquetado (`packaging/`)](./packaging).
+  - [`packaging/build_release.py`](./packaging/build_release.py): Orquestador maestro que audita el código contra fugas de datos personales, valida las capas Docker, compila el instalador de Windows/Linux y genera los paquetes finales en `./dist/`.
+  - [`packaging/windows/`](./packaging/windows): Scripts de instalación por lotes (`install.bat`, `installer.iss`, `launch.bat`, `stop.bat`).
+  - [`packaging/linux/`](./packaging/linux): Scripts de instalación Bash (`installer.sh`, `launch.sh`, `stop.sh`).
+
+### ¿Cómo generar los instaladores tú mismo?
+Puedes generar los instaladores de release con un solo comando:
+```cmd
+# Desde Windows con start.bat (Opción 2 del menú)
+.\start.bat --package
+
+# O invocando directamente el orquestador Python:
+python packaging/build_release.py --platform all --skip-model
+```
 
 ---
 
 ## 📋 Requisitos del Sistema
 
-1. **Docker Desktop** (en Windows con motor WSL2) o **Docker Engine + Docker Compose v2** (en Linux).
-2. **Mínimo 4 GB de RAM** disponibles para contenedores Docker.
-3. **Mínimo 8 GB de espacio en disco** para imágenes y modelos de IA locales.
+1. **Docker Desktop** (en Windows con backend WSL2) o **Docker Engine + Docker Compose v2** (en Linux).
+2. **Mínimo 4 GB de memoria RAM** disponibles para contenedores Docker.
+3. **Mínimo 8 GB de espacio libre en disco** para imágenes de Docker y el modelo local de IA.
 
 ---
 
 ## 🚀 Inicio Rápido en Windows (`start.bat`)
 
-El proyecto incluye un lanzador simplificado [`start.bat`](./start.bat) que automatiza todo:
+El proyecto incluye un lanzador simplificado [`start.bat`](./start.bat) que automatiza todo el ciclo de vida:
 
-Haz doble clic en `start.bat` o ejecútalo en la terminal:
+Haz doble clic en `start.bat` o ejecútalo en tu terminal:
 
 ```cmd
 .\start.bat
 ```
 
-Se abrirá el menú unificado:
+Se abrirá el menú interactivo unificado:
 
 ```text
 =====================================================================
@@ -63,11 +93,11 @@ Selecciona qué deseas ejecutar:
 
 ### ¿Qué hace la Opción [1]?
 1. Comprueba y crea tu archivo `.env` automáticamente si falta.
-2. Inicia Docker Desktop si estaba cerrado y espera a que el motor esté listo.
+2. Inicia Docker Desktop si estaba cerrado y espera a que el motor esté operativo.
 3. Levanta los contenedores en segundo plano.
-4. Comprueba si el modelo `qwen2.5:3b-instruct` ya existe en Ollama; si ya está, **no lo vuelve a descargar**.
-5. Espera a que el backend responda y abre automáticamente tu navegador en **`http://localhost:8000`**.
-6. Al pulsar cualquier tecla en la consola o pulsar `[Q]`, **detiene automáticamente todos los contenedores** para no consumir memoria.
+4. Comprueba si el modelo `qwen2.5:3b-instruct` ya existe en Ollama; si ya está descargado, **no gasta ancho de banda volviéndolo a descargar**.
+5. Espera a que el backend esté listo y abre automáticamente tu navegador en **`http://localhost:8000`**.
+6. Al pulsar cualquier tecla en la consola o pulsar `[Q]`, **detiene ordenadamente todos los contenedores** para liberar la memoria RAM.
 
 ---
 
@@ -91,57 +121,19 @@ xdg-open http://localhost:8000 || open http://localhost:8000
 
 ---
 
-## 💼 Cómo Adaptarlo a tu Perfil
+## 💼 Cómo Usarlo con tu Perfil
 
-lazyJobFinder se adapta a cualquier profesional en dos sencillos pasos:
+lazyJobFinder no requiere editar archivos YAML ni configurar plantillas complejas:
 
-### 1. Términos de Búsqueda
-En la pestaña **Ajustes** del panel web (o editando [`config/settings.yaml`](./config/settings.yaml)), indica los puestos y ubicaciones que te interesan:
-```yaml
-busqueda:
-  terminos:
-    - "Diseñador Gráfico"
-    - "Marketing Digital"
-  ubicaciones:
-    - "Spain"
-    - "Remoto"
-  antiguedad_horas: 48
-  limite_por_fuente: 15
-```
+### 1. Cargar tu Currículum en el Panel Web
+1. Abre **`http://localhost:8000`** en tu navegador.
+2. En la barra superior, pulsa el botón **Subir CV** y selecciona tu archivo (`.pdf`, `.md` o `.txt`).
+3. El sistema extrae el texto, lo guarda en la caché de SQLite y detecta automáticamente las palabras clave óptimas para tu búsqueda de empleo.
+4. Puedes pulsar el botón del ojo para previsualizar el texto extraído que utilizará la IA.
 
-### 2. Cargar tu Currículum
-1. Ve a la sección **Currículum Activo** en el panel web.
-2. Pulsa el botón **Subir CV** y selecciona tu archivo (`.pdf`, `.md` o `.txt`).
-3. El sistema extraerá el texto de forma segura y local.
-4. Selecciona tu CV en el desplegable. A partir de ese momento, la IA evaluará las ofertas contrastándolas con tu currículum real.
-5. *¿Prefieres no filtrar?* Deja seleccionado **"Sin CV (Sin filtrado de ofertas)"** y se guardarán todas las ofertas descubiertas.
-
----
-
-## 📦 Empaquetado y Creación de Instaladores
-
-lazyJobFinder cuenta con un orquestador completo para generar distribuciones independientes para usuarios finales:
-
-```cmd
-# Desde Windows con start.bat
-.\start.bat --package
-
-# O directamente con Python
-python packaging/build_release.py
-```
-
-### Opciones del empaquetador:
-- `--platform {all,windows,linux}`: Elige la plataforma de destino.
-- `--version 1.0.0`: Define la versión semántica.
-- `--skip-docker`: Genera los paquetes de scripts e instaladores sin compilar las imágenes Docker.
-- `--skip-model`: Genera paquetes ligeros dejando la descarga del modelo para el primer arranque del usuario.
-
-### Artefactos generados en `dist/`:
-- **Windows:** Instalador guiado Inno Setup (`.exe`) y paquete portable (`.zip`) con instalador autónomo `install.bat`.
-- **Linux:** Instalador ejecutable autoextraíble (`.run`) y tarball (`.tar.gz`) con instalador interactivo `installer.sh`.
-- **Aislamiento Estricto por Proyecto:** Cada instalación genera y mantiene su propio identificador único `COMPOSE_PROJECT_NAME`, asegurando que redes, volúmenes y contenedores no interfieran entre instalaciones concurrentes.
-- **Auditoría Profunda de Seguridad:** Inspección recursiva de las capas internas de Docker (`layer.tar`), verificación exhaustiva de los blobs del modelo Ollama contra el manifiesto y validación criptográfica de ida y vuelta de `SHA256SUMS.txt`.
-- **Garantía Anti-Fuga:** Las imágenes se construyen desde un contexto aislado con plantillas limpias, impidiendo que tus credenciales o CV personales se empaqueten en la distribución.
+### 2. Personalizar Ajustes de Búsqueda (Opcional)
+- Desde la pestaña **Ajustes** del panel web, puedes afinar los términos de búsqueda, ubicaciones (ej. *"Madrid"*, *"Remoto"*, *"España"*), antigüedad de las ofertas (horas) y el límite de resultados por portal.
+- Toda la configuración se guarda de forma persistente y transparente en la base de datos SQLite (`data/lazyjobfinder.db`).
 
 ---
 
@@ -160,32 +152,31 @@ python packaging/build_release.py
 
 ```
 lazyJobFinder/
-├── config/                   # Configuración activa del usuario (settings, perfil)
-├── data/                     # Base de datos SQLite, CVs subidos y documentos (excluido de git)
-├── docs/                     # Documentación técnica y guías de arquitectura
-├── packaging/                # Infraestructura de empaquetado e instaladores
-│   ├── build_release.py      # Orquestador maestro de builds
-│   ├── compose.release.yaml  # Docker Compose de producción para usuarios
-│   ├── config-templates/     # Plantillas limpias sin datos personales
-│   ├── windows/              # Scripts e instalador Inno Setup para Windows
-│   └── linux/                # Scripts e instalador autoextraíble para Linux
+├── data/                     # Base de datos SQLite (lazyjobfinder.db) y CVs subidos (excluido de git)
+├── docs/                     # Documentación técnica, arquitectura y guías de hardware
+├── packaging/                # Infraestructura de empaquetado y creador de instaladores
+│   ├── build_release.py      # Orquestador maestro de builds y auditoría de seguridad
+│   ├── compose.release.yaml  # Docker Compose de producción para distribución
+│   ├── windows/              # Scripts e instalador Inno Setup para Windows (.exe, .zip)
+│   └── linux/                # Scripts e instalador autoextraíble para Linux (.run, .tar.gz)
+├── dist/                     # Carpeta de salida con los instaladores y paquetes generados
 ├── src/                      # Código fuente del backend Python (FastAPI, conectores, IA)
 │   ├── api/                  # Endpoints REST (jobs, cv, settings, system)
-│   ├── connectors/           # Conectores multi-portal (Tecnoempleo, InfoJobs, JobSpy)
-│   ├── evaluator/            # Scoring universal y cliente de Ollama
+│   ├── connectors/           # Conectores multi-portal (LinkedIn, Indeed, InfoJobs, Glassdoor, etc.)
+│   ├── evaluator/            # Scoring universal, anti-alucinación y cliente Ollama
 │   ├── scheduler/            # Planificador diario de ejecuciones
-│   └── tailoring/            # Extractor multiformato de CV y generador de cartas
-├── web/                      # Frontend Next.js 14 + Tailwind CSS
-├── dist/                     # Paquetes e instaladores generados listos para distribuir
-├── Dockerfile                # Imagen optimizada con frontend pre-integrado
+│   └── tailoring/            # Extractor con caché SQLite, validador de CV y cartas de presentación
+├── web/                      # Frontend Next.js 14 + Tailwind CSS (SPA)
+├── Dockerfile                # Imagen optimizada con frontend estático pre-integrado
 ├── docker-compose.yml        # Orquestador Docker local para desarrollo
-└── start.bat                 # Lanzador rápido unificado para Windows
+└── start.bat                 # Lanzador rápido interactivo para Windows
 ```
 
 ---
 
 ## 🛡️ Privacidad y Seguridad
 
-1. **100% Local:** Tus currículums, datos personales y notas jamás se envían a servidores de terceros ni a modelos de IA en la nube.
+1. **100% Local:** Tus currículums, datos personales y notas jamás se envían a servidores externos ni a modelos de IA en la nube.
 2. **Puertos enlazados a 127.0.0.1:** La API y los servicios se vinculan estrictamente a localhost para evitar exposición en redes locales o públicas.
-3. **Cero Telemetría:** Sin recopilación de métricas, cookies de seguimiento ni dependencias ocultas.
+3. **Cero Telemetría:** Sin recopilación de métricas, cookies de seguimiento ni rastreo de terceros.
+

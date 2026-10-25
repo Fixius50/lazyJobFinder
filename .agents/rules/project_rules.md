@@ -7,13 +7,13 @@ Este documento establece las normas obligatorias de desarrollo, arquitectura y c
 ## 1. Universalidad Global y Neutralidad Profesional
 - **Agnóstico a la profesión**: El sistema es 100% universal para cualquier oficio o carrera (mozo de almacén, carretillero, repartidor, sanitario, administrativo, hostelería, mantenimiento, diseño, abogacía, desarrollo de software, etc.).
 - **Prohibido el sesgo sectorial**: Queda estrictamente prohibido introducir discriminaciones o clasificaciones artificiales (ej. variables tipo `is_tech_role`, bifurcaciones que favorezcan a la informática sobre otros sectores o listas fijas de profesiones).
-- **Cero plantillas fijas impuestas**: Ni `config/profile.yaml` ni `config/settings.yaml` deben contener datos de prueba, perfiles de desarrollador DAM ni listas de términos fijos por defecto. El sistema debe operar limpio desde el primer momento.
+- **Cero plantillas fijas impuestas**: La base de datos SQLite y el sistema no contienen datos de prueba, perfiles precocinados ni listas de términos fijos por defecto. El sistema opera limpio desde el primer momento.
 
 ---
 
 ## 2. El CV Activo como Única Fuente de Verdad y Dinamismo de Búsqueda
 - **Extracción abierta y dinámica**: Al subir o seleccionar un CV (PDF, Markdown o TXT), la IA analiza el texto de forma abierta y extrae de 2 a 4 términos reales de búsqueda de empleo habituales en España que se correspondan estrictamente con la capacitación demostrada en el documento.
-- **Sincronización automática**: Los términos extraídos se sincronizan en memoria y en la configuración (`settings.yaml`) para alimentar los escáneres en portales de empleo.
+- **Sincronización automática**: Los términos extraídos se sincronizan en memoria y en la base de datos SQLite para alimentar los escáneres en portales de empleo.
 - **Veracidad factual**: Las competencias, titulaciones e historial laboral se validan exclusivamente contra el texto del CV activo aportado mediante `ProfileVerifier`. Jamás se inventan datos ni se mezclan perfiles de diferentes oficios.
 
 ---
@@ -28,7 +28,7 @@ Este documento establece las normas obligatorias de desarrollo, arquitectura y c
 
 ## 4. Conectores Globales vs Portales Temáticos
 - **Portales globales activos por defecto**: JobSpy (Indeed España, LinkedIn, Glassdoor, Google Jobs) e InfoJobs API son las fuentes primarias porque cubren todas las profesiones y sectores del mercado laboral.
-- **Portales de nicho o exclusivos**: Conectores específicos de un solo sector (como Tecnoempleo RSS, exclusivo de TI) permanecen desactivados por defecto en `settings.yaml` (`habilitado: false`) para no contaminar búsquedas de candidatos de otros oficios.
+- **Portales de nicho o exclusivos**: Conectores específicos de un solo sector (como Tecnoempleo RSS, exclusivo de TI) permanecen desactivados por defecto en los ajustes de SQLite (`habilitado: false`) para no contaminar búsquedas de candidatos de otros oficios.
 
 ---
 
@@ -78,16 +78,16 @@ Este documento establece las normas obligatorias de desarrollo, arquitectura y c
 ---
 
 ## 12. Ciclo de Vida de CVs y Vinculación Estricta de Ofertas
-- **Desacoplamiento de `settings.yaml`**: `settings.yaml` no requiere términos de búsqueda fijos (`busqueda.terminos: []`). Los términos de búsqueda pertenecen a cada CV y se extraen/guardan de forma dinámica en `data/active_cv.json` sin reescribir la configuración global del sistema.
+- **Desacoplamiento de archivos de configuración**: Toda la configuración del sistema y de búsqueda se gestiona a través de la base de datos SQLite (tabla `app_state`). Los términos de búsqueda pertenecen a cada CV y se extraen dinámicamente sin requerir archivos YAML.
 - **Búsqueda únicamente al subir**: El rastreo automático en portales se ejecuta exclusivamente al subir un nuevo archivo CV.
 - **Cambio de CV sin re-escaneo**: Al seleccionar en el desplegable un CV ya existente, no se realiza ninguna llamada externa a portales; la interfaz filtra localmente las ofertas que ya se trajeron para ese CV (`WHERE cv_filename = :cv`).
 - **Eliminación en cascada**: Al borrar un CV, se eliminan del almacenamiento local tanto el archivo físico como todas las ofertas vinculadas a dicho CV en la base de datos SQLite.
-- **Extracción única y caché multinivel (Cero re-parseos)**: El archivo físico del CV (PDF, MD, TXT) se parsea una única vez cuando se sube o se modifica. Su texto se almacena en caché en memoria RAM (`_CV_TEXT_CACHE`) y en disco (`.extracted_<cv>.txt`). Queda terminantemente prohibido re-parsear el documento en consultas de listado/filtrado de ofertas (`/jobs`), cálculo de facetas o iteraciones de evaluación. Las consultas de interfaz utilizan comprobaciones ultraligeras de puntero (`get_active_cv_status()`) y el motor de scoring reutiliza la instancia de `ProfileVerifier` y el texto en memoria para todo el lote de vacantes.
+- **Extracción única y caché en SQLite (Cero re-parseos y cero archivos sueltos)**: El archivo físico del CV (PDF, MD, TXT) se parsea una única vez cuando se sube o se modifica. Su texto se almacena en memoria RAM (`_CV_TEXT_CACHE`) y en la tabla SQLite `cv_cache`. Queda terminantemente prohibido generar archivos sueltos `.extracted_<cv>.txt` en disco o re-parsear el documento en consultas de listado/filtrado de ofertas (`/jobs`), cálculo de facetas o iteraciones de evaluación. Las consultas de interfaz utilizan comprobaciones ultraligeras de puntero (`get_active_cv_status()`) y el motor de scoring reutiliza la instancia de `ProfileVerifier` y el texto en memoria para todo el lote de vacantes.
 
 ---
 
 ## 13. Centralización Estricta de `__pycache__`
-- **Prefijo unificado**: Todo el bytecode de Python se centraliza obligatoriamente en `.cache/pycache/` a través de la variable de entorno `PYTHONPYCACHEPREFIX` (definida en `start.bat`, `docker-compose.yml`, `Dockerfile` y reforzada en `sitecustomize.py`).
+- **Prefijo unificado**: Todo el bytecode de Python se centraliza obligatoriamente en `src/__pycache__/` a través de la variable de entorno `PYTHONPYCACHEPREFIX` (definida en `start.bat`, `docker-compose.yml`, `Dockerfile` y reforzada en `sitecustomize.py`).
 - **Cero subcarpetas en el árbol**: Queda terminantemente prohibido generar o commitear subdirectorios `__pycache__` dispersos en `src/`, `tests/` o cualquier otra carpeta del repositorio.
 
 ---

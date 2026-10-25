@@ -66,6 +66,9 @@ cd /d "%~dp0"
 echo.
 echo --^> Verificando requisitos y entorno del sistema...
 
+:: 0. Limpieza de archivos temporales residuales
+if exist "%~dp0data\uploaded_cvs\.extracted_*" del /f /q "%~dp0data\uploaded_cvs\.extracted_*" >nul 2>&1
+
 :: 1. Archivo .env
 if not exist ".env" (
     echo   [i] Archivo .env no encontrado. Creando desde .env.example...

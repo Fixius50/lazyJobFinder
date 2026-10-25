@@ -62,16 +62,16 @@ class CoverLetterGenerator:
         raw_matched = eval_result.get("matched_skills", [])
         verified_matched = self.verifier.validate_matched_skills(raw_matched)
         missing = eval_result.get("missing_skills", [])
-        titulo_candidato = atomic_facts.get("candidato", {}).get("titulo") or candidato.get("titulo_profesional", "Desarrollador de Software")
+        titulo_candidato = atomic_facts.get("candidato", {}).get("titulo") or candidato.get("titulo_profesional", "Profesional")
         skills_str = ", ".join(verified_matched) if verified_matched else "competencias funcionales y formativas acreditadas"
 
         # Intento con LLM local guiado estrictamente por hechos atómicos aprobados
         prompt = (
             f"Redacta una carta de presentación formal y profesional en español para una candidatura de empleo.\n\n"
-            f"### HECHOS ATÓMICOS APROBADOS DEL CANDIDATO (ÚNICA FUENTE DE VERDAD):\n"
+            f"### DATOS DEL CANDIDATO (ÚNICA FUENTE DE VERDAD):\n"
             f"- Nombre del candidato: {nombre}\n"
-            f"- Especialidad o Titulación: {titulo_candidato}\n"
-            f"- Historial y Experiencia: {atomic_facts.get('experiencia_comercial_previa', 'Formación técnica y proyectos acreditados')}\n"
+            f"- Especialidad o Perfil: {titulo_candidato}\n"
+            f"- Trayectoria y Experiencia: {atomic_facts.get('experiencia_comercial_previa', 'Formación y experiencia acreditadas')}\n"
             f"- Competencias demostrables que coinciden con la vacante: {skills_str}\n\n"
             f"### DATOS DE LA VACANTE:\n"
             f"- Puesto: {puesto}\n"
@@ -80,7 +80,7 @@ class CoverLetterGenerator:
             f"DIRECTRICES DE REDACCIÓN:\n"
             f"1. Estructura en 3 o 4 párrafos claros y directos (máximo 250 palabras).\n"
             f"2. Expresa motivación genuina por el proyecto de {empresa} y por consolidar la carrera profesional en {puesto}.\n"
-            f"3. Resalta la base formativa y profesional sólida adquirida y los proyectos prácticos realizados.\n"
+            f"3. Resalta la base formativa y profesional sólida adquirida y la dedicación demostrada.\n"
             f"4. PROHIBIDO TERMINANTEMENTE usar corchetes o marcadores de posición como [Tu Nombre], [Nombre del Recibidor], [Especialidad o Titulación] o similares. "
             f"Usa siempre los datos reales del candidato ({nombre}) y de la empresa ({empresa}).\n"
             f"5. Firma la carta al final con: Atentamente,\n{nombre}\n"
@@ -113,13 +113,13 @@ class CoverLetterGenerator:
             logger.debug("Generación de carta por LLM falló, usando plantilla determinista: %s", e)
 
         # Plantilla determinista de respaldo 100% verídica y personalizada
-        tech_ref = f"{', '.join(verified_matched[:3])}" if verified_matched else "las competencias requeridas"
+        competencias_ref = f"{', '.join(verified_matched[:3])}" if verified_matched else "las competencias requeridas"
         perfil_desc = titulo_candidato or "mi perfil formativo y profesional"
         fallback_body = (
             f"Estimado/a responsable de selección de {empresa},\n\n"
             f"Me pongo en contacto con ustedes con motivo de la vacante de {puesto}. Tras revisar con detalle los requisitos de la oferta, "
             f"considero que mi preparación como {perfil_desc} "
-            f"y los proyectos prácticos realizados con {tech_ref} me permiten ofrecer una base sólida, dedicación y muchas ganas "
+            f"y mi experiencia con {competencias_ref} me permiten ofrecer una base sólida, dedicación y muchas ganas "
             f"de aportar valor a su organización.\n\n"
             f"A lo largo de mi trayectoria he profundizado en las metodologías, procedimientos y herramientas propias de este ámbito, "
             f"priorizando el rigor, el trabajo bien hecho y la colaboración fluida en equipo.\n\n"

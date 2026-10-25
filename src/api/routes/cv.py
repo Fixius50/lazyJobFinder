@@ -166,6 +166,8 @@ def list_uploaded_cvs() -> List[Dict[str, Any]]:
     if os.path.exists(UPLOAD_DIR):
         for entry in os.scandir(UPLOAD_DIR):
             if entry.is_file():
+                if entry.name.startswith(".") or "extracted" in entry.name.lower():
+                    continue
                 ext = os.path.splitext(entry.name)[1].lower()
                 if ext in ALLOWED_EXTENSIONS:
                     stat = entry.stat()

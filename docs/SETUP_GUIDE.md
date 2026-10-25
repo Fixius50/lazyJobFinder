@@ -33,17 +33,16 @@ Presenta un menú simplificado y directo:
 
 ---
 
-## 2. Paso 1: Configurar tu Búsqueda y Perfil
+## 2. Paso 1: Configurar tu Búsqueda y Currículum
 
-lazyJobFinder es **universal**: no está limitado al sector tecnológico, sino que sirve para cualquier disciplina (marketing, administración, diseño, educación, salud, programación, etc.).
+lazyJobFinder es **universal**: no está limitado al sector tecnológico, sino que sirve para cualquier disciplina (logística, administración, hostelería, diseño, educación, salud, programación, transporte, etc.).
 
 1. **Desde la Web (`http://localhost:8000`)**:
-   - Ve a la pestaña **Currículum Activo**, pulsa **Subir CV** y carga tu currículum en PDF, Markdown o TXT. El sistema extraerá y previsualizará el texto.
+   - En la cabecera, pulsa **Subir CV** y carga tu currículum en formato PDF, Markdown o TXT. El sistema extraerá el texto, lo guardará en la caché SQLite (`cv_cache`) y detectará de forma abierta las palabras clave de empleo adecuadas a tu perfil.
    - Si no subes un CV o seleccionas *"Sin CV"*, el sistema mantendrá todas las ofertas descubiertas sin descartar ninguna.
-   - En la pestaña **Ajustes**, ajusta tus palabras clave de búsqueda y ubicaciones deseadas.
-2. **Desde los archivos de configuración (Opcional)**:
-   - Puedes editar `config/settings.yaml` para afinar términos de búsqueda, ubicaciones, horarios de ejecución y exclusiones.
-   - Puedes completar `config/profile.yaml` con tus datos estructurados si deseas mayor fidelidad en cartas de presentación.
+   - En la pestaña **Ajustes**, puedes ajustar tus palabras clave de búsqueda y ubicaciones deseadas (ej. *"Madrid"*, *"Remoto"*, *"España"*).
+2. **Sin edición de archivos YAML**:
+   - Toda la configuración se gestiona visualmente desde el panel y se persiste directamente en la base de datos local SQLite (`data/lazyjobfinder.db`).
 
 ---
 
@@ -83,7 +82,7 @@ SCHEDULE_MINUTE=30
 MIN_SCORE_THRESHOLD=65
 
 # Opcional: InfoJobs API (developer.infojobs.net)
-# Si se deja en blanco, el sistema utiliza Tecnoempleo RSS, Indeed, LinkedIn, Glassdoor y Google
+# Si se deja en blanco, el sistema utiliza Indeed, LinkedIn, Glassdoor, Google Jobs y Tecnoempleo
 INFOJOBS_CLIENT_ID=
 INFOJOBS_CLIENT_SECRET=
 ```
@@ -110,19 +109,23 @@ docker compose exec ollama ollama pull qwen2.5:3b-instruct
 ## 6. Paso 5: Uso Diario
 
 ### Panel Web Unificado (`http://localhost:8000`)
-- **Candidaturas**: Listado con filtros, puntuación de afinidad, justificación de la IA, requisitos que cumples y faltan, y enlaces a la vacante original.
-- **Currículum Activo**: Carga, borrado y previsualización de CVs con selector dinámico.
+- **Candidaturas**: Listado con filtros interactivos, puntuación de afinidad objetiva, justificación de la IA, requisitos que cumples y faltan, y enlaces a la vacante original.
+- **Currículum Activo**: Carga, borrado y previsualización de CVs con selector dinámico en cabecera.
 - **Servicios y Logs**: Monitor en vivo de contenedores y consola de logs por SSE.
-- **Ajustes**: Configuración ágil de parámetros de búsqueda.
+- **Ajustes**: Configuración ágil de parámetros de búsqueda y preferencias.
 
 ### Telegram (Si está configurado)
 - Notificación diaria a la hora programada con las mejores ofertas y cartas de presentación en PDF adjuntas.
-- Comandos interactivos: `/buscar` (ejecución manual inmediata con cooldown de 5 min), `/estado`, `/ultimas`, `/config` y `/ayuda`.
+- Comandos interactivos: `/buscar` (ejecución manual inmediata con cooldown de 5 min), `/estado`, `/ultimas` y `/ayuda`.
 
 ---
 
-## 7. Mantenimiento y Respaldos
+## 7. Mantenimiento, Instaladores y Respaldos
 
+- **Instaladores y Paquetes Autónomos**:
+  - Los instaladores generados residen en [`dist/`](../dist).
+  - Las herramientas y scripts de empaquetado residen en [`packaging/`](../packaging).
+  - Para generar nuevos instaladores: `start.bat` (Opción 2) o `python packaging/build_release.py`.
 - **Ver logs del sistema**:
   ```bash
   docker compose logs -f lazyjobfinder
@@ -132,7 +135,7 @@ docker compose exec ollama ollama pull qwen2.5:3b-instruct
   docker compose down
   # o docker compose stop
   ```
-- **Copia de seguridad**:
-  - Tu base de datos y currículums residen en `./data`.
-  - Tus ajustes y perfil residen en `./config`.
-  - Respaldar estas dos carpetas mantiene intacto tu historial y configuraciones.
+- **Copia de seguridad completa**:
+  - Toda tu base de datos SQLite, historiales de ofertas, caché de CVs y documentos residen íntegramente en `./data`.
+  - Respaldar esta única carpeta mantiene intacto el 100% de tus datos personales, ajustes y currículums.
+

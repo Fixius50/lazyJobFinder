@@ -97,24 +97,23 @@ class CVTailorer:
         job_title = job.get("title", "")
         company = job.get("company", "")
 
-        titulo_candidato = atomic_facts.get("candidato", {}).get("titulo") or self.profile.get("candidato", {}).get("titulo_profesional", "Desarrollador de Software")
+        titulo_candidato = atomic_facts.get("candidato", {}).get("titulo") or self.profile.get("candidato", {}).get("titulo_profesional", "Profesional")
         skills_str = ", ".join(verified_skills) if verified_skills else "competencias acreditadas"
 
         prompt = (
-            f"Eres un asistente de redacción curricular que opera bajo una política de CERO ALUCINACIONES.\n\n"
-            f"### HECHOS ATÓMICOS APROBADOS (ÚNICA FUENTE DE VERDAD):\n"
-            f"- Titulación o Perfil: {titulo_candidato}.\n"
-            f"- Historial y Experiencia: {atomic_facts.get('experiencia_comercial_previa', 'Formación y proyectos acreditados')}.\n"
-            f"- Competencias verificadas para este puesto: {skills_str}.\n"
+            f"Eres un asistente de redacción curricular que opera bajo una estricta política de veracidad.\n\n"
+            f"### DATOS DEL CANDIDATO (ÚNICA FUENTE DE VERDAD):\n"
+            f"- Especialidad o Perfil: {titulo_candidato}.\n"
+            f"- Trayectoria y Experiencia: {atomic_facts.get('experiencia_comercial_previa', 'Formación y competencias acreditadas')}.\n"
+            f"- Competencias demostrables afines al puesto: {skills_str}.\n"
             f"- Resumen base aprobado: '{self.profile.get('resumen_base', '').strip()}'\n\n"
             f"### VACANTE:\n"
             f"- Puesto: {job_title}\n"
             f"- Empresa: {company}\n\n"
             f"INSTRUCCIONES:\n"
-            f"Reformula y enfoca el resumen profesional (máximo 4 líneas) resaltando honestamente las competencias del perfil que mejor encajan con la vacante.\n"
-            f"PROHIBICIÓN ESTRICTA: No inventes empresas donde supuestamente trabajó, ni años de experiencia laboral, "
-            f"ni titulaciones no acreditadas, ni competencias ajenas.\n"
-            f"Devuelve ÚNICAMENTE el texto redactado del resumen sin comentarios."
+            f"Redacta un resumen profesional enfocado (máximo 4 líneas) que destaque honestamente las competencias del candidato afines a la vacante.\n"
+            f"REGLA ESTRICTA: No inventes puestos, empresas pasadas, años de experiencia ni cualificaciones no acreditadas en el currículum.\n"
+            f"Devuelve ÚNICAMENTE el texto redactado del resumen profesional, sin introducciones ni comentarios."
         )
 
         try:

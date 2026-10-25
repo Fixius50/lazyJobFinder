@@ -73,15 +73,8 @@ def extract_text_from_pdf(pdf_path: str) -> str:
 _CV_TEXT_CACHE: Dict[str, Tuple[float, int, str]] = {}
 
 
-def _get_extracted_cache_path(file_path: str) -> str:
-    """Devuelve la ruta del archivo de texto plano extraído (.txt) para evitar re-parseos de PDF."""
-    dirname = os.path.dirname(os.path.abspath(file_path))
-    basename = os.path.basename(file_path)
-    return os.path.join(dirname, f".extracted_{basename}.txt")
-
-
 def invalidate_cv_cache(filename_or_path: Optional[str] = None) -> None:
-    """Invalida la caché en memoria y elimina archivos temporales de texto extraído."""
+    """Invalida la caché en memoria y en SQLite."""
     global _CV_TEXT_CACHE
     if not filename_or_path:
         _CV_TEXT_CACHE.clear()
@@ -94,30 +87,37 @@ def invalidate_cv_cache(filename_or_path: Optional[str] = None) -> None:
     for k in keys_to_del:
         _CV_TEXT_CACHE.pop(k, None)
 
-    # 2. Limpiar archivo de caché en disco si existe
+    # 2. Limpiar registro en SQLite cv_cache
+    try:
+        from ..database import Database
+        Database().delete_cv_cache(clean_name)
+    except Exception as e:
+        logger.debug("Error eliminando cv_cache en SQLite: %s", e)
+
+    # 3. Limpiar archivo de caché residual en disco si quedara alguno antiguo
     disk_cache_file = os.path.join(UPLOAD_DIR, f".extracted_{clean_name}.txt")
     if os.path.exists(disk_cache_file):
         try:
             os.remove(disk_cache_file)
-            logger.debug("Caché persistente de texto eliminada: %s", disk_cache_file)
         except OSError:
             pass
 
 
-def extract_cv_text(file_path: str, force_refresh: bool = False) -> str:
+def extract_cv_text(file_path: str, force_refresh: bool = False, db: Optional[Any] = None) -> str:
     """Extrae y normaliza el texto de cualquier archivo CV admitido (.pdf, .md, .txt).
     
-    Implementa caché en dos niveles (memoria RAM y texto plano en disco):
+    Implementa caché inteligente en dos niveles (memoria RAM y SQLite cv_cache):
     1. Si ya se extrajo en memoria y el archivo físico no cambió (mtime/size), retorna en 0 ms.
-    2. Si el proceso se reinició pero ya existía la extracción previa en disco, lee el .txt directo en <1 ms.
-    3. Solo si es la primera vez que se sube o si el archivo fue modificado, parsea el binario PDF con pypdf.
+    2. Si el proceso se reinició pero ya existía la extracción previa en SQLite, lee directo en <1 ms sin tocar pypdf.
+    3. Solo si es la primera vez que se sube o si el archivo fue modificado físicamente, parsea el binario PDF.
+    CERO archivos temporales .extracted_*.txt creados en disco.
     """
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"Archivo no encontrado: {file_path}")
 
     mtime = os.path.getmtime(file_path)
     size = os.path.getsize(file_path)
-    cache_path = _get_extracted_cache_path(file_path)
+    filename = os.path.basename(file_path)
 
     # Nivel 1: Caché en memoria RAM (ultra-rápido, 0 I/O)
     if not force_refresh and file_path in _CV_TEXT_CACHE:
@@ -125,17 +125,18 @@ def extract_cv_text(file_path: str, force_refresh: bool = False) -> str:
         if cached_mtime == mtime and cached_size == size:
             return cached_text
 
-    # Nivel 2: Caché persistente en disco (sin pasar por pypdf)
-    if not force_refresh and os.path.exists(cache_path):
+    # Nivel 2: Caché persistente en SQLite (cv_cache)
+    from ..database import Database
+    database = db or Database()
+    if not force_refresh:
         try:
-            if os.path.getmtime(cache_path) >= mtime:
-                with open(cache_path, "r", encoding="utf-8") as f:
-                    text = f.read().strip()
-                if text:
-                    _CV_TEXT_CACHE[file_path] = (mtime, size, text)
-                    return text
-        except Exception as read_err:
-            logger.debug("Error leyendo caché persistente de CV: %s", read_err)
+            cached_entry = database.get_cv_cache(filename, file_mtime=mtime, file_size=size)
+            if cached_entry and cached_entry.get("extracted_text"):
+                text = cached_entry["extracted_text"]
+                _CV_TEXT_CACHE[file_path] = (mtime, size, text)
+                return text
+        except Exception as db_err:
+            logger.debug("Error consultando cv_cache en SQLite: %s", db_err)
 
     # Nivel 3: Extracción real del documento
     ext = os.path.splitext(file_path)[1].lower()
@@ -159,12 +160,26 @@ def extract_cv_text(file_path: str, force_refresh: bool = False) -> str:
     # Guardar en memoria
     _CV_TEXT_CACHE[file_path] = (mtime, size, normalized)
 
-    # Persistir en disco para futuros arranques
+    # Calcular hash rápido y persistir en SQLite cv_cache (extracción + perfil)
+    import hashlib
+    file_hash = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+    profile_data = None
     try:
-        with open(cache_path, "w", encoding="utf-8") as f:
-            f.write(normalized)
+        profile_data = _extract_profile_from_raw_text(normalized, filename)
+    except Exception as prof_err:
+        logger.debug("Error pre-extrayendo perfil estructurado: %s", prof_err)
+
+    try:
+        database.save_cv_cache(
+            filename=filename,
+            file_hash=file_hash,
+            file_mtime=mtime,
+            file_size=size,
+            extracted_text=normalized,
+            profile_data=profile_data,
+        )
     except Exception as save_err:
-        logger.debug("Error escribiendo caché persistente de CV: %s", save_err)
+        logger.debug("Error persistiendo cv_cache en SQLite: %s", save_err)
 
     return normalized
 
@@ -564,30 +579,48 @@ def _extract_profile_from_raw_text(cv_text: str, filename: Optional[str] = None)
         exp_block = exp_match.group(1).strip()
         curr_exp = {}
         for xl in [l.strip() for l in exp_block.splitlines() if l.strip()]:
-            if any(role in xl.lower() for role in ['desarrollador', 'ingeniero', 'programador', 'técnico', 'consultor', 'analista', 'prácticas', 'developer', 'junior', 'senior']):
-                if curr_exp:
-                    experiencia.append(curr_exp)
-                curr_exp = {"puesto": xl, "empresa": "", "periodo": "", "descripcion": ""}
-            elif curr_exp and not curr_exp.get("empresa"):
+            has_date = bool(re.search(r'\b(20\d\d|19\d\d)\b', xl))
+            is_new_header = (
+                xl.startswith(("-", "*", "•", "·", "#"))
+                or has_date
+                or any(sep in xl for sep in [" - ", " – ", " | ", " / "])
+            )
+            if is_new_header and curr_exp and curr_exp.get("puesto"):
+                experiencia.append(curr_exp)
+                curr_exp = {"puesto": re.sub(r"^[\-\*•·#\s]+", "", xl), "empresa": "", "periodo": "", "descripcion": ""}
+            elif not curr_exp:
+                curr_exp = {"puesto": re.sub(r"^[\-\*•·#\s]+", "", xl), "empresa": "", "periodo": "", "descripcion": ""}
+            elif not curr_exp.get("empresa") and not has_date:
                 curr_exp["empresa"] = xl
-            elif curr_exp and not curr_exp.get("periodo") and re.search(r'\b(20\d\d|19\d\d)\b', xl):
+            elif has_date and not curr_exp.get("periodo"):
                 curr_exp["periodo"] = xl
-            elif curr_exp:
+            else:
                 curr_exp["descripcion"] = (curr_exp.get("descripcion", "") + " " + xl).strip()
         if curr_exp:
             experiencia.append(curr_exp)
 
-    # 10. Competencias técnicas
+    # 10. Competencias y habilidades profesionales (universal para cualquier oficio o sector)
     skills = []
-    known_techs = [
-        "Python", "Java", "JavaScript", "TypeScript", "C++", "C#", "PHP", "Go", "Rust", "Kotlin", "Swift",
-        "React", "Angular", "Vue", "Next.js", "Node.js", "NestJS", "Spring Boot", "FastAPI", "Django", "Flask",
-        "SQL", "PostgreSQL", "MySQL", "MongoDB", "Redis", "SQLite", "Oracle",
-        "Docker", "Kubernetes", "AWS", "Azure", "GCP", "Git", "GitHub", "Linux"
-    ]
-    for tech in known_techs:
-        if re.search(rf'\b{re.escape(tech)}\b', text, re.IGNORECASE):
-            skills.append(tech)
+    skills_match = re.search(
+        r'(?:competencias|habilidades|skills|conocimientos|aptitudes|herramientas|destrezas|funciones|tareas)[\s:]*\n+(.*?)(?=\n+#|\n+(?:formaci|experiencia|idiomas|proyectos)|\Z)',
+        text,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if skills_match:
+        sk_block = skills_match.group(1).strip()
+        for sk_line in sk_block.splitlines():
+            sk_clean = re.sub(r"^[\-\*•·0-9\.\s]+", "", sk_line).strip()
+            if sk_clean:
+                parts = re.split(r"[,;•|·/\t]", sk_clean)
+                for p in parts:
+                    p_str = p.strip()
+                    if len(p_str) >= 2 and p_str.lower() not in [s.lower() for s in skills]:
+                        skills.append(p_str)
+
+    if not skills:
+        from .verifier import ProfileVerifier
+        extracted_skills = ProfileVerifier({}, cv_text=text).allowed_skills
+        skills = sorted(list(extracted_skills))
 
     # 11. Idiomas
     idiomas = []
@@ -644,7 +677,17 @@ def get_active_profile(profile_path: Optional[str] = None) -> Dict[str, Any]:
     # En caso contrario, extraer dinámicamente todo del CV activo en data/uploaded_cvs/
     cv_text, meta = get_active_cv_text_and_meta()
     if cv_text:
-        extracted = _extract_profile_from_raw_text(cv_text, meta.get("filename"))
+        extracted = None
+        try:
+            from ..database import Database
+            cached_cv = Database().get_cv_cache(meta.get("filename", ""))
+            if cached_cv and cached_cv.get("profile"):
+                extracted = cached_cv["profile"]
+        except Exception:
+            pass
+
+        if not extracted:
+            extracted = _extract_profile_from_raw_text(cv_text, meta.get("filename"))
         if not profile_data.get("candidato"):
             profile_data["candidato"] = extracted["candidato"]
         else:

@@ -101,33 +101,8 @@ class ProfileVerifier:
                         if cand not in stop_words and not stop_lines_pattern.search(cand):
                             skills.add(cand)
 
-        # Expansión de sinónimos y términos técnicos de diferentes oficios (logística, almacén, sanidad, administración, etc.)
-        expanded = set(skills)
-        for s in list(skills):
-            if "carretillaselevadoras" in s or "carretilla" in s:
-                expanded.add("carretillas elevadoras")
-                expanded.add("carretilla")
-                expanded.add("carretillero")
-            if "traspaletamanual" in s or "traspaleta" in s:
-                expanded.add("traspaleta manual")
-                expanded.add("traspaleta eléctrica")
-                expanded.add("traspaleta")
-            if "manipulación de objetos" in s or "manipulación de cargas" in s:
-                expanded.add("manipulación de cargas")
-                expanded.add("manipulacion de cargas")
-            if "protección individual" in s or "epi" in s:
-                expanded.add("epi")
-                expanded.add("epis")
-            if "logística" in s or "logistica" in s:
-                expanded.add("almacén")
-                expanded.add("almacen")
-                expanded.add("logística")
-            if "prevención de riesgos" in s or "riesgos laborales" in s:
-                expanded.add("prevención de riesgos laborales")
-                expanded.add("prl")
-
         return {
-            s for s in expanded
+            s for s in skills
             if s not in stop_words and len(s) >= 3 and not s.isdigit()
         }
 
@@ -227,44 +202,30 @@ class ProfileVerifier:
             ]
             for pattern in employment_assertions:
                 if re.search(pattern, text_lower):
-                    violations.append(f"Afirmación no respaldada: Se atribuye experiencia comercial previa cuando el perfil es académico DAM ({pattern}).")
+                    violations.append("Afirmación no respaldada: Se atribuye experiencia laboral previa no acreditada en el currículum.")
 
         # 2. Validación de titulaciones ficticias
         unapproved_degrees = [
-            r"\b(ingenier[ií]a\s+inform[aá]tica|ingeniero\s+inform[aá]tico)\b",
-            r"\b(grado\s+en\s+ingenier[ií]a|grado\s+universitario|licenciatur[a|o])\b",
+            r"\b(grado\s+universitario|licenciatur[a|o])\b",
             r"\bm[aá]ster\s+(en|of)\b",
             r"\bdoctorado\s+(en)?\b",
         ]
         for pattern in unapproved_degrees:
             if re.search(pattern, text_lower):
-                violations.append(f"Titulación no respaldada en el perfil: Detectada mención indebida ({pattern}).")
+                if not any(re.search(pattern, src) for src in [self.cv_text_lower, str(self.profile).lower()]):
+                    violations.append(f"Titulación no respaldada en el perfil: Detectada mención indebida ({pattern}).")
 
         # 3. Validación de roles no respaldados (solo si no figuran en el CV o perfil)
         fictitious_roles = [
-            (r"\b(fui|como)\s+(lead|senior|arquitecto|project\s+manager|jefe\s+de\s+equipo)\b", "rol de liderazgo o seniority"),
+            (r"\b(fui|como)\s+(lead|senior|director|directora|project\s+manager|jefe\s+de\s+equipo)\b", "rol de liderazgo o seniority"),
             (r"\blideré\s+equipos?\b", "liderazgo de equipos"),
             (r"\bgestión\s+de\s+personal\b", "gestión de personal"),
             (r"\bgestión\s+de\s+presupuestos?\b", "gestión de presupuestos"),
         ]
         for pattern, desc in fictitious_roles:
             if re.search(pattern, text_lower):
-                # Si el término figura en el CV o perfil del candidato, es verídico
                 if not any(re.search(pattern, src) for src in [self.cv_text_lower, str(self.profile).lower()]):
                     violations.append(f"Afirmación no respaldada: Se atribuye {desc} no documentado.")
-
-        # 4. Tecnologías o competencias no respaldadas
-        words = re.findall(r"\b[A-Za-z0-9#\+\./\-]+\b", text)
-        common_advanced_techs = {
-            "kubernetes", "k8s", "aws", "azure", "gcp", "react native", "flutter",
-            "scala", "golang", "c#", ".net", "cobol", "rust", "angular", "react",
-            "django", "ruby", "rails", "swift", "kotlin", "objective-c"
-        }
-        for word in words:
-            w_lower = word.lower()
-            if w_lower in common_advanced_techs:
-                if w_lower not in self.allowed_skills and w_lower not in self.cv_text_lower:
-                    violations.append(f"Competencia no respaldada en el perfil ni en el CV: '{word}'.")
 
         return len(violations) == 0, violations
 

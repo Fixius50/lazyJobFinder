@@ -22,7 +22,7 @@
 > 1. **Inferencia de IA (100% Local)**: El modelo LLM (Ollama en Docker) se ejecuta íntegramente en localhost. El CV, los datos de contacto y el texto analizado jamás se envían a ningún servicio de IA externo o en la nube.
 > 2. **Consultas Salientes a Portales de Empleo (Huella de Red)**: Las peticiones HTTP(S) hacia las APIs y scrapers globales de JobSpy (Indeed, LinkedIn, Glassdoor, Google Jobs) e InfoJobs **no** envían datos personales, pero **sí revelan a los portales y al proveedor de internet (ISP)** la dirección IP pública del usuario, cabeceras User-Agent, y los términos de búsqueda activos correspondientes al CV o definidos por el usuario y ubicaciones (*«Spain»*).
 > 3. **Transmisión de Documentos por Telegram (Salida Externa)**: El envío de los currículums y cartas en PDF a través del bot utiliza la API oficial de Telegram (`api.telegram.org`). Por tanto, **los documentos generados SÍ abandonan el equipo local y transitan por los centros de datos en la nube de Telegram**.
-> 4. **Modo Estricto Local (Zero-Network CV)**: Si el usuario desea privacidad absoluta donde ningún documento salga del equipo, puede desactivar el envío de documentos en `config/settings.yaml` (`generar_documentos: false` o apagar el bot), consultando los PDFs generados exclusivamente en el almacenamiento local montado en `data/documents/`.
+> 4. **Modo Estricto Local (Zero-Network CV)**: Si el usuario desea privacidad absoluta donde ningún documento salga del equipo, puede desactivar el canal de Telegram en la configuración, consultando las cartas y adaptaciones generadas exclusivamente en el almacenamiento local montado en `data/documents/` o descargándolas desde el panel web.
 
 ---
 
@@ -30,16 +30,18 @@
 
 ```
 lazyJobFinder/
-├── config/
-│   ├── profile.yaml          # Perfil estructurado editable (limpio de plantillas o datos fijos)
-│   ├── settings.yaml         # Configuración general y términos dinámicos sincronizados
-│   └── shared_constants.json # Frases de confirmación y constantes compartidas
 ├── data/                     # Volumen persistente local montado en Docker (/app/data)
 │   ├── documents/            # Carpetas organizadas {job_id}_{empresa}/ con PDFs, Markdown y diffs
 │   │   └── .gitkeep
 │   ├── uploaded_cvs/         # Currículums subidos por el usuario (PDF, MD, TXT)
 │   ├── active_cv.json        # Puntero atómico al CV activo y sus términos adaptados
-│   └── lazyjobfinder.db      # Base de datos SQLite en modo WAL
+│   └── lazyjobfinder.db      # Base de datos SQLite unificada en modo WAL (jobs, app_state, cv_cache)
+├── packaging/                # Infraestructura de empaquetado y creador de instaladores
+│   ├── build_release.py      # Orquestador maestro de builds y auditoría de seguridad
+│   ├── compose.release.yaml  # Docker Compose de producción para distribución
+│   ├── windows/              # Scripts e instalador Inno Setup (.exe, .zip)
+│   └── linux/                # Scripts e instalador autoextraíble (.run, .tar.gz)
+├── dist/                     # Carpeta de salida con los instaladores y paquetes generados
 ├── docs/                     # Documentación técnica de referencia
 │   ├── AI_SYSTEM_OVERVIEW.md # [ESTE DOCUMENTO] Base de conocimiento para IAs
 │   ├── ARCHITECTURE.md       # Diagramas Mermaid y flujos de datos
@@ -103,9 +105,9 @@ lazyJobFinder/
 - **Solución implementada**: Next.js configurado con `output: 'export'` compilado a activos estáticos (`web/out/`) servidos directamente por FastAPI y Uvicorn en el contenedor principal Python (`http://localhost:8000`), manteniendo el consumo en ~200-300 MB de RAM y permitiendo el control completo sin servidores intermedios.
 
 ### B. ¿Por qué NO usar RAG ni bases de datos vectoriales (Qdrant / Chroma / PGvector)?
-- **Análisis**: Un perfil junior de DAM tiene ~1.000 tokens. Cabe holgadamente en la ventana de contexto de modelos locales (Qwen 2.5: 4k a 32k tokens).
-- **Razón del descarte**: Fragmentar un CV de una sola página en trozos para indexarlo en una base vectorial destruye el contexto holístico, confunde tecnologías parecidas (Java vs JavaScript) y consume memoria innecesaria.
-- **Solución implementada**: Inyección directa del perfil canónico íntegro en el prompt del LLM, precedido por un pre-filtro determinista por código.
+- **Análisis**: Un perfil laboral medio tiene ~1.000 tokens. Cabe holgadamente en la ventana de contexto de modelos locales (Qwen 2.5: 4k a 32k tokens).
+- **Razón del descarte**: Fragmentar un CV de una o dos páginas en trozos para indexarlo en una base vectorial destruye el contexto holístico, fragmenta la trayectoria y consume memoria innecesaria.
+- **Solución implementada**: Inyección directa del currículum íntegro en el prompt del LLM, precedido por un pre-filtro determinista por código.
 
 ### C. Estrategia de Hardware: AMD Radeon RX 6600 en Windows WSL2
 - **Realidad técnica**:
@@ -124,17 +126,16 @@ lazyJobFinder/
 - **Solución en [`src/evaluator/scoring_engine.py`](../src/evaluator/scoring_engine.py)**:
   - Analiza si *Senior* está en el puesto objetivo o en la mención al equipo.
   - Separa la sección de requisitos mínimos obligatorios de la sección de deseables/valorables.
-  - Solo descarta ante incompatibilidades manifiestas (roles ajenos a software, prácticas no remuneradas o puestos estrictamente Senior con más de 5 años obligatorios).
+  - Solo descarta ante incompatibilidades manifiestas (roles ejecutivos de alta antigüedad o requisitos con más de 5 años obligatorios).
 
 ### F. Veracidad Factual y Validación de Afirmaciones (`ProfileVerifier`)
-- **Problema**: No se debe atribuir experiencia laboral a la mera presencia de una tecnología en el perfil ni confiar ciegamente en el JSON del LLM.
+- **Problema**: No se debe atribuir experiencia laboral a la mera presencia de una palabra clave ni confiar ciegamente en el JSON del LLM.
 - **Solución en [`src/tailoring/verifier.py`](../src/tailoring/verifier.py)**:
   - `ProfileVerifier.validate_concrete_assertions` comprueba afirmaciones fácticas concretas:
-    - Prohíbe afirmar experiencia laboral comercial o antigüedad en empresas si el perfil solo contiene formación académica DAM.
-    - Prohíbe atribuir roles de liderazgo o arquitectura no documentados.
-    - Prohíbe tecnologías ausentes en la lista blanca canónica.
-  - En [`src/tailoring/cv_tailorer.py`](../src/tailoring/cv_tailorer.py), las secciones de educación, competencias y proyectos se generan **directamente de los datos estructurados aprobados de `profile.yaml`**. El LLM únicamente reordena y redacta el resumen, y si falla la validación, se recurre a la plantilla canónica aprobada.
-  - [`config/cv_base.md`](../config/cv_base.md) es estrictamente de solo lectura y jamás se sobreescribe.
+    - Prohíbe afirmar experiencia laboral o antigüedad no reflejada en el CV.
+    - Prohíbe atribuir roles de liderazgo o titulaciones no acreditadas.
+    - Prohíbe inventar competencias ausentes en el documento aportado.
+  - En [`src/tailoring/cv_tailorer.py`](../src/tailoring/cv_tailorer.py), el LLM únicamente adapta el resumen y reordena los puntos fuertes para ajustarse a la vacante, y si falla la validación, recurre al texto seguro verificado.
 
 ### G. Deduplicación Difusa Avanzada (RapidFuzz), Heurísticas y Blindaje Anti-Cadenas
 - **Problema previo**: Un hash exacto SHA-256 (`content_fingerprint`) no detectaba duplicados cuando la misma vacante presentaba ligeras diferencias de formato entre portales (ej. *"Indra"* vs *"Indra Sistemas, S.A."*, o *"Desarrollador Junior Java"* vs *"Junior Java Developer"*).
@@ -172,25 +173,23 @@ lazyJobFinder/
   - `Instructor`: Excelente biblioteca para OpenAI/Anthropic, pero para Ollama local introduce más de 8 dependencias transitivas redundantes (`jiter`, `docstring-parser`, etc.) y opera envolviendo llamadas HTTP estándar.
   - `Salidas Estructuradas Nativas de Ollama (v0.1.34+)`: Ollama acepta directamente un esquema JSON Schema en su parámetro `format`. Detrás de escena, llama.cpp compila el JSON Schema en una gramática GBNF estricta a nivel de muestreo de logits, forzando la generación sintácticamente válida token por token sin dependencias adicionales.
 - **Decisión**: Se selecciona **Ollama Nativo + Pydantic v2**. Se define `JobEvaluationSchema(BaseModel)` y se pasa `JobEvaluationSchema.model_json_schema()` directamente a `ollama.generate(format_schema=...)`. Se descarta Instructor por redundancia.
-- **Garantía Semántica**: Se establece formalmente que **una salida JSON sintácticamente válida NO equivale a una afirmación verdadera**. Tras la validación de tipos por Pydantic, `ProfileVerifier` valida algorítmicamente las competencias frente a la lista canónica de `profile.yaml`.
+- **Garantía Semántica**: Se establece formalmente que **una salida JSON sintácticamente válida NO equivale a una afirmación verdadera**. Tras la validación de tipos por Pydantic, `ProfileVerifier` valida algorítmicamente las competencias frente al texto verídico del CV activo.
 
-### J. Veracidad Factual: Generación Determinista desde Hechos Aprobados
+### J. Veracidad Factual: Generación Determinista desde Hechos Certificados del CV
 - **Límites de las listas blancas y regex**:
-  - Una lista blanca de tecnologías y un conjunto de patrones prohibidos son filtros de seguridad necesarios, pero **no demuestran por sí solos que una frase en lenguaje natural generada por un LLM sea verdadera**.
-- **Solución Arquitectónica (Hechos Estructurados como Única Fuente de Verdad)**:
-  - **100% Determinismo en Secciones Factuales**: En [`src/tailoring/cv_tailorer.py`](../src/tailoring/cv_tailorer.py), las secciones críticas del currículum (formación académica, títulos, centros, años, proyectos destacados, tecnologías de cada proyecto, competencias clave e idiomas) **se proyectan de forma 100% determinista y literal directamente desde `config/profile.yaml`**. La IA jamás redacta ni inventa estas secciones.
+  - Una lista fija de palabras clave o un conjunto de patrones prohibidos no demuestran por sí solos que una afirmación en lenguaje natural generada por un LLM sea verídica.
+- **Solución Arquitectónica (El CV Activo como Única Fuente de Verdad)**:
+  - **100% Determinismo en Secciones Factuales**: En [`src/tailoring/cv_tailorer.py`](../src/tailoring/cv_tailorer.py), las secciones críticas del currículum (formación académica, títulos, centros, años, empresas y competencias) se proyectan de forma 100% determinista y literal directamente desde el texto real del CV activo almacenado en `cv_cache`. La IA jamás redacta ni inventa estas secciones.
   - **Papel Acotado de la IA**: La intervención de la IA se limita a:
-    1. Reordenar los proyectos canónicos según su afinidad técnica con la vacante.
-    2. Proponer una redacción enfocada del resumen profesional a partir de los hechos atómicos certificados (`get_approved_atomic_facts()`).
-  - **Fallback Inmediato ante Dudas**: Si el validador programático (`ProfileVerifier.sanitize_summary`) detecta cualquier entidad no autorizada, mención de experiencia comercial inexistente, rol de liderazgo o titulación no certificada, el texto generado por la IA es **descartado de inmediato** y sustituido por la plantilla canónica certificada `_build_canonical_summary()`.
-  - [`config/cv_base.md`](../config/cv_base.md) permanece como documento maestro de solo lectura inmutable.
+    1. Reordenar y destacar los puntos fuertes según su afinidad técnica con la vacante.
+    2. Proponer una redacción enfocada del resumen profesional a partir de los hechos atómicos certificados del CV activo.
+  - **Fallback Inmediato ante Dudas**: Si el validador programático (`ProfileVerifier.sanitize_summary`) detecta cualquier entidad no autorizada, mención de experiencia inexistente, rol de liderazgo o titulación no certificada, el texto generado por la IA es **descartado de inmediato** y sustituido por la versión canónica verificada.
 
-### K. Migraciones Transaccionales No Destructivas con Respaldo Previo
-- **Salvaguardas implementadas en [`src/migrations/migrator.py`](../src/migrations/migrator.py)**:
-  - **Copia de Respaldo Previa (.bak)**: Antes de aplicar cualquier cambio de esquema sobre una base de datos existente, el sistema ejecuta un checkpoint de WAL (`PRAGMA wal_checkpoint(TRUNCATE)`) y crea una copia exacta `lazyjobfinder.db.backup_v{version}_{timestamp}.bak`.
-  - **Atomicidad y Transaccionalidad**: Las sentencias de alteración (`ALTER TABLE ... ADD COLUMN`, `CREATE INDEX`) y la actualización de versión (`PRAGMA user_version = 2`) se ejecutan dentro de un bloque transaccional explícito `BEGIN IMMEDIATE ... COMMIT`.
-  - **Reversión Limpia (Rollback y Restauración)**: Si se produce cualquier fallo a mitad de la migración, se ejecuta `ROLLBACK`, se restaura automáticamente el archivo desde la copia de respaldo `.bak` y se interrumpe el arranque sin dejar la base de datos en un estado parcialmente migrado o corrupto.
-  - **Idempotencia**: Todas las operaciones consultan previamente `PRAGMA table_info` para evitar errores si las columnas ya existían.
+### K. Persistencia SQLite Idempotente y Transaccional
+- **Salvaguardas implementadas en [`src/database.py`](../src/database.py)**:
+  - **Inicialización Idempotente (`init_db`)**: Creación automática y segura de tablas con `CREATE TABLE IF NOT EXISTS` e índices específicos para `url_hash`, `content_fingerprint` y `cv_cache`.
+  - **Concurrencia WAL con Fallback Silencioso**: Inicialización de `PRAGMA journal_mode=WAL` con fallback seguro a modo `DELETE` para evitar bloqueos de memoria compartida sobre sistemas de archivos de red o volúmenes Docker VirtioFS/9p en Windows.
+  - **Atomicidad y Claves Foráneas**: Toda la persistencia de relaciones de duplicados y cascadas de borrado se protege mediante `PRAGMA foreign_keys=ON;` y transacciones inmediatas.
 
 ### L. Seguridad y Defensa en Profundidad (Prompt Shield y Telegram)
 - **Evaluación de Prompt Shield**:
@@ -281,8 +280,7 @@ La interfaz de administración de `lazyJobFinder` está diseñada como una **Sin
 - **Sincronización con la API:** Antes de abrir el navegador o arrancar el servidor Next.js, sondea periódicamente `http://127.0.0.1:8000/api/health` hasta confirmar que FastAPI está activo y respondiendo, eliminando por completo los errores de proxy `ECONNREFUSED`.
 - **Modo Interactivo y CLI:** Ofrece un menú interactivo rápido con comando nativo `choice` (opciones 1-6, Q) y soporte de argumentos por línea de comandos (`--all`, `--docker`, `--web`, `--status`, `--pull`, `--stop`, `--help`).
 
-### 6.4 Contrato Compartido Front/Back y Esquema Unificado
+### 6.4 Contrato Compartido Front/Back y Esquema SQLite Canónico
 
-- **Contrato Único (`config/shared_constants.json`):** Centraliza estados de candidatura, códigos de portales, acciones Docker, límites de subida y frases de confirmación.
-- **Vinculaciones Tipadas:** Genera [`src/shared_constants.py`](../src/shared_constants.py) para el backend y [`web/src/lib/constants.ts`](../web/src/lib/constants.ts) para el frontend, eliminando cadenas mágicas y discrepancias de nombres.
-- **Esquema SQL Unificado (`src/migrations/sql/schema.sql`):** Consolida la estructura canónica de la base de datos SQLite en un único archivo declarativo y versionado.
+- **Constantes Tipadas y Compartidas:** Centralizadas en [`src/shared_constants.py`](../src/shared_constants.py) para el backend y [`web/src/lib/constants.ts`](../web/src/lib/constants.ts) para el frontend, eliminando cadenas mágicas y discrepancias de nombres para estados de vacantes, códigos de portales y límites de archivo.
+- **Esquema SQLite Canónico e Idempotente (`src/database.py`):** Consolida la estructura relacional de la base de datos local en `Database.init_db()` (`jobs`, `app_state`, `cv_cache`, `pipeline_runs`, `system_logs`), asegurando compatibilidad multiplataforma y cero desincronizaciones de esquema.

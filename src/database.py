@@ -143,16 +143,22 @@ class Database:
         self.init_db()
 
     def _get_connection(self) -> sqlite3.Connection:
+        os.makedirs(os.path.dirname(os.path.abspath(self.db_path)), exist_ok=True)
         conn = sqlite3.connect(self.db_path, timeout=30.0)
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL;")
-        conn.execute("PRAGMA synchronous=NORMAL;")
         conn.execute("PRAGMA foreign_keys=ON;")
         return conn
 
     def init_db(self) -> None:
         """Crea o actualiza las tablas e índices necesarios."""
         with self._get_connection() as conn:
+            try:
+                conn.execute("PRAGMA journal_mode=WAL;")
+                conn.execute("PRAGMA synchronous=NORMAL;")
+            except sqlite3.OperationalError as wal_err:
+                logger.warning("No se pudo activar WAL mode en SQLite (fallback a DELETE): %s", wal_err)
+                conn.execute("PRAGMA journal_mode=DELETE;")
+
             conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS jobs (
@@ -251,6 +257,17 @@ class Database:
                     value TEXT NOT NULL,
                     updated_at TEXT DEFAULT (datetime('now', 'localtime'))
                 );
+
+                CREATE TABLE IF NOT EXISTS cv_cache (
+                    filename TEXT PRIMARY KEY,
+                    file_hash TEXT NOT NULL,
+                    file_mtime REAL,
+                    file_size INTEGER,
+                    extracted_text TEXT NOT NULL,
+                    profile_json TEXT,
+                    created_at TEXT DEFAULT (datetime('now', 'localtime')),
+                    updated_at TEXT DEFAULT (datetime('now', 'localtime'))
+                );
                 """
             )
         # Garantizar que bases de datos SQLite preexistentes cuenten con todas las columnas
@@ -274,8 +291,8 @@ class Database:
         except Exception as e:
             logger.debug("Comprobación de columnas en jobs completada: %s", e)
 
-        # Recuperar ejecuciones interrumpidas en el último reinicio
-        self.recover_interrupted_runs()
+        # Recuperar ejecuciones interrumpidas y limpiar estados de arranques previos
+        self.clean_startup_artifacts()
         self.prune_old_system_logs()
 
         logger.info("Base de datos inicializada correctamente en %s", self.db_path)
@@ -313,6 +330,133 @@ class Database:
         """Elimina una clave de estado persistente de SQLite."""
         with self._get_connection() as conn:
             conn.execute("DELETE FROM app_state WHERE key = ?", (key,))
+
+    def get_cv_cache(
+        self,
+        filename: str,
+        file_mtime: Optional[float] = None,
+        file_size: Optional[int] = None,
+        file_hash: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Recupera la extracción y perfil en caché para un CV desde SQLite."""
+        with self._get_connection() as conn:
+            cursor = conn.execute("SELECT * FROM cv_cache WHERE filename = ?", (filename,))
+            row = cursor.fetchone()
+            if not row:
+                return None
+            if file_mtime is not None and row["file_mtime"] is not None:
+                if abs(float(row["file_mtime"]) - float(file_mtime)) > 1.0:
+                    return None
+            if file_size is not None and row["file_size"] is not None:
+                if int(row["file_size"]) != int(file_size):
+                    return None
+            if file_hash is not None and row["file_hash"] != file_hash:
+                return None
+            import json
+            profile = None
+            if row["profile_json"]:
+                try:
+                    profile = json.loads(row["profile_json"])
+                except Exception:
+                    pass
+            return {
+                "filename": row["filename"],
+                "file_hash": row["file_hash"],
+                "file_mtime": row["file_mtime"],
+                "file_size": row["file_size"],
+                "extracted_text": row["extracted_text"],
+                "profile": profile,
+            }
+
+    def save_cv_cache(
+        self,
+        filename: str,
+        file_hash: str,
+        file_mtime: float,
+        file_size: int,
+        extracted_text: str,
+        profile_data: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Almacena o actualiza la extracción y perfil de un CV en SQLite."""
+        import json
+        prof_json = json.dumps(profile_data, ensure_ascii=False) if profile_data else None
+        with self._get_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO cv_cache (filename, file_hash, file_mtime, file_size, extracted_text, profile_json, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
+                ON CONFLICT(filename) DO UPDATE SET
+                    file_hash = excluded.file_hash,
+                    file_mtime = excluded.file_mtime,
+                    file_size = excluded.file_size,
+                    extracted_text = excluded.extracted_text,
+                    profile_json = excluded.profile_json,
+                    updated_at = datetime('now', 'localtime')
+                """,
+                (filename, file_hash, file_mtime, file_size, extracted_text, prof_json),
+            )
+
+    def delete_cv_cache(self, filename: str) -> None:
+        """Elimina la caché de extracción de un CV específico en SQLite."""
+        with self._get_connection() as conn:
+            conn.execute("DELETE FROM cv_cache WHERE filename = ?", (filename,))
+
+    def clean_startup_artifacts(self, upload_dir: Optional[str] = None) -> Dict[str, int]:
+        """Limpia estados y archivos residuales de arranques o caídas previas."""
+        interrupted_runs = self.recover_interrupted_runs()
+
+        reset_jobs = 0
+        with self._get_connection() as conn:
+            cur = conn.execute(
+                "UPDATE jobs SET status = 'discovered' WHERE status = 'evaluating'"
+            )
+            reset_jobs = cur.rowcount
+
+        cleaned_files = 0
+        target_dir = upload_dir or os.getenv("UPLOAD_DIR", os.path.join(os.path.dirname(self.db_path), "uploaded_cvs"))
+        if os.path.exists(target_dir):
+            try:
+                for fname in os.listdir(target_dir):
+                    if fname.startswith(".extracted_") or (fname.startswith(".") and fname.endswith(".txt")):
+                        full_p = os.path.join(target_dir, fname)
+                        try:
+                            if os.path.isfile(full_p):
+                                os.remove(full_p)
+                                cleaned_files += 1
+                        except OSError:
+                            pass
+            except Exception as e:
+                logger.debug("Error limpiando archivos temporales en %s: %s", target_dir, e)
+
+        stale_cv_entries = 0
+        if os.path.exists(target_dir):
+            try:
+                valid_files = set(os.listdir(target_dir))
+                with self._get_connection() as conn:
+                    cur = conn.execute("SELECT filename FROM cv_cache")
+                    cached_names = [r["filename"] for r in cur.fetchall()]
+                    for cn in cached_names:
+                        if cn not in valid_files:
+                            conn.execute("DELETE FROM cv_cache WHERE filename = ?", (cn,))
+                            stale_cv_entries += 1
+            except Exception:
+                pass
+
+        if interrupted_runs > 0 or reset_jobs > 0 or cleaned_files > 0 or stale_cv_entries > 0:
+            logger.info(
+                "Limpieza de arranque completada: %d ejecuciones recuperadas, %d ofertas reajustadas, %d archivos residuales eliminados, %d cachés de CV obsoletas depuradas.",
+                interrupted_runs,
+                reset_jobs,
+                cleaned_files,
+                stale_cv_entries,
+            )
+
+        return {
+            "interrupted_runs": interrupted_runs,
+            "reset_jobs": reset_jobs,
+            "cleaned_files": cleaned_files,
+            "stale_cv_entries": stale_cv_entries,
+        }
 
     def job_exists(self, url_hash: str) -> bool:
         """Comprueba si una oferta con este hash de URL ya existe."""

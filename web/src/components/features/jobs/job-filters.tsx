@@ -308,13 +308,13 @@ export function JobFilters({
     );
   };
 
-  // Opciones adaptadas dinámicamente según las ofertas en SQLite con fallback a estándares universales
+  // Opciones adaptadas dinámicamente según las ofertas reales en SQLite
   const dynamicSources = facets?.sources && facets.sources.length > 0 ? facets.sources : [];
-  const dynamicModalities = facets?.modalities && facets.modalities.length > 0 ? facets.modalities : DEFAULT_MODALITIES;
-  const dynamicCategories = facets?.categories && facets.categories.length > 0 ? facets.categories : DEFAULT_CATEGORIES;
-  const dynamicEducations = facets?.educations && facets.educations.length > 0 ? facets.educations : DEFAULT_EDUCATIONS;
-  const dynamicSchedules = facets?.schedules && facets.schedules.length > 0 ? facets.schedules : DEFAULT_SCHEDULES;
-  const dynamicContracts = facets?.contract_types && facets.contract_types.length > 0 ? facets.contract_types : DEFAULT_CONTRACTS;
+  const dynamicModalities = facets?.modalities && facets.modalities.length > 0 ? facets.modalities : [];
+  const dynamicCategories = facets?.categories && facets.categories.length > 0 ? facets.categories : [];
+  const dynamicEducations = facets?.educations && facets.educations.length > 0 ? facets.educations : [];
+  const dynamicSchedules = facets?.schedules && facets.schedules.length > 0 ? facets.schedules : [];
+  const dynamicContracts = facets?.contract_types && facets.contract_types.length > 0 ? facets.contract_types : [];
   const dynamicLocations = facets?.top_locations || [];
 
   const normQuery = filterSearchQuery.trim().toLowerCase();

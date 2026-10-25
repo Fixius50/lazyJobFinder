@@ -251,22 +251,16 @@ class CVTailorer:
             if len(exp_lines) > 1:
                 blocks.append("\n".join(exp_lines))
 
-        # 5. Competencias Técnicas
+        # 5. Competencias Profesionales y Técnicas
         techs = self.profile.get("competencias_tecnicas", {})
-        comp_lines = ["## Competencias Técnicas Destacadas"]
+        comp_lines = ["## Competencias Profesionales Destacadas"]
         if isinstance(techs, dict):
-            lenguajes = [l.get("nombre") if isinstance(l, dict) else str(l) for l in techs.get("lenguajes", []) if l]
-            frameworks = [str(f) for f in techs.get("frameworks_y_librerias", []) if f]
-            dbs = [str(d) for d in techs.get("bases_de_datos", []) if d]
-            tools = [str(t) for t in techs.get("herramientas_y_entornos", []) if t]
-            if lenguajes:
-                comp_lines.append(f"- **Lenguajes:** {', '.join(lenguajes)}")
-            if frameworks:
-                comp_lines.append(f"- **Frameworks y Librerías:** {', '.join(frameworks)}")
-            if dbs:
-                comp_lines.append(f"- **Bases de Datos:** {', '.join(dbs)}")
-            if tools:
-                comp_lines.append(f"- **Herramientas y Entornos:** {', '.join(tools)}")
+            for cat, items in techs.items():
+                if isinstance(items, list) and items:
+                    cat_label = cat.replace("_", " ").title()
+                    clean_items = [item.get("nombre") if isinstance(item, dict) else str(item) for item in items if item]
+                    if clean_items:
+                        comp_lines.append(f"- **{cat_label}:** {', '.join(clean_items)}")
         elif isinstance(techs, list) and techs:
             comp_lines.append(f"- **Competencias Principales:** {', '.join(str(t) for t in techs if t)}")
 

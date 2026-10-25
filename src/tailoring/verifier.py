@@ -37,8 +37,8 @@ class ProfileVerifier:
 
         stop_lines_pattern = re.compile(
             r"(\bduración\s+del\s+curso\b|\bfecha\s*:|\bfirma\b|\bfdo\s*:|\bconforme\s+ha\s+cursado\b|"
-            r"\bcamino\s+del|\bcalle\b|\bavenida\b|\b\d{5}\b|\bdni\b|\bnie\b|\bnif\b|\badecco\b|"
-            r"\bmancomunado\b|\bdomicilio\b|\btel[eé]fono\b|\bemail\b|\bcorreo\b|\bhttp\b|\bwww\b)",
+            r"\bcalle\b|\bavenida\b|\b\d{5}\b|\bdni\b|\bnie\b|\bnif\b|"
+            r"\bdomicilio\b|\btel[eé]fono\b|\bemail\b|\bcorreo\b|\bhttp\b|\bwww\b)",
             re.IGNORECASE,
         )
 
@@ -46,13 +46,11 @@ class ProfileVerifier:
             "el", "la", "los", "las", "un", "una", "unos", "unas", "del", "al", "con", "sin", "por", "para",
             "como", "sobre", "entre", "desde", "hasta", "según", "segun", "conforme", "artículo", "articulo",
             "ley", "decreto", "servicio", "prevención", "evaluación", "evaluacion", "siguientes", "contenidos",
-            "certifica", "certificado", "superado", "éxito", "exito", "mancomunado", "grupo", "adecco",
+            "certifica", "certificado", "superado", "éxito", "exito", "entidad", "empresa", "organización",
             "alumno", "estudiante", "programa", "formación", "formacion", "curso",
-            "genérico", "generico", "lugares", "equipos", "trabajo", "trabajos", "psicosociales", "físicos",
-            "fisicos", "químicos", "quimicos", "biológicos", "biologicos", "pvd", "especialidad", "riesgos",
-            "laborales", "madrid", "pozuelo", "alarcon", "alarcón", "barcelona", "valencia", "sevilla", "bilbao",
-            "málaga", "zaragoza", "españa", "spain", "camino", "cerro", "gamos", "dni", "nie", "horas", "min",
-            "minutos", "diciembre", "enero", "consta", "nivel", "medio", "básico", "alto", "avanzado", "profesional",
+            "genérico", "generico", "lugares", "equipos", "trabajo", "trabajos", "especialidad",
+            "madrid", "barcelona", "valencia", "sevilla", "bilbao", "málaga", "zaragoza", "españa", "spain",
+            "dni", "nie", "horas", "min", "minutos", "consta", "nivel", "medio", "básico", "alto", "avanzado", "profesional",
             "candidato", "titular", "año", "años", "experiencia", "conocimientos", "habilidades", "competencias"
         }
 

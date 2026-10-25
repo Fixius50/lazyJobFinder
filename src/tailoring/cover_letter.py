@@ -32,7 +32,7 @@ class CoverLetterGenerator:
         # Reemplazar placeholders de titulación
         text = re.sub(r"\[(?:Especialidad\s+o\s+Titulación|Titulación|Especialidad|Grado)\]", titulo or "mi especialidad técnica", text, flags=re.IGNORECASE)
         # Reemplazar placeholders de proyectos
-        text = re.sub(r"\[(?:Nombre\s+de\s+un\s+proyecto\s+práctico|Proyecto\s+práctico|Proyecto)\]", "proyectos empresariales y multiplataforma", text, flags=re.IGNORECASE)
+        text = re.sub(r"\[(?:Nombre\s+de\s+un\s+proyecto\s+práctico|Proyecto\s+práctico|Proyecto)\]", "proyectos formativos y profesionales del sector", text, flags=re.IGNORECASE)
         # Reemplazar placeholders de empresa o puesto
         text = re.sub(r"\[(?:Empresa|Nombre\s+de\s+la\s+Empresa)\]", empresa, text, flags=re.IGNORECASE)
         text = re.sub(r"\[(?:Puesto|Nombre\s+del\s+Puesto)\]", puesto, text, flags=re.IGNORECASE)

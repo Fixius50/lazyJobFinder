@@ -467,3 +467,194 @@ def get_active_cv_text_and_meta(force_refresh: bool = False) -> Tuple[str, Dict[
         "char_count": 0,
         "word_count": 0,
     }
+
+
+def _extract_profile_from_raw_text(cv_text: str, filename: Optional[str] = None) -> Dict[str, Any]:
+    """Extrae metadatos y perfil estructurado de manera 100% genérica para cualquier usuario a partir de su CV."""
+    import re
+    text = cv_text or ""
+    norm = re.sub(r'github\.com/\s*\n\s*', 'github.com/', text)
+    norm = re.sub(r'(linkedin\.com/in/[a-zA-Z0-9_-]+)-\s*\n\s*', r'\1-', norm)
+
+    # 1. Email
+    email_m = re.search(r'[\w\.-]+(?:\s*\n\s*)?@[\w\.-]+\.\w+', text)
+    email = re.sub(r'\s+', '', email_m.group(0)) if email_m else ""
+
+    # 2. Teléfono
+    phone_m = re.search(r'(\+?\s*34\s*\d{3}[\s\.-]?\d{2}[\s\.-]?\d{2}[\s\.-]?\d{2}|\b\d{3}[\s\.-]?\d{2}[\s\.-]?\d{2}[\s\.-]?\d{2}\b)', text)
+    phone = re.sub(r'\s+', ' ', phone_m.group(0).strip()) if phone_m else ""
+
+    # 3. GitHub & LinkedIn
+    gh_m = re.search(r'https?://(?:www\.)?github\.com/[a-zA-Z0-9_-]+', norm)
+    github = gh_m.group(0) if gh_m else ""
+
+    li_m = re.search(r'(?:https?://)?(?:www\.)?linkedin\.com/in/[a-zA-Z0-9_-]+', norm)
+    linkedin = li_m.group(0) if li_m else ""
+    if linkedin and not linkedin.startswith('http'):
+        linkedin = 'https://' + linkedin
+
+    # 4. Nombre y Título
+    lines = [l.strip() for l in text.splitlines() if l.strip()]
+    nombre = ""
+    for l in lines[:5]:
+        if any(w in l.lower() for w in ['http', 'github', 'linkedin', '@', 'cv', 'curriculum', 'desarrollador', 'tecnico', 'ingeniero', 'programador', 'developer', 'telefono', 'email', 'teléfono']):
+            continue
+        if re.match(r'^[A-ZÁÉÍÓÚÑ][a-záéíóúñA-ZÁÉÍÓÚÑ\s\.-]+$', l) and 3 <= len(l) <= 45:
+            nombre = l
+            break
+
+    if not nombre and lines:
+        for l in lines[:3]:
+            if not any(c in l for c in ['@', ':', '/', '\\']) and len(l) < 40:
+                nombre = l
+                break
+
+    # 5. Título profesional
+    titulo = ""
+    for l in lines[:6]:
+        if l == nombre:
+            continue
+        if any(w in l.lower() for w in ['desarrollador', 'ingeniero', 'programador', 'técnico', 'analista', 'developer', 'full stack', 'frontend', 'backend', 'consultor', 'data scientist', 'arquitecto']):
+            titulo = l
+            break
+
+    # 6. Ciudad / Ubicación
+    ciudad = ""
+    cities_known = [
+        'madrid', 'barcelona', 'valencia', 'sevilla', 'zaragoza', 'málaga', 'murcia', 'palma',
+        'las palmas', 'bilbao', 'alicante', 'córdoba', 'valladolid', 'vigo', 'gijón', 'granada',
+        'vitoria', 'coruña', 'oviedo', 'valdemoro', 'pinto', 'getafe', 'leganés', 'móstoles', 'alcorcón'
+    ]
+    cv_lower = text.lower()
+    for c in cities_known:
+        if re.search(rf'\b{c}\b', cv_lower):
+            ciudad = c.capitalize()
+            if 'madrid' in cv_lower and c not in ('madrid', 'barcelona', 'valencia', 'sevilla'):
+                ciudad = f"{c.capitalize()} (Madrid)"
+            break
+
+    # 7. Resumen profesional base
+    resumen_base = ""
+    summary_match = re.search(r'(?:perfil profesional|sobre mí|resumen|extracto)[\s:]*\n+([^\n#]+(?:\n+[^\n#]+){0,4})', text, re.IGNORECASE)
+    if summary_match:
+        resumen_base = summary_match.group(1).strip()
+
+    # 8. Formación académica
+    formacion = []
+    edu_match = re.search(r'(?:formaci[oó]n|educaci[oó]n|estudios)[\s:]*\n+(.*?)(?=\n+#|\n+(?:experiencia|competencias|habilidades|idiomas|proyectos)|\Z)', text, re.IGNORECASE | re.DOTALL)
+    if edu_match:
+        edu_block = edu_match.group(1).strip()
+        current_item = {}
+        for el in [l.strip() for l in edu_block.splitlines() if l.strip()]:
+            if any(deg in el.lower() for deg in ['grado', 'técnico', 'bachillerato', 'ingenier', 'licenciat', 'máster', 'master', 'curso', 'ciclo']):
+                if current_item:
+                    formacion.append(current_item)
+                current_item = {"titulo": el, "institucion": "", "fecha_fin": ""}
+            elif current_item and not current_item.get("institucion"):
+                current_item["institucion"] = el
+            elif current_item and not current_item.get("fecha_fin") and re.search(r'\b(20\d\d|19\d\d)\b', el):
+                current_item["fecha_fin"] = el
+        if current_item:
+            formacion.append(current_item)
+
+    # 9. Experiencia laboral
+    experiencia = []
+    exp_match = re.search(r'(?:experiencia\s+laboral|experiencia\s+profesional|experiencia)[\s:]*\n+(.*?)(?=\n+#|\n+(?:formaci|competencias|habilidades|idiomas|proyectos)|\Z)', text, re.IGNORECASE | re.DOTALL)
+    if exp_match:
+        exp_block = exp_match.group(1).strip()
+        curr_exp = {}
+        for xl in [l.strip() for l in exp_block.splitlines() if l.strip()]:
+            if any(role in xl.lower() for role in ['desarrollador', 'ingeniero', 'programador', 'técnico', 'consultor', 'analista', 'prácticas', 'developer', 'junior', 'senior']):
+                if curr_exp:
+                    experiencia.append(curr_exp)
+                curr_exp = {"puesto": xl, "empresa": "", "periodo": "", "descripcion": ""}
+            elif curr_exp and not curr_exp.get("empresa"):
+                curr_exp["empresa"] = xl
+            elif curr_exp and not curr_exp.get("periodo") and re.search(r'\b(20\d\d|19\d\d)\b', xl):
+                curr_exp["periodo"] = xl
+            elif curr_exp:
+                curr_exp["descripcion"] = (curr_exp.get("descripcion", "") + " " + xl).strip()
+        if curr_exp:
+            experiencia.append(curr_exp)
+
+    # 10. Competencias técnicas
+    skills = []
+    known_techs = [
+        "Python", "Java", "JavaScript", "TypeScript", "C++", "C#", "PHP", "Go", "Rust", "Kotlin", "Swift",
+        "React", "Angular", "Vue", "Next.js", "Node.js", "NestJS", "Spring Boot", "FastAPI", "Django", "Flask",
+        "SQL", "PostgreSQL", "MySQL", "MongoDB", "Redis", "SQLite", "Oracle",
+        "Docker", "Kubernetes", "AWS", "Azure", "GCP", "Git", "GitHub", "Linux"
+    ]
+    for tech in known_techs:
+        if re.search(rf'\b{re.escape(tech)}\b', text, re.IGNORECASE):
+            skills.append(tech)
+
+    # 11. Idiomas
+    idiomas = []
+    known_langs = ["Español", "Inglés", "Francés", "Alemán", "Italiano", "Portugués"]
+    for lang in known_langs:
+        m = re.search(rf'\b{lang}\b[^\n,]*', text, re.IGNORECASE)
+        if m:
+            idiomas.append({"idioma": lang, "nivel": m.group(0).replace(lang, "").strip(" :-") or "Nativo/Fluido"})
+
+    return {
+        "candidato": {
+            "nombre_completo": nombre,
+            "titulo_profesional": titulo,
+            "email": email,
+            "telefono": phone,
+            "ciudad": ciudad,
+            "linkedin": linkedin,
+            "github": github,
+            "disponibilidad": "",
+        },
+        "resumen_base": resumen_base,
+        "formacion": formacion,
+        "experiencia_laboral": experiencia,
+        "competencias_tecnicas": {"lenguajes": skills} if skills else {},
+        "idiomas": idiomas,
+        "proyectos": [],
+    }
+
+
+def get_active_profile(profile_path: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Recupera el perfil estructurado del candidato del CV activo o de config/profile.yaml.
+    Garantiza que el generador de CVs y cartas trabaje siempre con los datos
+    reales del candidato que subió el documento y sin valores forzados en duro.
+    """
+    import yaml
+    from ..storage import PROFILE_FILE
+
+    profile_file = profile_path or PROFILE_FILE
+    profile_data: Dict[str, Any] = {}
+    if os.path.exists(profile_file):
+        try:
+            with open(profile_file, "r", encoding="utf-8") as f:
+                loaded = yaml.safe_load(f)
+                if isinstance(loaded, dict):
+                    profile_data = loaded
+        except Exception as e:
+            logger.debug("Error leyendo profile.yaml: %s", e)
+
+    # Si profile.yaml ya contenía un candidato con nombre, respetarlo
+    if profile_data.get("candidato", {}).get("nombre_completo"):
+        return profile_data
+
+    # En caso contrario, extraer dinámicamente todo del CV activo en data/uploaded_cvs/
+    cv_text, meta = get_active_cv_text_and_meta()
+    if cv_text:
+        extracted = _extract_profile_from_raw_text(cv_text, meta.get("filename"))
+        if not profile_data.get("candidato"):
+            profile_data["candidato"] = extracted["candidato"]
+        else:
+            for k, v in extracted["candidato"].items():
+                if not profile_data["candidato"].get(k):
+                    profile_data["candidato"][k] = v
+
+        for section in ["resumen_base", "formacion", "experiencia_laboral", "competencias_tecnicas", "idiomas", "proyectos"]:
+            if not profile_data.get(section) and extracted.get(section):
+                profile_data[section] = extracted[section]
+
+    return profile_data
+

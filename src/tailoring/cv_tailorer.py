@@ -2,6 +2,7 @@
 
 import json
 import logging
+import os
 from typing import Any, Dict, List, Optional, Tuple
 import yaml
 
@@ -14,10 +15,11 @@ logger = logging.getLogger("lazyJobFinder.tailoring.cv")
 class CVTailorer:
     """Adapta el enfoque del CV para una vacante específica asegurando que cada dato esté certificado por el perfil."""
 
-    def __init__(self, profile: Dict[str, Any], ollama_client: Optional[OllamaClient] = None):
-        self.profile = profile
+    def __init__(self, profile: Optional[Dict[str, Any]] = None, ollama_client: Optional[OllamaClient] = None):
+        from .cv_reader import get_active_profile
+        self.profile = profile if profile is not None else get_active_profile()
         self.ollama = ollama_client or OllamaClient()
-        self.verifier = ProfileVerifier(profile)
+        self.verifier = ProfileVerifier(self.profile)
 
     def tailor(
         self,
@@ -28,13 +30,19 @@ class CVTailorer:
         Genera una versión en Markdown del CV adaptada honestamente al puesto,
         validando mediante código que no se introduzcan alucinaciones ni afirmaciones falsas.
         """
+        from .cv_reader import get_active_profile
+        if self.profile is None:
+            self.profile = get_active_profile()
+            self.verifier = ProfileVerifier(self.profile)
+
         candidato = self.profile.get("candidato", {})
-        nombre = candidato.get("nombre_completo", "Candidato")
-        titulo_base = candidato.get("titulo_profesional") or self.profile.get("primary_role", "Profesional")
-        email = candidato.get("email", "contacto@candidato.com")
-        telefono = candidato.get("telefono", "")
-        linkedin = candidato.get("linkedin", "")
-        github = candidato.get("github", "")
+        nombre = (candidato.get("nombre_completo") or "").strip()
+        titulo_base = (candidato.get("titulo_profesional") or self.profile.get("primary_role") or "").strip()
+        email = (candidato.get("email") or "").strip()
+        telefono = (candidato.get("telefono") or "").strip()
+        ciudad = (candidato.get("ciudad") or "").strip()
+        linkedin = (candidato.get("linkedin") or "").strip()
+        github = (candidato.get("github") or "").strip()
 
         raw_matched = eval_result.get("matched_skills", [])
         # 1. Validar por código que las habilidades coincidentes existan en el perfil
@@ -58,6 +66,7 @@ class CVTailorer:
             titulo=titulo_base,
             email=email,
             telefono=telefono,
+            ciudad=ciudad,
             linkedin=linkedin,
             github=github,
             summary=sanitized_summary,
@@ -75,7 +84,7 @@ class CVTailorer:
             "reordenacion_proyectos": project_reasons,
             "correcciones_anti_alucinacion": corrections or ["Ninguna (contenido 100% fiel al perfil)"],
             "garantia_honestidad": (
-                "Validado algorítmicamente contra config/profile.yaml mediante ProfileVerifier. "
+                "Validado algorítmicamente contra el perfil acreditado del candidato mediante ProfileVerifier. "
                 "Los datos académicos, empresas y tecnologías son inmutables."
             ),
         }
@@ -88,14 +97,14 @@ class CVTailorer:
         job_title = job.get("title", "")
         company = job.get("company", "")
 
-        titulo_candidato = atomic_facts["candidato"]["titulo"]
+        titulo_candidato = atomic_facts.get("candidato", {}).get("titulo") or self.profile.get("candidato", {}).get("titulo_profesional", "Desarrollador de Software")
         skills_str = ", ".join(verified_skills) if verified_skills else "competencias acreditadas"
 
         prompt = (
             f"Eres un asistente de redacción curricular que opera bajo una política de CERO ALUCINACIONES.\n\n"
             f"### HECHOS ATÓMICOS APROBADOS (ÚNICA FUENTE DE VERDAD):\n"
             f"- Titulación o Perfil: {titulo_candidato}.\n"
-            f"- Historial y Experiencia: {atomic_facts['experiencia_comercial_previa']}.\n"
+            f"- Historial y Experiencia: {atomic_facts.get('experiencia_comercial_previa', 'Formación y proyectos acreditados')}.\n"
             f"- Competencias verificadas para este puesto: {skills_str}.\n"
             f"- Resumen base aprobado: '{self.profile.get('resumen_base', '').strip()}'\n\n"
             f"### VACANTE:\n"
@@ -146,7 +155,7 @@ class CVTailorer:
         ordered = [p for _, p in scored_projects]
 
         reasons = [
-            f"Proyecto '{p['nombre']}' en posición #{idx+1} por relevancia de stack ({', '.join(p.get('tecnologias', []))})"
+            f"Proyecto '{p.get('nombre', 'Proyecto')}' en posición #{idx+1} por relevancia de stack ({', '.join(p.get('tecnologias', []))})"
             for idx, p in enumerate(ordered)
         ]
         return ordered, reasons
@@ -157,77 +166,145 @@ class CVTailorer:
         titulo: str,
         email: str,
         telefono: str,
+        ciudad: str,
         linkedin: str,
         github: str,
         summary: str,
         projects: List[Dict[str, Any]],
         matched_skills: List[str],
     ) -> str:
+        blocks = []
+
+        # 1. Cabecera (Nombre, Título, Contacto, Enlaces)
+        header_lines = []
+        if nombre:
+            header_lines.append(f"# {nombre}")
+        if titulo:
+            header_lines.append(f"**{titulo}**")
+
+        contact_parts = [p for p in [ciudad, email, telefono] if p]
+        if contact_parts:
+            header_lines.append(" | ".join(contact_parts))
+
         links = []
         if linkedin:
             links.append(f"[LinkedIn]({linkedin})")
         if github:
             links.append(f"[GitHub]({github})")
-        links_str = " | ".join(links)
+        if links:
+            header_lines.append(" | ".join(links))
 
-        md = f"""# {nombre}
-**{titulo}**  
-España | {email} | {telefono}  
-{links_str}
+        if header_lines:
+            blocks.append("\n".join(header_lines))
 
----
+        # 2. Resumen / Perfil Profesional
+        clean_sum = (summary or "").strip()
+        if clean_sum:
+            blocks.append(f"## Perfil Profesional\n{clean_sum}")
 
-## Perfil Profesional
-{summary}
+        # 3. Formación Académica
+        form_list = self.profile.get("formacion", [])
+        if form_list:
+            form_lines = ["## Formación Académica"]
+            for form in form_list:
+                if isinstance(form, dict):
+                    t = form.get("titulo", "")
+                    inst = form.get("institucion", "")
+                    fecha = form.get("fecha_fin", "")
+                    if not t and not inst:
+                        continue
+                    form_lines.append(f"- **{t or 'Titulación'}**")
+                    meta = " | ".join([p for p in [inst, fecha] if p])
+                    if meta:
+                        form_lines.append(f"  *{meta}*")
+                    modulos = form.get("modulos_destacados", [])
+                    if modulos and isinstance(modulos, list):
+                        form_lines.append(f"  - Módulos clave: {', '.join(str(m) for m in modulos)}")
+                elif isinstance(form, str) and form.strip():
+                    form_lines.append(f"- {form.strip()}")
+            if len(form_lines) > 1:
+                blocks.append("\n".join(form_lines))
 
----
+        # 4. Experiencia Laboral
+        exp_list = self.profile.get("experiencia_laboral", [])
+        if exp_list:
+            exp_lines = ["## Experiencia Laboral"]
+            for exp in exp_list:
+                if isinstance(exp, dict):
+                    puesto = exp.get("puesto", "")
+                    empresa = exp.get("empresa", "")
+                    periodo = exp.get("periodo", "")
+                    if not puesto and not empresa:
+                        continue
+                    head = puesto or "Puesto"
+                    if empresa:
+                        head += f" — *{empresa}*"
+                    if periodo:
+                        head += f" ({periodo})"
+                    exp_lines.append(f"- **{head}**")
+                    if exp.get("ubicacion"):
+                        exp_lines.append(f"  *{exp.get('ubicacion')}*")
+                    if exp.get("descripcion"):
+                        exp_lines.append(f"  {exp.get('descripcion').strip()}")
+                    techs_exp = exp.get("tecnologias", [])
+                    if techs_exp:
+                        exp_lines.append(f"  - Tecnologías: {', '.join(str(t) for t in techs_exp)}")
+            if len(exp_lines) > 1:
+                blocks.append("\n".join(exp_lines))
 
-## Formación Académica
-"""
-        for form in self.profile.get("formacion", []):
-            if isinstance(form, dict):
-                md += f"- **{form.get('titulo', 'Titulación')}**  \n"
-                md += f"  *{form.get('institucion', '')}* | {form.get('fecha_fin', '')}  \n"
-                modulos = form.get("modulos_destacados", [])
-                if modulos and isinstance(modulos, list):
-                    md += f"  - Módulos clave: {', '.join(str(m) for m in modulos)}\n"
-
-        md += "\n---\n\n## Competencias Técnicas Destacadas\n"
+        # 5. Competencias Técnicas
         techs = self.profile.get("competencias_tecnicas", {})
+        comp_lines = ["## Competencias Técnicas Destacadas"]
         if isinstance(techs, dict):
-            lenguajes = [l.get("nombre") if isinstance(l, dict) else str(l) for l in techs.get("lenguajes", [])]
-            dbs = [str(d) for d in techs.get("bases_de_datos", [])]
-            tools = [str(t) for t in techs.get("herramientas_y_entornos", [])]
+            lenguajes = [l.get("nombre") if isinstance(l, dict) else str(l) for l in techs.get("lenguajes", []) if l]
+            frameworks = [str(f) for f in techs.get("frameworks_y_librerias", []) if f]
+            dbs = [str(d) for d in techs.get("bases_de_datos", []) if d]
+            tools = [str(t) for t in techs.get("herramientas_y_entornos", []) if t]
             if lenguajes:
-                md += f"- **Lenguajes:** {', '.join(lenguajes)}\n"
+                comp_lines.append(f"- **Lenguajes:** {', '.join(lenguajes)}")
+            if frameworks:
+                comp_lines.append(f"- **Frameworks y Librerías:** {', '.join(frameworks)}")
             if dbs:
-                md += f"- **Bases de Datos:** {', '.join(dbs)}\n"
+                comp_lines.append(f"- **Bases de Datos:** {', '.join(dbs)}")
             if tools:
-                md += f"- **Herramientas y Entornos:** {', '.join(tools)}\n"
+                comp_lines.append(f"- **Herramientas y Entornos:** {', '.join(tools)}")
         elif isinstance(techs, list) and techs:
-            md += f"- **Competencias Principales:** {', '.join(str(t) for t in techs)}\n"
+            comp_lines.append(f"- **Competencias Principales:** {', '.join(str(t) for t in techs if t)}")
 
         if matched_skills:
-            md += f"- **Coincidencias clave con la vacante:** {', '.join(matched_skills)}\n"
+            comp_lines.append(f"- **Coincidencias clave con la vacante:** {', '.join(matched_skills)}")
 
-        md += "\n---\n\n## Proyectos Destacados (Selección Relevante)\n"
-        for p in projects:
-            if isinstance(p, dict):
-                tech_list = p.get("tecnologias", [])
-                tech_str = ", ".join(str(t) for t in tech_list) if isinstance(tech_list, list) else str(tech_list)
-                md += f"### {p.get('nombre', 'Proyecto')}\n"
-                if tech_str:
-                    md += f"*Tecnologías: {tech_str}*\n"
-                md += f"{p.get('descripcion', '').strip()}\n"
-                for logro in p.get("logros", []):
-                    md += f"- {logro}\n"
-                md += "\n"
+        if len(comp_lines) > 1:
+            blocks.append("\n".join(comp_lines))
 
-        md += "---\n\n## Idiomas\n"
-        for idi in self.profile.get("idiomas", []):
-            if isinstance(idi, dict):
-                md += f"- **{idi.get('idioma', '')}:** {idi.get('nivel', '')}\n"
-            elif isinstance(idi, str):
-                md += f"- {idi}\n"
+        # 6. Proyectos Destacados
+        if projects:
+            proj_lines = ["## Proyectos Destacados (Selección Relevante)"]
+            for p in projects:
+                if isinstance(p, dict):
+                    tech_list = p.get("tecnologias", [])
+                    tech_str = ", ".join(str(t) for t in tech_list if t) if isinstance(tech_list, list) else str(tech_list)
+                    proj_lines.append(f"### {p.get('nombre', 'Proyecto')}")
+                    if tech_str:
+                        proj_lines.append(f"*Tecnologías: {tech_str}*")
+                    if p.get("descripcion"):
+                        proj_lines.append(p.get("descripcion", "").strip())
+                    for logro in p.get("logros", []):
+                        if logro:
+                            proj_lines.append(f"- {logro}")
+            if len(proj_lines) > 1:
+                blocks.append("\n".join(proj_lines))
 
-        return md.strip()
+        # 7. Idiomas
+        idiomas = self.profile.get("idiomas", [])
+        if idiomas:
+            idi_lines = ["## Idiomas"]
+            for idi in idiomas:
+                if isinstance(idi, dict) and idi.get("idioma"):
+                    idi_lines.append(f"- **{idi.get('idioma')}:** {idi.get('nivel', '')}")
+                elif isinstance(idi, str) and idi.strip():
+                    idi_lines.append(f"- {idi.strip()}")
+            if len(idi_lines) > 1:
+                blocks.append("\n".join(idi_lines))
+
+        return "\n\n---\n\n".join(blocks).strip()

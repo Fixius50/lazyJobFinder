@@ -3,7 +3,7 @@ import os
 import sys
 
 _repo_root = os.path.dirname(os.path.abspath(__file__))
-_cache_target = os.environ.get("PYTHONPYCACHEPREFIX") or os.path.join(_repo_root, ".cache", "pycache")
+_cache_target = os.environ.get("PYTHONPYCACHEPREFIX") or os.path.join(_repo_root, "src", "__pycache__")
 
 try:
     os.makedirs(_cache_target, exist_ok=True)

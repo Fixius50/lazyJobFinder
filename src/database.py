@@ -11,7 +11,6 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
-from .migrations.migrator import DatabaseMigrator
 
 try:
     from rapidfuzz import fuzz
@@ -25,14 +24,21 @@ from .storage import DB_PATH as DEFAULT_DB_PATH, CONSTANTS_FILE
 
 
 def _load_shared_constants() -> Dict[str, Any]:
-    """Carga dinámicamente las constantes y definiciones de filtros desde shared_constants.json sin hardcodeos."""
+    """Carga las constantes canónicas directamente desde src.shared_constants."""
     try:
-        if os.path.exists(CONSTANTS_FILE):
-            with open(CONSTANTS_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
+        from . import shared_constants
+        return {
+            "application_statuses": shared_constants.APPLICATION_STATUSES,
+            "portal_sources": shared_constants.PORTAL_SOURCES,
+            "services": shared_constants.SERVICES,
+            "service_actions": shared_constants.SERVICE_ACTIONS,
+            "document_types": shared_constants.DOCUMENT_TYPES,
+            "confirmation_phrases": shared_constants.CONFIRMATION_PHRASES,
+            "cv_upload_limits": shared_constants.CV_LIMITS,
+        }
     except Exception as e:
-        logger.debug("No se pudo cargar shared_constants.json: %s", e)
-    return {}
+        logger.debug("Error cargando shared_constants en database.py: %s", e)
+        return {}
 
 
 def _decode_row_json_fields(row_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -172,7 +178,10 @@ class Database:
                     similarity_score REAL,
                     alternate_sources TEXT DEFAULT '[]',
                     telegram_notified INTEGER DEFAULT 0,
-                    ui_saved INTEGER DEFAULT 1
+                    ui_saved INTEGER DEFAULT 1,
+                    contract_type TEXT,
+                    schedule TEXT,
+                    education_level TEXT
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_jobs_url_hash ON jobs(url_hash);
@@ -181,6 +190,7 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON jobs(created_at);
                 CREATE INDEX IF NOT EXISTS idx_jobs_duplicate_of ON jobs(duplicate_of_id);
                 CREATE INDEX IF NOT EXISTS idx_jobs_notification_channels ON jobs(telegram_notified, ui_saved);
+                CREATE INDEX IF NOT EXISTS idx_jobs_contract_schedule ON jobs(contract_type, schedule);
 
                 CREATE TABLE IF NOT EXISTS evaluations (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -235,20 +245,74 @@ class Database:
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_system_logs_timestamp ON system_logs(timestamp);
+
+                CREATE TABLE IF NOT EXISTS app_state (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    updated_at TEXT DEFAULT (datetime('now', 'localtime'))
+                );
                 """
             )
-        # Ejecutar migraciones incrementales no destructivas para bases de datos existentes
+        # Garantizar que bases de datos SQLite preexistentes cuenten con todas las columnas
         try:
-            migrator = DatabaseMigrator(self.db_path)
-            migrator.run_migrations_safely()
+            with self._get_connection() as conn:
+                cursor = conn.execute("PRAGMA table_info(jobs);")
+                existing_cols = {row["name"] for row in cursor.fetchall()}
+                for col, col_def in [
+                    ("contract_type", "TEXT"),
+                    ("schedule", "TEXT"),
+                    ("education_level", "TEXT"),
+                    ("duplicate_of_id", "INTEGER REFERENCES jobs(id) ON DELETE SET NULL"),
+                    ("similarity_score", "REAL"),
+                    ("alternate_sources", "TEXT DEFAULT '[]'"),
+                    ("telegram_notified", "INTEGER DEFAULT 0"),
+                    ("ui_saved", "INTEGER DEFAULT 1"),
+                ]:
+                    if col not in existing_cols:
+                        conn.execute(f"ALTER TABLE jobs ADD COLUMN {col} {col_def};")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_contract_schedule ON jobs(contract_type, schedule);")
         except Exception as e:
-            logger.error("Error aplicando migraciones no destructivas: %s", e)
+            logger.debug("Comprobación de columnas en jobs completada: %s", e)
 
         # Recuperar ejecuciones interrumpidas en el último reinicio
         self.recover_interrupted_runs()
         self.prune_old_system_logs()
 
         logger.info("Base de datos inicializada correctamente en %s", self.db_path)
+
+    def get_app_state(self, key: str, default: Any = None) -> Any:
+        """Recupera un valor de estado o configuración persistente desde SQLite."""
+        with self._get_connection() as conn:
+            cursor = conn.execute("SELECT value FROM app_state WHERE key = ?", (key,))
+            row = cursor.fetchone()
+            if not row:
+                return default
+            try:
+                import json
+                return json.loads(row["value"])
+            except Exception:
+                return row["value"]
+
+    def set_app_state(self, key: str, value: Any) -> None:
+        """Guarda o actualiza un valor de estado persistente en SQLite de manera atómica."""
+        import json
+        val_str = json.dumps(value, ensure_ascii=False) if not isinstance(value, str) else value
+        with self._get_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO app_state (key, value, updated_at)
+                VALUES (?, ?, datetime('now', 'localtime'))
+                ON CONFLICT(key) DO UPDATE SET
+                    value = excluded.value,
+                    updated_at = datetime('now', 'localtime')
+                """,
+                (key, val_str),
+            )
+
+    def delete_app_state(self, key: str) -> None:
+        """Elimina una clave de estado persistente de SQLite."""
+        with self._get_connection() as conn:
+            conn.execute("DELETE FROM app_state WHERE key = ?", (key,))
 
     def job_exists(self, url_hash: str) -> bool:
         """Comprueba si una oferta con este hash de URL ya existe."""

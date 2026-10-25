@@ -30,8 +30,8 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # Directorios principales (personalizables mediante variables de entorno)
 DATA_DIR = os.getenv("DATA_DIR", os.path.join(PROJECT_ROOT, "data"))
-CONFIG_DIR = os.getenv("CONFIG_DIR", os.path.join(PROJECT_ROOT, "config"))
-CACHE_DIR = os.getenv("PYTHONPYCACHEPREFIX", os.path.join(PROJECT_ROOT, ".cache", "pycache"))
+CONFIG_DIR = os.getenv("CONFIG_DIR", DATA_DIR)
+CACHE_DIR = os.getenv("PYTHONPYCACHEPREFIX", os.path.join(PROJECT_ROOT, "src", "__pycache__"))
 WEB_OUT_DIR = os.getenv("WEB_OUT_DIR", os.path.join(PROJECT_ROOT, "web", "out"))
 
 # Subdirectorios de datos persistentes
@@ -43,11 +43,11 @@ DB_PATH = os.getenv("DATABASE_PATH", os.path.join(DATA_DIR, "lazyjobfinder.db"))
 SECRETS_FILE = os.getenv("SECRETS_FILE", os.path.join(DATA_DIR, "secrets.json"))
 ACTIVE_CV_FILE = os.getenv("ACTIVE_CV_FILE", os.path.join(DATA_DIR, "active_cv.json"))
 
-# Archivos de configuración estática y plantillas del usuario
-SETTINGS_FILE = os.path.join(CONFIG_DIR, "settings.yaml")
-PROFILE_FILE = os.path.join(CONFIG_DIR, "profile.yaml")
-BASE_CV_FILE = os.path.join(CONFIG_DIR, "cv_base.md")
-CONSTANTS_FILE = os.path.join(CONFIG_DIR, "shared_constants.json")
+# Archivos de configuración y compatibilidad
+SETTINGS_FILE = os.path.join(DATA_DIR, "settings.yaml")
+PROFILE_FILE = os.path.join(DATA_DIR, "profile.yaml")
+BASE_CV_FILE = os.path.join(DATA_DIR, "cv_base.md")
+CONSTANTS_FILE = os.path.join(DATA_DIR, "shared_constants.json")
 
 
 # =============================================================================
@@ -84,26 +84,92 @@ def ensure_storage_dirs() -> None:
 
 
 # =============================================================================
-# 4. GESTIÓN DE SECRETOS PERSISTENTES (data/secrets.json)
+# 4. GESTIÓN DE ESTADO Y SECRETOS EN SQLITE (lazyjobfinder.db -> app_state)
 # =============================================================================
 
-def read_persisted_secrets() -> Dict[str, str]:
-    """Lee las credenciales privadas almacenadas en el volumen persistente (data/secrets.json)."""
-    if not os.path.exists(SECRETS_FILE):
-        return {}
+def _get_sqlite_state(key: str, default: Any = None) -> Any:
+    """Lee un valor persistente de app_state en SQLite (lazyjobfinder.db)."""
+    import sqlite3
+    if not os.path.exists(DB_PATH):
+        return default
     try:
-        with open(SECRETS_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            if isinstance(data, dict):
-                return {str(k): str(v) for k, v in data.items() if v is not None}
-            return {}
-    except Exception as exc:
-        logger.warning("No se pudo leer data/secrets.json: %s", exc)
-        return {}
+        conn = sqlite3.connect(DB_PATH, timeout=10.0)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='app_state'")
+        if not cursor.fetchone():
+            conn.close()
+            return default
+        cursor = conn.execute("SELECT value FROM app_state WHERE key = ?", (key,))
+        row = cursor.fetchone()
+        conn.close()
+        if not row:
+            return default
+        return json.loads(row["value"])
+    except Exception as e:
+        logger.debug("Error leyendo app_state (%s) en SQLite: %s", key, e)
+        return default
+
+
+def _set_sqlite_state(key: str, value: Any) -> None:
+    """Guarda un valor de app_state en SQLite de manera atómica."""
+    import sqlite3
+    ensure_storage_dirs()
+    val_str = json.dumps(value, ensure_ascii=False)
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=10.0)
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS app_state (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at TEXT DEFAULT (datetime('now', 'localtime'))
+            );
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO app_state (key, value, updated_at)
+            VALUES (?, ?, datetime('now', 'localtime'))
+            ON CONFLICT(key) DO UPDATE SET
+                value = excluded.value,
+                updated_at = datetime('now', 'localtime')
+            """,
+            (key, val_str),
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.error("Error guardando app_state (%s) en SQLite: %s", key, e)
+        raise
+
+
+def read_persisted_secrets() -> Dict[str, str]:
+    """Lee las credenciales privadas almacenadas en SQLite."""
+    data = _get_sqlite_state("secrets")
+    if data is not None and isinstance(data, dict):
+        return {str(k): str(v) for k, v in data.items() if v is not None}
+
+    # Migración transparente desde secrets.json legacy si existiese
+    if os.path.exists(SECRETS_FILE):
+        try:
+            with open(SECRETS_FILE, "r", encoding="utf-8") as f:
+                legacy = json.load(f)
+            if isinstance(legacy, dict) and legacy:
+                _set_sqlite_state("secrets", legacy)
+                try:
+                    os.remove(SECRETS_FILE)
+                except OSError:
+                    pass
+                return {str(k): str(v) for k, v in legacy.items() if v is not None}
+        except Exception as exc:
+            logger.warning("Error migrando data/secrets.json a SQLite: %s", exc)
+
+    return {}
 
 
 def get_secret(key: str, default: str = "") -> str:
-    """Recupera un secreto con orden de precedencia: 1) data/secrets.json, 2) os.environ, 3) default."""
+    """Recupera un secreto con orden de precedencia: 1) SQLite, 2) os.environ, 3) default."""
     persisted = read_persisted_secrets()
     val = persisted.get(key)
     if val:
@@ -115,44 +181,28 @@ def get_secret(key: str, default: str = "") -> str:
 
 
 def save_persisted_secret(key: str, value: str) -> None:
-    """Guarda o actualiza un secreto en data/secrets.json de manera atómica."""
-    ensure_storage_dirs()
+    """Guarda o actualiza un secreto en SQLite."""
     data = read_persisted_secrets()
     data[key] = value
-
-    tmp_file = f"{SECRETS_FILE}.tmp.{os.getpid()}"
-    try:
-        with open(tmp_file, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-        os.replace(tmp_file, SECRETS_FILE)
-    except Exception as exc:
-        if os.path.exists(tmp_file):
-            try:
-                os.remove(tmp_file)
-            except OSError:
-                pass
-        logger.error("No se pudo escribir atómicamente en data/secrets.json: %s", exc)
-        raise
+    _set_sqlite_state("secrets", data)
+    if os.path.exists(SECRETS_FILE):
+        try:
+            os.remove(SECRETS_FILE)
+        except OSError:
+            pass
 
 
 def delete_persisted_secret(key: str) -> None:
-    """Elimina una credencial de data/secrets.json."""
+    """Elimina una credencial de SQLite."""
     data = read_persisted_secrets()
     if key in data:
         data.pop(key, None)
-        tmp_file = f"{SECRETS_FILE}.tmp.{os.getpid()}"
+        _set_sqlite_state("secrets", data)
+    if os.path.exists(SECRETS_FILE):
         try:
-            with open(tmp_file, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
-            os.replace(tmp_file, SECRETS_FILE)
-        except Exception as exc:
-            if os.path.exists(tmp_file):
-                try:
-                    os.remove(tmp_file)
-                except OSError:
-                    pass
-            logger.error("No se pudo actualizar data/secrets.json al eliminar clave: %s", exc)
-            raise
+            os.remove(SECRETS_FILE)
+        except OSError:
+            pass
 
 
 def sync_secrets_to_env() -> None:
@@ -163,26 +213,36 @@ def sync_secrets_to_env() -> None:
             os.environ[k] = str(v)
     if persisted:
         logger.info(
-            "Credenciales persistentes sincronizadas correctamente desde data/secrets.json (%d claves).",
+            "Credenciales persistentes sincronizadas correctamente desde SQLite (%d claves).",
             len(persisted),
         )
 
 
 # =============================================================================
-# 5. GESTIÓN DEL PUNTERO DE CV ACTIVO (data/active_cv.json)
+# 5. GESTIÓN DEL PUNTERO DE CV ACTIVO EN SQLITE
 # =============================================================================
 
 def read_active_cv_pointer() -> Dict[str, Any]:
-    """Lee el puntero del CV activo desde data/active_cv.json."""
-    if not os.path.exists(ACTIVE_CV_FILE):
-        return {"selected_filename": "none"}
-    try:
-        with open(ACTIVE_CV_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            if isinstance(data, dict):
-                return data
-    except Exception as exc:
-        logger.debug("Error leyendo active_cv.json: %s", exc)
+    """Lee el puntero del CV activo directamente desde la tabla app_state de SQLite."""
+    data = _get_sqlite_state("active_cv_pointer")
+    if data is not None and isinstance(data, dict):
+        return data
+
+    # Migración transparente desde active_cv.json legacy si existiese
+    if os.path.exists(ACTIVE_CV_FILE):
+        try:
+            with open(ACTIVE_CV_FILE, "r", encoding="utf-8") as f:
+                legacy = json.load(f)
+            if isinstance(legacy, dict) and legacy:
+                _set_sqlite_state("active_cv_pointer", legacy)
+                try:
+                    os.remove(ACTIVE_CV_FILE)
+                except OSError:
+                    pass
+                return legacy
+        except Exception as exc:
+            logger.debug("Error migrando active_cv.json a SQLite: %s", exc)
+
     return {"selected_filename": "none"}
 
 
@@ -191,8 +251,7 @@ def write_active_cv_pointer(
     search_terms: Optional[list] = None,
     primary_role: Optional[str] = None,
 ) -> None:
-    """Escribe de manera atómica la selección del CV activo en data/active_cv.json con sus términos de búsqueda adaptados."""
-    ensure_storage_dirs()
+    """Escribe de manera atómica la selección del CV activo en SQLite con sus términos de búsqueda."""
     existing = read_active_cv_pointer()
     payload = {
         "selected_filename": filename,
@@ -200,19 +259,41 @@ def write_active_cv_pointer(
         "search_terms": search_terms if search_terms is not None else existing.get("search_terms", []),
         "primary_role": primary_role if primary_role is not None else existing.get("primary_role", ""),
     }
-    tmp_file = f"{ACTIVE_CV_FILE}.tmp.{os.getpid()}"
-    try:
-        with open(tmp_file, "w", encoding="utf-8") as f:
-            json.dump(payload, f, indent=2, ensure_ascii=False)
-        os.replace(tmp_file, ACTIVE_CV_FILE)
-    except Exception as exc:
-        if os.path.exists(tmp_file):
-            try:
-                os.remove(tmp_file)
-            except OSError:
-                pass
-        logger.error("Error guardando active_cv.json: %s", exc)
-        raise
+    _set_sqlite_state("active_cv_pointer", payload)
+    if os.path.exists(ACTIVE_CV_FILE):
+        try:
+            os.remove(ACTIVE_CV_FILE)
+        except OSError:
+            pass
+
+
+def get_persisted_settings() -> Dict[str, Any]:
+    """Recupera la configuración del sistema desde la tabla app_state de SQLite."""
+    import copy
+    from .shared_constants import DEFAULT_SETTINGS
+    data = _get_sqlite_state("settings")
+    if data is not None and isinstance(data, dict):
+        return data
+
+    # Migración transparente desde settings.yaml legacy si existiese
+    legacy_file = os.path.join(PROJECT_ROOT, "config", "settings.yaml")
+    if os.path.exists(legacy_file):
+        try:
+            import yaml
+            with open(legacy_file, "r", encoding="utf-8") as f:
+                legacy = yaml.safe_load(f)
+            if isinstance(legacy, dict) and legacy:
+                _set_sqlite_state("settings", legacy)
+                return legacy
+        except Exception as exc:
+            logger.debug("Error migrando settings.yaml a SQLite: %s", exc)
+
+    return copy.deepcopy(DEFAULT_SETTINGS)
+
+
+def save_persisted_settings(data: Dict[str, Any]) -> None:
+    """Persiste la configuración del sistema directamente en SQLite."""
+    _set_sqlite_state("settings", data)
 
 
 def resolve_active_cv_path() -> Optional[str]:

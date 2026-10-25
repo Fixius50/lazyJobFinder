@@ -20,7 +20,7 @@ Si eres un modelo de Inteligencia Artificial que trabaja en este repositorio, co
 9. Auto-Recarga en Caliente: El backend vigila cambios en `src/` y reinicia el proceso automáticamente.
 10. Prohibición de Testeo por Navegador: Jamás utilizar subagentes de navegador automatizado para testeo del sistema.
 11. Ciclo de Vida de CVs y Extracción Única: Búsqueda únicamente al subir nuevo CV; cambio de CV en el desplegable no relanza llamadas externas; eliminación en cascada de ofertas en SQLite; extracción y parseo del documento una sola vez con caché multinivel (RAM y `.extracted_<cv>.txt`); comprobaciones ligeras en UI sin re-parsear PDF.
-12. Centralización Estricta de `__pycache__`: Todo el bytecode reside exclusivamente en `.cache/pycache/` (`PYTHONPYCACHEPREFIX` y `sitecustomize.py`). Cero carpetas `__pycache__` en el árbol de código.
+12. Centralización Estricta de `__pycache__`: Todo el bytecode reside exclusivamente en `src/__pycache__/` (`PYTHONPYCACHEPREFIX` y `sitecustomize.py`). Cero carpetas dispersas en el árbol de código.
 13. UI con Unidades Relativas y Alias `@/...`: En Tailwind/CSS solo unidades relativas (`text-2xs`, `text-3xs`, `rem`, `em`, `clamp()`). Cero `px` arbitrarios (`text-[10px]`, `text-[11px]`). Importaciones frontend exclusivamente con alias `@/...` sin rutas relativas (`./`, `../`).
 14. Cero Archivos Puente o Redundantes: Prohibidos archivos pasarela dedicados a re-exportar, re-importar o redirigir rutas estáticamente.
 15. CSS Moderno y Centralizado: `globals.css` utiliza variables fluidas, `clamp()`, `color-mix()`, `@supports (backdrop-filter: ...)` y `@media (prefers-reduced-motion)`.

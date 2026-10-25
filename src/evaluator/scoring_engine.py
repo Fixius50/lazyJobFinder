@@ -82,16 +82,17 @@ class ScoringEngine:
     def __init__(
         self,
         db: Database,
-        profile_path: str,
-        settings: Dict[str, Any],
+        profile_path: Optional[str] = None,
+        settings: Optional[Dict[str, Any]] = None,
         ollama_client: Optional[OllamaClient] = None,
     ):
         self.db = db
-        self.settings = settings
+        from ..storage import get_persisted_settings
+        self.settings = settings or get_persisted_settings()
         self.ollama = ollama_client or OllamaClient()
         self.profile = self._load_profile(profile_path)
         self.verifier = ProfileVerifier(self.profile)
-        self.min_score = settings.get("evaluacion", {}).get("umbral_minimo_puntuacion", 65)
+        self.min_score = self.settings.get("evaluacion", {}).get("umbral_minimo_puntuacion", 65)
         self._cached_cv_filename: Optional[str] = None
         self._cached_cv_text: str = ""
         self._cached_cv_meta: Dict[str, Any] = {}
@@ -127,13 +128,9 @@ class ScoringEngine:
 
         return text, meta, verifier
 
-    def _load_profile(self, path: str) -> Dict[str, Any]:
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                return yaml.safe_load(f) or {}
-        except Exception as e:
-            logger.error("Error cargando perfil desde %s: %s", path, e)
-            return {}
+    def _load_profile(self, path: Optional[str] = None) -> Dict[str, Any]:
+        from ..tailoring.cv_reader import get_active_profile
+        return get_active_profile(path)
 
     def prefilter(self, job: Dict[str, Any]) -> Tuple[bool, str, Dict[str, Any]]:
         """

@@ -33,10 +33,11 @@ class JobPipelineRunner:
         from ..storage import CONFIG_DIR
         self.config_dir = config_dir or CONFIG_DIR
 
-        # 1. Cargar configuraciones
-        self.settings = self._load_yaml(os.path.join(self.config_dir, "settings.yaml"))
-        self.profile_path = os.path.join(self.config_dir, "profile.yaml")
-        self.profile = self._load_yaml(self.profile_path)
+        from ..storage import get_persisted_settings
+        from ..tailoring.cv_reader import get_active_profile
+        self.settings = get_persisted_settings()
+        self.profile = get_active_profile()
+        self.profile_path = None
 
         # 2. Inicializar persistencia y clientes
         self.db = Database(db_path=db_path)
@@ -131,6 +132,20 @@ class JobPipelineRunner:
                             self.connectors_mgr.settings = fresh
                     except Exception as s_err:
                         logger.debug("Error recargando settings en runner: %s", s_err)
+
+                try:
+                    from ..tailoring.cv_reader import get_active_profile
+                    fresh_prof = get_active_profile(self.profile_path)
+                    if fresh_prof:
+                        self.profile = fresh_prof
+                        if hasattr(self, "cv_tailorer"):
+                            self.cv_tailorer.profile = fresh_prof
+                            if hasattr(self.cv_tailorer, "verifier"):
+                                self.cv_tailorer.verifier.profile = fresh_prof
+                        if hasattr(self, "letter_generator"):
+                            self.letter_generator.profile = fresh_prof
+                except Exception as p_err:
+                    logger.debug("Error recargando perfil activo en runner: %s", p_err)
 
                 # 1. Descubrimiento de ofertas y deduplicación (en worker thread)
                 self.db.log_event("INFO", "pipeline", "Iniciando rastreo de ofertas en portales...")
@@ -364,12 +379,12 @@ class JobPipelineRunner:
         return self._async_lock is not None and self._async_lock.locked()
 
     def reload_settings(self) -> None:
-        """Recarga la configuración desde settings.yaml y propaga los cambios a los componentes."""
-        settings_path = os.path.join(self.config_dir, "settings.yaml")
-        self.settings = self._load_yaml(settings_path)
+        """Recarga la configuración desde SQLite y propaga los cambios a los componentes."""
+        from ..storage import get_persisted_settings
+        self.settings = get_persisted_settings()
         self.connectors_mgr.settings = self.settings
         self.connectors_mgr.reload_connectors()
         self.scoring_engine.settings = self.settings
         self.telegram_bot.settings = self.settings
         self.telegram_bot.reload_credentials()
-        logger.info("Configuraciones recargadas dinámicamente en JobPipelineRunner.")
+        logger.info("Configuraciones recargadas dinámicamente desde SQLite en JobPipelineRunner.")

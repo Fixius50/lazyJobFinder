@@ -4,7 +4,7 @@ title lazyJobFinder - Lanzador Principal
 
 cd /d "%~dp0"
 
-if not defined PYTHONPYCACHEPREFIX set "PYTHONPYCACHEPREFIX=%~dp0.cache\pycache"
+if not defined PYTHONPYCACHEPREFIX set "PYTHONPYCACHEPREFIX=%~dp0src\__pycache__"
 
 set "CLI_INVOKED=0"
 
@@ -79,11 +79,7 @@ if not exist ".env" (
 docker info >nul 2>&1
 if %ERRORLEVEL% neq 0 (
     echo   [!] El motor de Docker Desktop no esta activo.
-    set "DOCKER_EXE="
-    if exist "C:\Program Files\Docker\Docker\Docker Desktop.exe" set "DOCKER_EXE=C:\Program Files\Docker\Docker\Docker Desktop.exe"
-    if not defined DOCKER_EXE if exist "%ProgramFiles%\Docker\Docker\Docker Desktop.exe" set "DOCKER_EXE=%ProgramFiles%\Docker\Docker\Docker Desktop.exe"
-    if not defined DOCKER_EXE if exist "%ProgramFiles(x86)%\Docker\Docker\Docker Desktop.exe" set "DOCKER_EXE=%ProgramFiles(x86)%\Docker\Docker\Docker Desktop.exe"
-    if not defined DOCKER_EXE if exist "%LOCALAPPDATA%\Programs\Docker Desktop\Docker Desktop.exe" set "DOCKER_EXE=%LOCALAPPDATA%\Programs\Docker Desktop\Docker Desktop.exe"
+    call :FIND_DOCKER_EXE
 
     if defined DOCKER_EXE (
         echo   [i] Iniciando Docker Desktop automaticamente en segundo plano...
@@ -91,7 +87,7 @@ if %ERRORLEVEL% neq 0 (
         echo   [i] Esperando a que el motor Docker responda...
         set /a DOCKER_RETRY=0
         :WAIT_DOCKER
-        timeout /t 3 /nobreak >nul
+        ping -n 4 127.0.0.1 >nul 2>&1
         docker info >nul 2>&1
         if !ERRORLEVEL! neq 0 (
             set /a DOCKER_RETRY+=1
@@ -126,12 +122,10 @@ set "NEED_BUILD=0"
 if not exist "%~dp0web\out\index.html" set "NEED_BUILD=1"
 if not exist "%~dp0web\out\_next" set "NEED_BUILD=1"
 
-if "!NEED_BUILD!"=="0" (
-    for /f %%i in ('powershell -NoProfile -Command "if ((Get-ChildItem -Path '%~dp0web\src' -Recurse | Measure-Object -Property LastWriteTime -Maximum).Maximum -gt (Get-Item '%~dp0web\out\index.html').LastWriteTime) { Write-Output '1' } else { Write-Output '0' }" 2^>nul') do set "NEED_BUILD=%%i"
-)
+if "!NEED_BUILD!"=="0" call :CHECK_WEB_FRESHNESS
 
 if "!NEED_BUILD!"=="1" (
-    echo   [i] Actualizando panel web estatico unificado (Next.js)...
+    echo   [i] Actualizando panel web estatico unificado - Next.js...
     if not exist "%~dp0web\node_modules" (
         pushd "%~dp0web"
         call npm install
@@ -148,6 +142,21 @@ if "!NEED_BUILD!"=="1" (
 ) else (
     echo   [OK] Panel web estatico sincronizado y verificado en web\out.
 )
+
+goto :CHECK_DONE
+
+:FIND_DOCKER_EXE
+set "DOCKER_EXE="
+if exist "C:\Program Files\Docker\Docker\Docker Desktop.exe" set "DOCKER_EXE=C:\Program Files\Docker\Docker\Docker Desktop.exe"
+if not defined DOCKER_EXE if exist "%ProgramFiles%\Docker\Docker\Docker Desktop.exe" set "DOCKER_EXE=%ProgramFiles%\Docker\Docker\Docker Desktop.exe"
+if not defined DOCKER_EXE if exist "%ProgramFiles(x86)%\Docker\Docker\Docker Desktop.exe" set "DOCKER_EXE=%ProgramFiles(x86)%\Docker\Docker\Docker Desktop.exe"
+if not defined DOCKER_EXE if exist "%LOCALAPPDATA%\Programs\Docker Desktop\Docker Desktop.exe" set "DOCKER_EXE=%LOCALAPPDATA%\Programs\Docker Desktop\Docker Desktop.exe"
+exit /b 0
+
+:CHECK_WEB_FRESHNESS
+powershell -NoProfile -Command "$src = (Get-ChildItem -Path '%~dp0web\src' -Recurse | Measure-Object -Property LastWriteTime -Maximum).Maximum; $out = (Get-Item '%~dp0web\out\index.html').LastWriteTime; if ($src -gt $out) { exit 1 } else { exit 0 }" >nul 2>&1
+if errorlevel 1 set "NEED_BUILD=1"
+exit /b 0
 
 :CHECK_DONE
 exit /b 0
@@ -177,7 +186,7 @@ if %ERRORLEVEL% neq 0 (
 
 :: Comprobar modelo de IA en Ollama previamente antes de descargar
 echo --^> Verificando modelo de IA en Ollama...
-timeout /t 3 /nobreak >nul
+ping -n 4 127.0.0.1 >nul 2>&1
 docker exec lazyjob_ollama ollama list 2>nul | findstr /i "qwen2.5:3b-instruct" >nul 2>&1
 if %ERRORLEVEL% equ 0 (
     echo   [OK] Modelo qwen2.5:3b-instruct verificado y disponible en Ollama.
@@ -209,7 +218,7 @@ if !ERRORLEVEL! neq 0 (
 )
 
 :: Margen de estabilizacion para asegurar que la cache de static files y Docker este caliente
-timeout /t 2 /nobreak >nul
+ping -n 3 127.0.0.1 >nul 2>&1
 
 echo.
 echo =====================================================================

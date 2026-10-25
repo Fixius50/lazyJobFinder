@@ -1,6 +1,8 @@
 """Generador de cartas de presentación honestas y personalizadas en español."""
 
 import logging
+import os
+import re
 from datetime import datetime
 from typing import Any, Dict, Optional
 
@@ -13,49 +15,75 @@ logger = logging.getLogger("lazyJobFinder.tailoring.cover_letter")
 class CoverLetterGenerator:
     """Genera cartas de presentación profesionales y sobrias adaptadas a cada vacante."""
 
-    def __init__(self, profile: Dict[str, Any], ollama_client: Optional[OllamaClient] = None):
-        self.profile = profile
+    def __init__(self, profile: Optional[Dict[str, Any]] = None, ollama_client: Optional[OllamaClient] = None):
+        from .cv_reader import get_active_profile
+        self.profile = profile if profile is not None else get_active_profile()
         self.ollama = ollama_client or OllamaClient()
-        self.verifier = ProfileVerifier(profile)
+        self.verifier = ProfileVerifier(self.profile)
+
+    def _clean_body_placeholders(self, text: str, nombre: str, empresa: str, puesto: str, titulo: str) -> str:
+        """Elimina sistemáticamente cualquier corchete o marcador de posición que el LLM pudiera generar."""
+        if not text:
+            return ""
+        # Reemplazar placeholders de nombre
+        text = re.sub(r"\[(?:Tu\s+Nombre|Nombre|Nombre\s+del\s+Candidato|Firma|Candidato)\]", nombre, text, flags=re.IGNORECASE)
+        # Reemplazar placeholders de destinatario
+        text = re.sub(r"\[(?:Nombre\s+del\s+Recibidor|Recibidor|Responsable|Nombre\s+del\s+Responsable|Destinatario|Nombre\s+del\s+empleador)\]", f"Responsable de Selección de {empresa}", text, flags=re.IGNORECASE)
+        # Reemplazar placeholders de titulación
+        text = re.sub(r"\[(?:Especialidad\s+o\s+Titulación|Titulación|Especialidad|Grado)\]", titulo or "mi especialidad técnica", text, flags=re.IGNORECASE)
+        # Reemplazar placeholders de proyectos
+        text = re.sub(r"\[(?:Nombre\s+de\s+un\s+proyecto\s+práctico|Proyecto\s+práctico|Proyecto)\]", "proyectos empresariales y multiplataforma", text, flags=re.IGNORECASE)
+        # Reemplazar placeholders de empresa o puesto
+        text = re.sub(r"\[(?:Empresa|Nombre\s+de\s+la\s+Empresa)\]", empresa, text, flags=re.IGNORECASE)
+        text = re.sub(r"\[(?:Puesto|Nombre\s+del\s+Puesto)\]", puesto, text, flags=re.IGNORECASE)
+        # Limpiar cualquier corchete residual [ ... ]
+        text = re.sub(r"\[([^\]]+)\]", r"\1", text)
+        return text.strip()
 
     def generate(self, job: Dict[str, Any], eval_result: Dict[str, Any]) -> str:
         """Genera el texto completo de la carta de presentación en formato Markdown validando afirmaciones."""
+        from .cv_reader import get_active_profile
+        if self.profile is None:
+            self.profile = get_active_profile()
+            self.verifier = ProfileVerifier(self.profile)
+
         candidato = self.profile.get("candidato", {})
-        nombre = candidato.get("nombre_completo", "Candidato")
-        email = candidato.get("email", "contacto@candidato.com")
-        telefono = candidato.get("telefono", "")
-        ciudad = candidato.get("ciudad", "España")
+        nombre = (candidato.get("nombre_completo") or "").strip()
+        email = (candidato.get("email") or "").strip()
+        telefono = (candidato.get("telefono") or "").strip()
+        ciudad = (candidato.get("ciudad") or "").strip()
         fecha_actual = datetime.now().strftime("%d de %B de %Y")
 
         empresa = job.get("company", "Equipo de Selección")
         puesto = job.get("title", "Puesto Ofertado")
-        
+
         # Validar que solo se presuman habilidades reales
         atomic_facts = self.verifier.get_approved_atomic_facts()
         raw_matched = eval_result.get("matched_skills", [])
         verified_matched = self.verifier.validate_matched_skills(raw_matched)
         missing = eval_result.get("missing_skills", [])
-        titulo_candidato = atomic_facts["candidato"]["titulo"]
+        titulo_candidato = atomic_facts.get("candidato", {}).get("titulo") or candidato.get("titulo_profesional", "Desarrollador de Software")
         skills_str = ", ".join(verified_matched) if verified_matched else "competencias funcionales y formativas acreditadas"
 
         # Intento con LLM local guiado estrictamente por hechos atómicos aprobados
         prompt = (
             f"Redacta una carta de presentación formal y profesional en español para una candidatura de empleo.\n\n"
             f"### HECHOS ATÓMICOS APROBADOS DEL CANDIDATO (ÚNICA FUENTE DE VERDAD):\n"
-            f"- Nombre: {nombre}\n"
-            f"- Especialidad o Titulación: {titulo_candidato}.\n"
-            f"- Historial y Experiencia: {atomic_facts['experiencia_comercial_previa']}.\n"
-            f"- Competencias demostrables que coinciden con la vacante: {skills_str}.\n\n"
+            f"- Nombre del candidato: {nombre}\n"
+            f"- Especialidad o Titulación: {titulo_candidato}\n"
+            f"- Historial y Experiencia: {atomic_facts.get('experiencia_comercial_previa', 'Formación técnica y proyectos acreditados')}\n"
+            f"- Competencias demostrables que coinciden con la vacante: {skills_str}\n\n"
             f"### DATOS DE LA VACANTE:\n"
             f"- Puesto: {puesto}\n"
             f"- Empresa a la que postula: {empresa}\n"
-            f"- Requisitos adicionales donde manifiesta total disposición para aprender: {', '.join(missing[:2]) or 'nuevas herramientas y procedimientos'}.\n\n"
-            f"DIRECTRICES DE VERACIDAD:\n"
+            f"- Requisitos adicionales donde manifiesta total disposición para aprender: {', '.join(missing[:2]) or 'nuevas herramientas y procedimientos'}\n\n"
+            f"DIRECTRICES DE REDACCIÓN:\n"
             f"1. Estructura en 3 o 4 párrafos claros y directos (máximo 250 palabras).\n"
             f"2. Expresa motivación genuina por el proyecto de {empresa} y por consolidar la carrera profesional en {puesto}.\n"
             f"3. Resalta la base formativa y profesional sólida adquirida y los proyectos prácticos realizados.\n"
-            f"4. PROHIBIDO inventar empresas pasadas ficticias o atribuir años de experiencia laboral comercial previa inexistentes.\n"
-            f"5. Tono humilde, profesional, resolutivo y entusiasta por seguir aprendiendo.\n"
+            f"4. PROHIBIDO TERMINANTEMENTE usar corchetes o marcadores de posición como [Tu Nombre], [Nombre del Recibidor], [Especialidad o Titulación] o similares. "
+            f"Usa siempre los datos reales del candidato ({nombre}) y de la empresa ({empresa}).\n"
+            f"5. Firma la carta al final con: Atentamente,\n{nombre}\n"
             f"Devuelve ÚNICAMENTE el cuerpo de la carta en español."
         )
 
@@ -66,7 +94,7 @@ class CoverLetterGenerator:
                 temperature=0.1,
                 timeout=50,
             )
-            cleaned_body = body_text.strip().strip('"')
+            cleaned_body = self._clean_body_placeholders(body_text.strip().strip('"'), nombre, empresa, puesto, titulo_candidato)
             is_valid, violations = self.verifier.validate_concrete_assertions(cleaned_body, target_company=empresa)
             if is_valid and len(cleaned_body) > 100:
                 return self._assemble_letter(
@@ -84,7 +112,7 @@ class CoverLetterGenerator:
         except Exception as e:
             logger.debug("Generación de carta por LLM falló, usando plantilla determinista: %s", e)
 
-        # Plantilla determinista de respaldo 100% verídica y adaptable a cualquier profesión
+        # Plantilla determinista de respaldo 100% verídica y personalizada
         tech_ref = f"{', '.join(verified_matched[:3])}" if verified_matched else "las competencias requeridas"
         perfil_desc = titulo_candidato or "mi perfil formativo y profesional"
         fallback_body = (
@@ -98,10 +126,10 @@ class CoverLetterGenerator:
             f"Me motiva especialmente incorporarme a {empresa} por la proyección de sus proyectos y la posibilidad de seguir creciendo "
             f"en un entorno profesional de primer nivel. Cuento con una alta capacidad de aprendizaje, actitud proactiva y total disposición "
             f"para dominar con rapidez cualquier procedimiento específico que el puesto requiera.\n\n"
-            f"Agradezco de antemano el tiempo dedicado a valorar mi candidatura y quedo a su entera disposición para mantener una "
-            f"entrevista en la que poder profundizar en mis motivaciones.\n\n"
-            f"Atentamente,\n"
-            f"{nombre}"
+            f"Agradezco de antemano el tiempo dedicado a valorar mi candidatura y quedo a su entera disposición para mantener una entrevista "
+            f"en la que profundizar sobre mi trayectoria.\n\n"
+            f"Atentamente,\n\n"
+            f"**{nombre}**"
         )
 
         return self._assemble_letter(
@@ -126,15 +154,16 @@ class CoverLetterGenerator:
         fecha: str,
         body: str,
     ) -> str:
-        return f"""# Carta de Presentación
+        meta_lines = []
+        if nombre:
+            meta_lines.append(f"**De:** {nombre}")
+        contact_parts = [p for p in [ciudad, email, telefono] if p]
+        if contact_parts:
+            meta_lines.append(f"**Contacto:** {' | '.join(contact_parts)}")
+        meta_lines.append(f"**Para:** Departamento de Selección / {empresa}")
+        meta_lines.append(f"**Referencia:** Candidatura para {puesto}")
+        if fecha:
+            meta_lines.append(f"**Fecha:** {fecha}")
 
-**De:** {nombre}  
-**Contacto:** {email} | {telefono} | {ciudad}  
-**Para:** Departamento de Selección / {empresa}  
-**Referencia:** Candidatura para {puesto}  
-**Fecha:** {fecha}  
-
----
-
-{body.strip()}
-"""
+        header_block = "  \n".join(meta_lines)
+        return f"# Carta de Presentación\n\n{header_block}\n\n---\n\n{body.strip()}\n"

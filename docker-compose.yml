@@ -48,7 +48,7 @@ services:
     environment:
       - OLLAMA_BASE_URL=http://ollama:11434
       - DATABASE_PATH=/app/data/lazyjobfinder.db
-      - PYTHONPYCACHEPREFIX=/app/.cache/pycache
+      - PYTHONPYCACHEPREFIX=/app/src/__pycache__
     ports:
       # API REST local de administración vinculada estrictamente a localhost (seguridad y privacidad)
       - "127.0.0.1:8000:8000"
@@ -57,8 +57,6 @@ services:
       - ./src:/app/src:ro
       # Persistencia de la base de datos SQLite y los documentos generados (PDFs/MDs)
       - ./data:/app/data
-      # Configuración y perfil del candidato editable sin reconstruir la imagen
-      - ./config:/app/config
       # Frontend compilado estático para servicio unificado en http://localhost:8000
       - ./web/out:/app/web/out:ro
       # Acceso al socket de Docker para consultar logs y estado desde el backend

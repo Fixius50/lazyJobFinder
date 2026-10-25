@@ -7,7 +7,7 @@ FROM python:3.11-slim
 # Evitar prompts interactivos y buffers de Python
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONPYCACHEPREFIX=/app/.cache/pycache \
+    PYTHONPYCACHEPREFIX=/app/src/__pycache__ \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
@@ -23,16 +23,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copiar el código fuente, las configuraciones base y el frontend compilado
+# Copiar el código fuente y el frontend compilado
 COPY src/ /app/src/
-COPY config/ /app/config/
 COPY web/out/ /app/web/out/
 
 # Crear directorios para persistencia de datos y documentos
 RUN mkdir -p /app/data/documents
 
-# Definir volúmenes para persistir la base de datos y la configuración personalizada
-VOLUME ["/app/data", "/app/config"]
+# Definir volumen para persistir la base de datos y los documentos
+VOLUME ["/app/data"]
 
 # Comprobación de salud básica del contenedor
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \

@@ -76,30 +76,22 @@ class SearchConfigUpdate(BaseModel):
 
 
 def _read_settings() -> Dict[str, Any]:
-    if not os.path.exists(SETTINGS_FILE):
-        return {}
-    try:
-        with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
-            return yaml.safe_load(f) or {}
-    except Exception as e:
-        logger.error("Error leyendo settings.yaml: %s", e)
-        raise HTTPException(status_code=500, detail="No se pudo leer el archivo de configuración.")
+    from ...storage import get_persisted_settings
+    return get_persisted_settings()
 
 
 def _save_settings(data: Dict[str, Any]) -> None:
-    # NUNCA persistir client_secret en settings.yaml (archivo versionado en git)
+    from ...storage import save_persisted_settings
     if "fuentes" in data and "infojobs_api" in data["fuentes"]:
         data["fuentes"]["infojobs_api"].pop("client_secret", None)
 
     try:
-        with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
-            yaml.dump(data, f, allow_unicode=True, sort_keys=False)
-        # Notificar al runner para recargar configuraciones en caliente
+        save_persisted_settings(data)
         runner = get_runner()
         if runner:
             runner.reload_settings()
     except Exception as e:
-        logger.error("Error guardando settings.yaml: %s", e)
+        logger.error("Error guardando configuración en SQLite: %s", e)
         raise HTTPException(status_code=500, detail="No se pudo guardar la configuración.")
 
 

@@ -96,6 +96,57 @@ export function ApplicationsView() {
     }
   };
 
+  const filtersRef = useRef({
+    searchTerm,
+    exclusionTerm,
+    locationName,
+    isAllLocations,
+    selectedSource,
+    selectedStatus,
+    minScore,
+    selectedModalities,
+    selectedCategories,
+    selectedEducations,
+    minExperienceStep,
+    minSalaryStep,
+    selectedSchedules,
+    selectedContractTypes,
+  });
+
+  useEffect(() => {
+    filtersRef.current = {
+      searchTerm,
+      exclusionTerm,
+      locationName,
+      isAllLocations,
+      selectedSource,
+      selectedStatus,
+      minScore,
+      selectedModalities,
+      selectedCategories,
+      selectedEducations,
+      minExperienceStep,
+      minSalaryStep,
+      selectedSchedules,
+      selectedContractTypes,
+    };
+  }, [
+    searchTerm,
+    exclusionTerm,
+    locationName,
+    isAllLocations,
+    selectedSource,
+    selectedStatus,
+    minScore,
+    selectedModalities,
+    selectedCategories,
+    selectedEducations,
+    minExperienceStep,
+    minSalaryStep,
+    selectedSchedules,
+    selectedContractTypes,
+  ]);
+
   useEffect(() => {
     loadFacets();
     api.getActiveCV().then((cv) => {
@@ -107,7 +158,7 @@ export function ApplicationsView() {
     const interval = setInterval(async () => {
       const isRunning = await pollSearchStatus();
       if (isRunning) {
-        // Refrescar silenciosamente conservando exactamente la página activa en tiempo real
+        // Refrescar silenciosamente conservando exactamente la página activa en tiempo real y los filtros actuales
         fetchJobs(true, currentPageRef.current);
       }
     }, 3000);
@@ -118,25 +169,26 @@ export function ApplicationsView() {
     if (!silent) {
       setLoading(true);
     }
+    const current = filtersRef.current;
     const targetPage = pageOverride ?? currentPageRef.current;
     try {
-      const expYears = minExperienceStep > 0 ? EXPERIENCE_STEPS[minExperienceStep]?.years : undefined;
-      const minSal = minSalaryStep > 0 ? SALARY_STEPS[minSalaryStep]?.value : undefined;
+      const expYears = current.minExperienceStep > 0 ? EXPERIENCE_STEPS[current.minExperienceStep]?.years : undefined;
+      const minSal = current.minSalaryStep > 0 ? SALARY_STEPS[current.minSalaryStep]?.value : undefined;
 
       const res = await api.listJobs({
-        search: searchTerm.trim() || undefined,
-        exclude: exclusionTerm.trim() || undefined,
-        location: !isAllLocations && locationName ? locationName : undefined,
-        source: selectedSource || undefined,
-        status: selectedStatus || undefined,
-        min_score: minScore > 0 ? minScore : undefined,
-        modalities: selectedModalities.length > 0 ? selectedModalities : undefined,
-        categories: selectedCategories.length > 0 ? selectedCategories : undefined,
-        educations: selectedEducations.length > 0 ? selectedEducations : undefined,
+        search: current.searchTerm.trim() || undefined,
+        exclude: current.exclusionTerm.trim() || undefined,
+        location: !current.isAllLocations && current.locationName ? current.locationName : undefined,
+        source: current.selectedSource || undefined,
+        status: current.selectedStatus || undefined,
+        min_score: current.minScore > 0 ? current.minScore : undefined,
+        modalities: current.selectedModalities.length > 0 ? current.selectedModalities : undefined,
+        categories: current.selectedCategories.length > 0 ? current.selectedCategories : undefined,
+        educations: current.selectedEducations.length > 0 ? current.selectedEducations : undefined,
         min_experience_years: expYears,
         min_salary: minSal,
-        schedules: selectedSchedules.length > 0 ? selectedSchedules : undefined,
-        contract_types: selectedContractTypes.length > 0 ? selectedContractTypes : undefined,
+        schedules: current.selectedSchedules.length > 0 ? current.selectedSchedules : undefined,
+        contract_types: current.selectedContractTypes.length > 0 ? current.selectedContractTypes : undefined,
         page: targetPage,
         page_size: 20,
         sort_by: "created_at",

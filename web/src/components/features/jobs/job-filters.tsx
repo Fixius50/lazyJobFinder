@@ -736,12 +736,6 @@ export function JobFilters({
               </div>
             )}
           </div>
-
-          {/* Botón Aplicar */}
-          <Button type="submit" size="sm" className="w-full h-8 text-xs font-semibold gap-1.5 shadow-sm">
-            <Search className="h-3.5 w-3.5" />
-            <span>Aplicar Filtros</span>
-          </Button>
         </form>
       </CardContent>
     </Card>

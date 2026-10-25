@@ -848,6 +848,11 @@ class Database:
         gaps = json.dumps(eval_data.get("gaps", []), ensure_ascii=False)
 
         with self._get_connection() as conn:
+            job_exists = conn.execute("SELECT 1 FROM jobs WHERE id = ?", (job_id,)).fetchone()
+            if not job_exists:
+                logger.warning("Oferta ID %s ya no existe en tabla jobs. Omitiendo guardado de evaluación.", job_id)
+                return -1
+
             cursor = conn.execute(
                 """
                 INSERT INTO evaluations (
@@ -881,7 +886,13 @@ class Database:
 
     def save_documents(self, doc_data: Dict[str, Any]) -> int:
         """Registra o actualiza las rutas de los archivos PDF y Markdown generados."""
+        job_id = doc_data["job_id"]
         with self._get_connection() as conn:
+            job_exists = conn.execute("SELECT 1 FROM jobs WHERE id = ?", (job_id,)).fetchone()
+            if not job_exists:
+                logger.warning("Oferta ID %s ya no existe en tabla jobs. Omitiendo guardado de documentos.", job_id)
+                return -1
+
             cursor = conn.execute(
                 """
                 INSERT INTO generated_documents (
@@ -897,7 +908,7 @@ class Database:
                     created_at = datetime('now', 'localtime')
                 """,
                 (
-                    doc_data["job_id"],
+                    job_id,
                     doc_data.get("cv_pdf_path"),
                     doc_data.get("cv_md_path"),
                     doc_data.get("letter_pdf_path"),

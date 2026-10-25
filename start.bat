@@ -66,8 +66,9 @@ cd /d "%~dp0"
 echo.
 echo --^> Verificando requisitos y entorno del sistema...
 
-:: 0. Limpieza de archivos temporales residuales
+:: 0. Limpieza de archivos temporales residuales y unificacion de pycache en src\__pycache__
 if exist "%~dp0data\uploaded_cvs\.extracted_*" del /f /q "%~dp0data\uploaded_cvs\.extracted_*" >nul 2>&1
+python -c "import os, shutil; [shutil.rmtree(os.path.join(r, d)) for r, dirs, _ in os.walk('src') for d in dirs if d == '__pycache__' and os.path.abspath(r) != os.path.abspath('src')]" >nul 2>&1
 
 :: 1. Archivo .env
 if not exist ".env" (
@@ -180,6 +181,11 @@ echo.
 echo --^> Levantando servicios Docker Compose...
 docker compose up -d
 if %ERRORLEVEL% neq 0 (
+    echo   [i] Esperando liberacion de puertos en el sistema... reintentando en 3 segundos...
+    timeout /t 3 /nobreak >nul 2>&1
+    docker compose up -d
+)
+if %ERRORLEVEL% neq 0 (
     echo.
     echo   [ERROR] No se pudieron arrancar los contenedores.
     if "%CLI_INVOKED%"=="1" goto :EXIT
@@ -240,9 +246,26 @@ echo   - Al cerrar el navegador o esta terminal, los servicios se detendran solo
 echo   - Tambien puedes pulsar Ctrl+C para salir inmediatamente.
 echo =====================================================================
 echo.
-:: Iniciar monitor vigilante en segundo plano para asegurar que si la terminal muere o el contenedor para, se detenga Compose
-start /b cmd /c "docker wait lazyjob_app >nul 2>&1 & cd /d "%~dp0" & docker compose stop >nul 2>&1"
-docker compose logs -f lazyjobfinder
+:: -----------------------------------------------------------------------------
+:: Supervisor de Ejecucion en Vivo: Mantiene la terminal abierta mientras este activo
+:: -----------------------------------------------------------------------------
+:SUPERVISOR_LOOP
+docker compose logs -f --tail=30 lazyjobfinder
+
+:: Si el stream de logs termino, comprobar si el contenedor sigue vivo
+docker inspect -f "{{.State.Running}}" lazyjob_app 2>nul | findstr /i "true" >nul 2>&1
+if !ERRORLEVEL! equ 0 (
+    :: El contenedor sigue en ejecucion (reinicio por recarga interna o reconexion de logs)
+    timeout /t 2 /nobreak >nul 2>&1
+    goto :SUPERVISOR_LOOP
+)
+
+:: El contenedor se ha detenido (cierre desde el navegador o fin de sesion)
+echo.
+echo =====================================================================
+echo   lazyJobFinder ha finalizado su sesion (cierre detectado).
+echo   Deteniendo todos los servicios y liberando puertos...
+echo =====================================================================
 goto :STOP_AND_EXIT
 
 :: -----------------------------------------------------------------------------

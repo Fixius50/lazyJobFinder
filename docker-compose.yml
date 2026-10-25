@@ -12,7 +12,7 @@ services:
   ollama:
     image: ollama/ollama:latest
     container_name: lazyjob_ollama
-    restart: unless-stopped
+    restart: "no"
     ports:
       - "11434:11434"
     volumes:
@@ -42,7 +42,7 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: lazyjob_app
-    restart: unless-stopped
+    restart: "no"
     env_file:
       - .env
     environment:
@@ -55,6 +55,7 @@ services:
     volumes:
       # Montaje del codigo fuente para reflejar cambios del backend inmediatamente
       - ./src:/app/src:ro
+      - ./src/__pycache__:/app/src/__pycache__:rw
       # Persistencia de la base de datos SQLite y los documentos generados (PDFs/MDs)
       - ./data:/app/data
       # Frontend compilado estático para servicio unificado en http://localhost:8000

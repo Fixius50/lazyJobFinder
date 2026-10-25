@@ -135,9 +135,10 @@ cleanup() {
 }
 trap cleanup SIGINT SIGTERM SIGHUP EXIT
 
-# Monitor vigilante en background: si el contenedor lazyjob_app se apaga (ej. cierre de navegador), detener compose
-(docker wait lazyjob_app >/dev/null 2>&1 && docker compose stop >/dev/null 2>&1) &
-
-docker compose logs -f lazyjobfinder
+# Monitor supervisor en primer plano manteniendo la terminal activa
+while [ "$(docker inspect -f '{{.State.Running}}' lazyjob_app 2>/dev/null)" = "true" ]; do
+    docker compose logs -f --tail=30 lazyjobfinder
+    sleep 2
+done
 
 

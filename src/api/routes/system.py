@@ -224,6 +224,7 @@ def get_services_status() -> Dict[str, Any]:
     - error
     Utiliza resolución 100% dinámica por etiquetas de Compose y aislamiento por proyecto.
     """
+    cancel_pending_shutdown()
     client = _get_docker_client()
     services_status = {}
     current_project = _resolve_current_project(client)
@@ -659,31 +660,47 @@ async def stream_logs_sse(
     )
 
 
+_pending_shutdown_timer: Optional[threading.Timer] = None
+_shutdown_lock = threading.Lock()
+
+
+def cancel_pending_shutdown():
+    """Cancela cualquier apagado programado si la interfaz web sigue viva."""
+    global _pending_shutdown_timer
+    with _shutdown_lock:
+        if _pending_shutdown_timer and _pending_shutdown_timer.is_alive():
+            _pending_shutdown_timer.cancel()
+            _pending_shutdown_timer = None
+            logger.info("Cancelada solicitud de apagado: la interfaz web sigue activa (pestaña reconectada o recargada).")
+
+
 @router.post("/heartbeat")
 def heartbeat_ping() -> Dict[str, Any]:
     """Latido enviado por la pestaña web abierta para confirmar presencia del usuario."""
+    cancel_pending_shutdown()
     return {"status": "alive", "timestamp": time.time()}
 
 
 @router.post("/shutdown")
-def shutdown_system() -> Dict[str, Any]:
+def shutdown_system(force: bool = False) -> Dict[str, Any]:
     """
-    Ordena la detención inmediata de lazyJobFinder al cerrar el navegador o la pestaña.
-    Detiene lazyjob_ollama y finaliza el proceso de lazyJobFinder, lo que causa la
-    parada automática de Docker en el host.
+    Ordena la detención de lazyJobFinder al cerrar el navegador o la pestaña.
+    Aplica un margen de gracia de 4 segundos para evitar apagados accidentales por recarga de página (F5).
     """
+    global _pending_shutdown_timer
     from ..deps import trigger_shutdown
-    client = _get_docker_client()
-    if client:
-        try:
-            ollama_c = client.containers.get("lazyjob_ollama")
-            ollama_c.stop(timeout=5)
-            logger.info("lazyjob_ollama detenido inmediatamente por cierre de aplicación.")
-        except Exception as e:
-            logger.debug("Error deteniendo lazyjob_ollama en shutdown: %s", e)
 
-    # Detener el runner y la API local en un hilo desacoplado para responder a la petición HTTP
-    def _delayed_exit():
+    def _execute_shutdown():
+        logger.info("Margen de gracia cumplido sin reconexión. Procediendo al apagado ordenado de servicios...")
+        client = _get_docker_client()
+        if client:
+            try:
+                ollama_c = client.containers.get("lazyjob_ollama")
+                ollama_c.stop(timeout=5)
+                logger.info("lazyjob_ollama detenido inmediatamente por cierre de aplicación.")
+            except Exception as e:
+                logger.debug("Error deteniendo lazyjob_ollama en shutdown: %s", e)
+
         time.sleep(0.5)
         logger.info("Apagando backend de lazyJobFinder...")
         if client:
@@ -697,6 +714,17 @@ def shutdown_system() -> Dict[str, Any]:
             import sys
             sys.exit(0)
 
-    threading.Thread(target=_delayed_exit, daemon=True).start()
-    return {"success": True, "message": "Apagado del sistema iniciado inmediatamente."}
+    with _shutdown_lock:
+        if _pending_shutdown_timer and _pending_shutdown_timer.is_alive():
+            _pending_shutdown_timer.cancel()
+
+        if force:
+            threading.Thread(target=_execute_shutdown, daemon=True).start()
+            return {"success": True, "message": "Apagado forzado iniciado inmediatamente."}
+
+        _pending_shutdown_timer = threading.Timer(4.0, _execute_shutdown)
+        _pending_shutdown_timer.daemon = True
+        _pending_shutdown_timer.start()
+
+    return {"success": True, "message": "Apagado programado en 4 segundos si no hay reconexión de pestaña."}
 

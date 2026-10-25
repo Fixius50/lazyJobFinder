@@ -45,7 +45,8 @@ if not exist ".env" (
         echo COMPOSE_PROJECT_NAME=lazyjob_!RAND_SUFFIX!>>".env"
         echo [i] Identificador COMPOSE_PROJECT_NAME asignado a .env (lazyjob_!RAND_SUFFIX!).
     )
-)
+:: Limpieza de pycache en subcarpetas para centralizar en src\__pycache__
+python -c "import os, shutil; [shutil.rmtree(os.path.join(r, d)) for r, dirs, _ in os.walk('src') for d in dirs if d == '__pycache__' and os.path.abspath(r) != os.path.abspath('src')]" >nul 2>&1
 
 :: 2. Comprobar si Docker esta operativo
 docker info >nul 2>&1
@@ -123,6 +124,11 @@ echo.
 echo --^> Levantando servicios en Docker...
 docker compose up -d
 if %ERRORLEVEL% neq 0 (
+    echo   [i] Esperando liberacion de puertos del sistema... reintentando en 3 segundos...
+    timeout /t 3 /nobreak >nul 2>&1
+    docker compose up -d
+)
+if %ERRORLEVEL% neq 0 (
     echo.
     echo [ERROR] Fallo al iniciar los contenedores de Docker con Compose.
     pause
@@ -199,9 +205,24 @@ echo   - Tambien puedes pulsar Ctrl+C para salir inmediatamente.
 echo =====================================================================
 echo.
 
-:: Iniciar monitor vigilante en segundo plano para asegurar que si la ventana se cierra o el contenedor para, se detenga Compose
-start /b cmd /c "docker wait lazyjob_app >nul 2>&1 & cd /d "%~dp0" & docker compose stop >nul 2>&1"
-docker compose logs -f lazyjobfinder
+:: -----------------------------------------------------------------------------
+:: Supervisor de Ejecucion en Vivo: Mantiene la terminal abierta mientras este activo
+:: -----------------------------------------------------------------------------
+:SUPERVISOR_LOOP
+docker compose logs -f --tail=30 lazyjobfinder
+
+:: Si el stream de logs termino, comprobar si el contenedor sigue vivo
+docker inspect -f "{{.State.Running}}" lazyjob_app 2>nul | findstr /i "true" >nul 2>&1
+if !ERRORLEVEL! equ 0 (
+    timeout /t 2 /nobreak >nul 2>&1
+    goto :SUPERVISOR_LOOP
+)
+
+echo.
+echo =====================================================================
+echo   lazyJobFinder ha finalizado su sesion (cierre detectado).
+echo   Deteniendo todos los servicios y liberando puertos...
+echo =====================================================================
 call "%~dp0stop.bat"
 exit /b 0
 

@@ -60,6 +60,7 @@ def _update_env_file(key: str, value: str) -> None:
 class NotificationChannelsUpdate(BaseModel):
     guardar_en_interfaz: Optional[bool] = Field(True, description="Conservar y consultar en la interfaz web local (obligatorio)")
     enviar_telegram: bool = Field(..., description="Enviar notificaciones por bot de Telegram")
+    telegram_bot_token: Optional[str] = Field(None, description="Token del Bot de Telegram (@BotFather)")
     telegram_user_id: Optional[str] = Field(None, description="ID numérico de usuario de Telegram autorizado")
     telegram_adjuntar_docs: Optional[bool] = Field(True, description="Adjuntar PDFs por Telegram (obligatorio si Telegram activo)")
     umbral_minimo_puntuacion: Optional[int] = Field(None, ge=0, le=100, description="Umbral mínimo de afinidad")
@@ -103,8 +104,9 @@ def get_settings() -> Dict[str, Any]:
     """
     data = _read_settings()
 
-    # Informar estado de configuración de Telegram e InfoJobs sin filtrar tokens secretos
-    telegram_bot_token_present = bool(os.getenv("TELEGRAM_BOT_TOKEN"))
+    stored_token = _get_secret("TELEGRAM_BOT_TOKEN", os.getenv("TELEGRAM_BOT_TOKEN", "")).strip()
+    is_placeholder = "ABCdefGhIJK" in stored_token or "tu_token" in stored_token.lower() or stored_token.startswith("123456789:")
+    telegram_bot_token_present = bool(stored_token) and not is_placeholder
     cfg_user_id = data.get("notificaciones", {}).get("telegram", {}).get("allowed_user_id", "")
     current_user_id = _get_secret("TELEGRAM_ALLOWED_USER_ID", str(cfg_user_id or ""))
     if current_user_id == "0":
@@ -121,6 +123,21 @@ def get_settings() -> Dict[str, Any]:
     if "infojobs_api" in fuentes_sanitized:
         fuentes_sanitized["infojobs_api"].pop("client_secret", None)
 
+    cfg_bot_user = data.get("notificaciones", {}).get("telegram", {}).get("bot_username", "")
+    if not cfg_bot_user and telegram_bot_token_present:
+        try:
+            import urllib.request, json
+            req_me = urllib.request.urlopen(f"https://api.telegram.org/bot{stored_token}/getMe", timeout=2)
+            me_res = json.loads(req_me.read().decode())
+            if me_res.get("ok"):
+                cfg_bot_user = me_res["result"].get("username", "")
+                if "telegram" not in data["notificaciones"]:
+                    data["notificaciones"]["telegram"] = {}
+                data["notificaciones"]["telegram"]["bot_username"] = cfg_bot_user
+                _save_settings(data)
+        except Exception:
+            pass
+
     return {
         "busqueda": data.get("busqueda", {}),
         "fuentes": fuentes_sanitized,
@@ -131,6 +148,7 @@ def get_settings() -> Dict[str, Any]:
             "telegram_configured": telegram_bot_token_present and bool(current_user_id),
             "telegram_token_present": telegram_bot_token_present,
             "telegram_user_id": current_user_id,
+            "telegram_bot_username": cfg_bot_user,
             "infojobs_configured": bool(current_ij_id and current_ij_secret),
             "infojobs_client_id": current_ij_id,
             "infojobs_secret_present": bool(current_ij_secret),
@@ -162,6 +180,21 @@ def update_notification_channels(req: NotificationChannelsUpdate) -> Dict[str, A
     # Guardar en interfaz es obligatorio por política del sistema
     data["notificaciones"]["guardar_en_interfaz"] = True
     data["notificaciones"]["enviar_telegram"] = req.enviar_telegram
+
+    if req.telegram_bot_token is not None:
+        if "telegram" not in data["notificaciones"]:
+            data["notificaciones"]["telegram"] = {}
+        clean_token = req.telegram_bot_token.strip()
+        if clean_token:
+            _save_persisted_secret("TELEGRAM_BOT_TOKEN", clean_token)
+            os.environ["TELEGRAM_BOT_TOKEN"] = clean_token
+            _update_env_file("TELEGRAM_BOT_TOKEN", clean_token)
+            data["notificaciones"]["telegram"]["bot_token"] = clean_token
+        else:
+            _delete_persisted_secret("TELEGRAM_BOT_TOKEN")
+            os.environ.pop("TELEGRAM_BOT_TOKEN", None)
+            _update_env_file("TELEGRAM_BOT_TOKEN", "")
+            data["notificaciones"]["telegram"].pop("bot_token", None)
 
     if req.telegram_user_id is not None:
         if "telegram" not in data["notificaciones"]:
@@ -265,3 +298,134 @@ def update_search_config(req: SearchConfigUpdate) -> Dict[str, Any]:
         "message": "Configuración de búsqueda actualizada.",
         "busqueda": data["busqueda"],
     }
+
+
+@router.post("/test-telegram")
+async def test_telegram_notification() -> Dict[str, Any]:
+    """Envía un mensaje de prueba inmediato a Telegram con diagnóstico detallado."""
+    runner = get_runner()
+    if not runner or not runner.telegram_bot:
+        raise HTTPException(status_code=500, detail="Módulo de Telegram no disponible en el servidor.")
+
+    runner.telegram_bot.reload_credentials()
+
+    if not runner.telegram_bot.token or "ABCdefGhIJK" in runner.telegram_bot.token:
+        raise HTTPException(
+            status_code=400,
+            detail="Falta el Token del Bot de Telegram. Debes crearlo con @BotFather en Telegram y guardarlo en la configuración.",
+        )
+
+    if not runner.telegram_bot.allowed_user_id or runner.telegram_bot.allowed_user_id <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Falta el ID de usuario de Telegram. Obtén tu ID numérico hablando con @userinfobot en Telegram y guárdalo.",
+        )
+
+    test_message = (
+        "🔔 <b>¡Conexión de Telegram con lazyJobFinder confirmada!</b>\n\n"
+        "Tu bot está correctamente configurado y enlazado. "
+        "A partir de ahora recibirás aquí tus alertas de empleo, resúmenes de afinidad y documentos adaptados."
+    )
+
+    try:
+        success = await runner.telegram_bot.send_message(test_message)
+        if success:
+            return {"success": True, "message": "¡Mensaje de prueba enviado con éxito a tu Telegram!"}
+        else:
+            raise HTTPException(status_code=500, detail="El bot no pudo enviar el mensaje. Comprueba las credenciales.")
+    except Exception as e:
+        err_msg = str(e)
+        logger.error("Fallo al enviar mensaje de prueba por Telegram: %s", err_msg)
+        bot_username = ""
+        try:
+            bot = await runner.telegram_bot._get_bot()
+            if bot:
+                me = await bot.get_me()
+                bot_username = me.username or ""
+        except Exception:
+            pass
+
+        if "chat not found" in err_msg.lower() or "bot was blocked" in err_msg.lower():
+            link = f"https://t.me/{bot_username}" if bot_username else "tu bot"
+            detail = (
+                f"Telegram devolvió 'Chat not found'. Tu ID de usuario está bien puesto, pero Telegram requiere "
+                f"que primero abras una conversación con tu bot ({link}) y pulses el botón 'Iniciar' (/start). "
+                f"Una vez pulsado Iniciar en Telegram, vuelve a probar."
+            )
+        elif "unauthorized" in err_msg.lower():
+            detail = "Token del Bot no válido. Verifica el token que te dio @BotFather."
+        else:
+            detail = f"Error comunicando con Telegram: {err_msg}"
+        raise HTTPException(status_code=400, detail=detail)
+
+
+@router.post("/telegram/auto-link")
+async def auto_link_telegram_user() -> Dict[str, Any]:
+    """
+    Inspecciona los mensajes recientes recibidos por el bot para vincular automáticamente
+    al usuario que haya pulsado 'Iniciar' (/start), evitando la necesidad de buscar el ID numérico.
+    """
+    runner = get_runner()
+    if not runner or not runner.telegram_bot:
+        raise HTTPException(status_code=500, detail="Módulo de Telegram no disponible en el servidor.")
+
+    runner.telegram_bot.reload_credentials()
+    bot = await runner.telegram_bot._get_bot()
+    if not bot:
+        raise HTTPException(status_code=400, detail="Bot de Telegram no configurado o token ausente.")
+
+    me = await bot.get_me()
+    updates = await bot.get_updates(limit=10)
+
+    if not updates:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"El bot @{me.username} aún no ha recibido ningún mensaje. "
+                f"Abre https://t.me/{me.username} en Telegram, pulsa el botón 'Iniciar' (/start) "
+                f"y vuelve a pulsar aquí para detectarlo."
+            ),
+        )
+
+    last_user = None
+    for u in reversed(updates):
+        if u.effective_user and not u.effective_user.is_bot:
+            last_user = u.effective_user
+            break
+
+    if not last_user:
+        raise HTTPException(status_code=400, detail="No se encontró ningún usuario humano en los mensajes del bot.")
+
+    user_id_str = str(last_user.id)
+    _save_persisted_secret("TELEGRAM_ALLOWED_USER_ID", user_id_str)
+    os.environ["TELEGRAM_ALLOWED_USER_ID"] = user_id_str
+    _update_env_file("TELEGRAM_ALLOWED_USER_ID", user_id_str)
+
+    data = _read_settings()
+    if "notificaciones" not in data:
+        data["notificaciones"] = {}
+    if "telegram" not in data["notificaciones"]:
+        data["notificaciones"]["telegram"] = {}
+    data["notificaciones"]["telegram"]["allowed_user_id"] = user_id_str
+    data["notificaciones"]["telegram"]["bot_username"] = me.username
+    _save_settings(data)
+
+    runner.telegram_bot.reload_credentials()
+
+    try:
+        await runner.telegram_bot.send_message(
+            f"🎉 <b>¡Vinculación completada con éxito!</b>\n\n"
+            f"Hola {html.escape(last_user.first_name or 'Roberto')}, tu usuario ha quedado enlazado "
+            f"exclusivamente con tu panel local de lazyJobFinder."
+        )
+    except Exception:
+        pass
+
+    return {
+        "success": True,
+        "user_id": user_id_str,
+        "username": last_user.username,
+        "first_name": last_user.first_name,
+        "message": f"¡Usuario @{last_user.username or last_user.first_name} (ID: {user_id_str}) vinculado y confirmado con éxito!",
+    }
+

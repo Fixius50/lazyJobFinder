@@ -301,6 +301,7 @@ export const api = {
   updateChannels: (payload: {
     guardar_en_interfaz?: boolean;
     enviar_telegram: boolean;
+    telegram_bot_token?: string;
     telegram_user_id?: string;
     telegram_adjuntar_docs?: boolean;
     umbral_minimo_puntuacion?: number;
@@ -310,6 +311,14 @@ export const api = {
     request<{ success: boolean; message: string }>("/settings/channels", {
       method: "PUT",
       body: JSON.stringify(payload),
+    }),
+  testTelegram: () =>
+    request<{ success: boolean; message: string }>("/settings/test-telegram", {
+      method: "POST",
+    }),
+  autoLinkTelegram: () =>
+    request<{ success: boolean; user_id: string; username?: string; first_name?: string; message: string }>("/settings/telegram/auto-link", {
+      method: "POST",
     }),
   updateSearchConfig: (payload: {
     terminos: string[];

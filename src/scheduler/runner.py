@@ -185,11 +185,6 @@ class JobPipelineRunner:
                         new_jobs=0,
                         relevant_jobs=0,
                     )
-                    if send_tg_pref and self.telegram_bot.is_configured():
-                        await self.telegram_bot.send_message(
-                            f"ℹ️ <b>Escaneo {tag.lower()} finalizado:</b>\n"
-                            f"Se escanearon {total_found} ofertas en las fuentes, pero no hay vacantes nuevas hoy."
-                        )
                     return
 
                 # 2. Evaluación paralela y delimitada con pre-filtro y Ollama (Fase 1: Scoring puro rápido)
@@ -312,17 +307,6 @@ class JobPipelineRunner:
                     len(relevant_matches),
                 )
 
-                # Resumen final en Telegram (solo si canal habilitado)
-                if send_tg_pref and self.telegram_bot.is_configured():
-                    source_stats_str = ", ".join(f"{k}: {v}" for k, v in metrics.get("por_fuente", {}).items())
-                    await self.telegram_bot.send_message(
-                        f"🏁 <b>Resumen del escaneo ({tag.lower()}):</b>\n"
-                        f"• Ofertas nuevas registradas: <b>{new_count}</b>\n"
-                        f"• Ofertas relevantes procesadas (≥{min_score}/100): <b>{len(relevant_matches)}</b>\n"
-                        f"• Fuentes consultadas: <i>{source_stats_str or 'Normales'}</i>\n"
-                        f"• Tiempo de ejecución: <b>{elapsed:.1f}s</b>"
-                    )
-
             except Exception as e:
                 error_encountered = str(e)
                 logger.error("Error crítico durante ejecución del pipeline: %s", e, exc_info=True)
@@ -335,8 +319,6 @@ class JobPipelineRunner:
                     error_message=error_encountered,
                 )
                 self.db.log_event("CRITICAL", "pipeline", f"Fallo catastrófico: {str(e)}")
-                if send_tg_pref and self.telegram_bot.is_configured():
-                    await self.telegram_bot.send_message(f"⚠️ <b>Alerta del sistema:</b> Error en el escaneo: {str(e)}")
 
     def check_missed_run_on_startup(self) -> None:
         """

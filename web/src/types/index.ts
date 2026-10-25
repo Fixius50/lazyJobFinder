@@ -198,6 +198,7 @@ export interface SettingsResponse {
     telegram_configured: boolean;
     telegram_token_present?: boolean;
     telegram_user_id?: string;
+    telegram_bot_username?: string;
     infojobs_configured: boolean;
     infojobs_client_id?: string;
     infojobs_secret_present?: boolean;

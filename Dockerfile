@@ -36,9 +36,9 @@ RUN mkdir -p /app/data/documents
 # Definir volumen para persistir la base de datos y los documentos
 VOLUME ["/app/data"]
 
-# Comprobación de salud básica del contenedor
+# Comprobación de salud básica del contenedor (vía API HTTP para no competir por bloqueos en SQLite)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
-  CMD python -c "import sqlite3; conn = sqlite3.connect('/app/data/lazyjobfinder.db'); conn.execute('SELECT 1'); conn.close()" || exit 1
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/docs', timeout=5)" || exit 1
 
 # Comando por defecto: arrancar el orquestador principal
 CMD ["python", "-m", "src.main"]

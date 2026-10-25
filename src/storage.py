@@ -92,32 +92,40 @@ def _get_sqlite_state(key: str, default: Any = None) -> Any:
     import sqlite3
     if not os.path.exists(DB_PATH):
         return default
+    conn = None
     try:
-        conn = sqlite3.connect(DB_PATH, timeout=10.0)
+        conn = sqlite3.connect(DB_PATH, timeout=30.0)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA busy_timeout = 30000;")
         cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='app_state'")
         if not cursor.fetchone():
-            conn.close()
             return default
         cursor = conn.execute("SELECT value FROM app_state WHERE key = ?", (key,))
         row = cursor.fetchone()
-        conn.close()
         if not row:
             return default
         return json.loads(row["value"])
     except Exception as e:
         logger.debug("Error leyendo app_state (%s) en SQLite: %s", key, e)
         return default
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 def _set_sqlite_state(key: str, value: Any) -> None:
-    """Guarda un valor de app_state en SQLite de manera atómica."""
+    """Guarda un valor de app_state en SQLite de manera atómica sin reactivar modo WAL."""
     import sqlite3
     ensure_storage_dirs()
     val_str = json.dumps(value, ensure_ascii=False)
+    conn = None
     try:
-        conn = sqlite3.connect(DB_PATH, timeout=10.0)
-        conn.execute("PRAGMA journal_mode=WAL;")
+        conn = sqlite3.connect(DB_PATH, timeout=30.0)
+        conn.execute("PRAGMA busy_timeout = 30000;")
+        conn.execute("PRAGMA journal_mode = TRUNCATE;")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS app_state (
@@ -138,10 +146,15 @@ def _set_sqlite_state(key: str, value: Any) -> None:
             (key, val_str),
         )
         conn.commit()
-        conn.close()
     except Exception as e:
         logger.error("Error guardando app_state (%s) en SQLite: %s", key, e)
         raise
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 def read_persisted_secrets() -> Dict[str, str]:

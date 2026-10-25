@@ -1,6 +1,7 @@
 """Módulo de persistencia local en SQLite con modo WAL y deduplicación avanzada para lazyJobFinder."""
 
 import collections
+import contextlib
 import hashlib
 import json
 import logging
@@ -8,7 +9,7 @@ import os
 import re
 import sqlite3
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Generator, List, Optional, Tuple
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 
@@ -142,21 +143,44 @@ class Database:
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         self.init_db()
 
-    def _get_connection(self) -> sqlite3.Connection:
+    @contextlib.contextmanager
+    def _get_connection(self) -> Generator[sqlite3.Connection, None, None]:
         os.makedirs(os.path.dirname(os.path.abspath(self.db_path)), exist_ok=True)
-        conn = sqlite3.connect(self.db_path, timeout=30.0)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys=ON;")
-        return conn
+        conn = None
+        for attempt in range(5):
+            try:
+                conn = sqlite3.connect(self.db_path, timeout=30.0)
+                conn.row_factory = sqlite3.Row
+                conn.execute("PRAGMA busy_timeout = 30000;")
+                conn.execute("PRAGMA foreign_keys = ON;")
+                break
+            except sqlite3.OperationalError as e:
+                if attempt == 4:
+                    logger.error("Error al conectar con SQLite tras 5 intentos: %s", e)
+                    raise
+                time.sleep(0.15 * (attempt + 1))
+        try:
+            with conn:
+                yield conn
+        finally:
+            if conn:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
     def init_db(self) -> None:
         """Crea o actualiza las tablas e índices necesarios."""
         with self._get_connection() as conn:
             try:
-                conn.execute("PRAGMA journal_mode=WAL;")
+                # TRUNCATE es el modo más robusto para SQLite sobre volúmenes montados (Windows <-> Docker WSL2).
+                # WAL mode requiere un archivo -shm con bloqueo de memoria compartida POSIX que es incompatible
+                # con 9p/drvfs en Windows, generando "unable to open database file" bajo concurrencia.
+                conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
+                conn.execute("PRAGMA journal_mode=TRUNCATE;")
                 conn.execute("PRAGMA synchronous=NORMAL;")
-            except sqlite3.OperationalError as wal_err:
-                logger.warning("No se pudo activar WAL mode en SQLite (fallback a DELETE): %s", wal_err)
+            except sqlite3.OperationalError as j_err:
+                logger.warning("Ajustando journal_mode en SQLite: %s", j_err)
                 conn.execute("PRAGMA journal_mode=DELETE;")
 
             conn.executescript(
@@ -967,35 +991,58 @@ class Database:
 
     def get_last_completed_run(self) -> Optional[Dict[str, Any]]:
         """Recupera los datos de la última ejecución exitosa."""
-        with self._get_connection() as conn:
-            cursor = conn.execute(
-                "SELECT * FROM pipeline_runs WHERE status = 'completed' ORDER BY id DESC LIMIT 1"
-            )
-            row = cursor.fetchone()
-            return dict(row) if row else None
+        for attempt in range(4):
+            try:
+                with self._get_connection() as conn:
+                    cursor = conn.execute(
+                        "SELECT * FROM pipeline_runs WHERE status = 'completed' ORDER BY id DESC LIMIT 1"
+                    )
+                    row = cursor.fetchone()
+                    return dict(row) if row else None
+            except sqlite3.OperationalError as e:
+                if attempt == 3:
+                    logger.warning("Fallo recuperando get_last_completed_run tras 4 intentos: %s", e)
+                    return None
+                time.sleep(0.1 * (attempt + 1))
+        return None
 
     def get_statistics(self) -> Dict[str, Any]:
-        """Recupera estadísticas globales para el diagnóstico por Telegram."""
-        with self._get_connection() as conn:
-            total_jobs = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
-            jobs_today = conn.execute(
-                "SELECT COUNT(*) FROM jobs WHERE date(created_at) = date('now', 'localtime')"
-            ).fetchone()[0]
-            total_evaluated = conn.execute("SELECT COUNT(*) FROM evaluations").fetchone()[0]
-            high_matches = conn.execute(
-                "SELECT COUNT(*) FROM evaluations WHERE score >= 65"
-            ).fetchone()[0]
-            last_run_row = conn.execute(
-                "SELECT finished_at FROM pipeline_runs WHERE status = 'completed' ORDER BY id DESC LIMIT 1"
-            ).fetchone()
+        """Recupera estadísticas globales para el diagnóstico por Telegram e interfaz."""
+        default_stats = {
+            "total_jobs": 0,
+            "jobs_today": 0,
+            "total_evaluated": 0,
+            "high_matches": 0,
+            "last_run": "Sin ejecuciones previas",
+        }
+        for attempt in range(4):
+            try:
+                with self._get_connection() as conn:
+                    total_jobs = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
+                    jobs_today = conn.execute(
+                        "SELECT COUNT(*) FROM jobs WHERE date(created_at) = date('now', 'localtime')"
+                    ).fetchone()[0]
+                    total_evaluated = conn.execute("SELECT COUNT(*) FROM evaluations").fetchone()[0]
+                    high_matches = conn.execute(
+                        "SELECT COUNT(*) FROM evaluations WHERE score >= 65"
+                    ).fetchone()[0]
+                    last_run_row = conn.execute(
+                        "SELECT finished_at FROM pipeline_runs WHERE status = 'completed' ORDER BY id DESC LIMIT 1"
+                    ).fetchone()
 
-            return {
-                "total_jobs": total_jobs,
-                "jobs_today": jobs_today,
-                "total_evaluated": total_evaluated,
-                "high_matches": high_matches,
-                "last_run": last_run_row[0] if last_run_row and last_run_row[0] else "Sin ejecuciones previas",
-            }
+                    return {
+                        "total_jobs": total_jobs,
+                        "jobs_today": jobs_today,
+                        "total_evaluated": total_evaluated,
+                        "high_matches": high_matches,
+                        "last_run": last_run_row[0] if last_run_row and last_run_row[0] else "Sin ejecuciones previas",
+                    }
+            except sqlite3.OperationalError as e:
+                if attempt == 3:
+                    logger.warning("Fallo recuperando get_statistics tras 4 intentos: %s", e)
+                    return default_stats
+                time.sleep(0.1 * (attempt + 1))
+        return default_stats
 
     def get_top_recent_jobs(self, limit: int = 10, min_score: int = 65) -> List[Dict[str, Any]]:
         """Devuelve las mejores ofertas recientes que superan el umbral."""

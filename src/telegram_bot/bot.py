@@ -54,21 +54,32 @@ class TelegramJobBot:
 
     def reload_credentials(self) -> None:
         """Recalcula las credenciales y el ID autorizado dinámicamente."""
-        self.token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+        from ..storage import get_secret
+        token_candidate = get_secret("TELEGRAM_BOT_TOKEN", "").strip()
+        if not token_candidate:
+            token_candidate = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+        if not token_candidate:
+            tg_cfg = self.settings.get("notificaciones", {}).get("telegram", {})
+            token_candidate = str(tg_cfg.get("bot_token", "")).strip()
+        self.token = token_candidate
+
         # Precedencia clara: si settings tiene una configuración explícita para allowed_user_id, manda sobre env
         tg_cfg = self.settings.get("notificaciones", {}).get("telegram", {})
         if "allowed_user_id" in tg_cfg and tg_cfg["allowed_user_id"] is not None:
             raw_user_id = str(tg_cfg["allowed_user_id"]).strip()
         else:
-            raw_user_id = os.getenv("TELEGRAM_ALLOWED_USER_ID", "").strip()
+            raw_user_id = get_secret("TELEGRAM_ALLOWED_USER_ID", os.getenv("TELEGRAM_ALLOWED_USER_ID", "")).strip()
 
         if raw_user_id and raw_user_id.isdigit():
             self.allowed_user_id = int(raw_user_id)
         else:
             self.allowed_user_id = 0
 
-        logger.info("Credenciales Telegram actualizadas. ID autorizado activo: %d (Configurado: %s)",
-                    self.allowed_user_id, self.is_configured())
+        logger.info(
+            "Credenciales Telegram actualizadas. ID autorizado activo: %d (Configurado: %s)",
+            self.allowed_user_id,
+            self.is_configured(),
+        )
 
     def is_configured(self) -> bool:
         """Verifica si las credenciales de Telegram están debidamente establecidas y no son placeholders."""
@@ -97,13 +108,44 @@ class TelegramJobBot:
         return True
 
     async def _cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Comando de bienvenida y verificación de acceso."""
+        """Comando de bienvenida y verificación o auto-vinculación de acceso."""
+        if not update.effective_user:
+            return
+
+        user_id = update.effective_user.id
+        user_name = update.effective_user.first_name or "Usuario"
+
+        # Si aún no hay usuario autorizado configurado, auto-vincular al primer usuario que interactúe
+        if not self.allowed_user_id:
+            self.allowed_user_id = user_id
+            try:
+                from ..storage import save_persisted_secret
+                save_persisted_secret("TELEGRAM_ALLOWED_USER_ID", str(user_id))
+                os.environ["TELEGRAM_ALLOWED_USER_ID"] = str(user_id)
+                if "notificaciones" not in self.settings:
+                    self.settings["notificaciones"] = {}
+                if "telegram" not in self.settings["notificaciones"]:
+                    self.settings["notificaciones"]["telegram"] = {}
+                self.settings["notificaciones"]["telegram"]["allowed_user_id"] = str(user_id)
+                from ..api.routes.settings import _read_settings, _save_settings
+                current_cfg = _read_settings()
+                if "notificaciones" not in current_cfg:
+                    current_cfg["notificaciones"] = {}
+                if "telegram" not in current_cfg["notificaciones"]:
+                    current_cfg["notificaciones"]["telegram"] = {}
+                current_cfg["notificaciones"]["telegram"]["allowed_user_id"] = str(user_id)
+                _save_settings(current_cfg)
+                logger.info("Bot de Telegram auto-vinculado con éxito al usuario ID %d (@%s)", user_id, update.effective_user.username)
+            except Exception as e:
+                logger.error("Error persistiendo auto-vinculación de Telegram: %s", e)
+
         if not self._is_authorized(update):
-            await update.message.reply_text("⛔ Acceso denegado. Este bot es de uso estrictamente privado.")
+            await update.message.reply_text("⛔ Acceso denegado. Este bot ya está vinculado exclusivamente a otro usuario.")
             return
 
         msg = (
-            "👋 <b>¡Hola Roberto! Bienvenido a lazyJobFinder</b>\n\n"
+            f"👋 <b>¡Hola {html.escape(user_name)}! Bienvenido a lazyJobFinder</b>\n\n"
+            f"✅ <b>Tu cuenta ha quedado vinculada y protegida con tu ID ({user_id}).</b>\n"
             "Tu sistema local y autónomo de búsqueda de empleo está activo y funcionando.\n\n"
             "📌 <b>Comandos disponibles:</b>\n"
             "• <code>/buscar</code> - Dispara una búsqueda y evaluación manual inmediata.\n"
@@ -111,7 +153,7 @@ class TelegramJobBot:
             "• <code>/ultimas</code> - Muestra las mejores ofertas recientes registradas.\n"
             "• <code>/config</code> - Ver los términos y filtros activos.\n"
             "• <code>/ayuda</code> - Muestra este mensaje de ayuda.\n\n"
-            "🔔 <i>Recibirás automáticamente un resumen matutino con las ofertas que superen el umbral, "
+            "🔔 <i>Recibirás automáticamente un resumen diario con las ofertas que superen tu umbral, "
             "acompañadas de tu CV adaptado y carta de presentación en PDF generados localmente.</i>"
         )
         await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
@@ -264,16 +306,32 @@ class TelegramJobBot:
         finally:
             self._is_manual_search_running = False
 
-    async def send_message(self, text: str) -> None:
+    async def _get_bot(self):
+        """Devuelve la instancia activa del bot, construyéndola bajo demanda si es necesario."""
+        if self.app:
+            return self.app.bot
+        if self.is_configured():
+            from telegram import Bot
+            bot = Bot(token=self.token)
+            try:
+                await bot.initialize()
+            except Exception:
+                pass
+            return bot
+        return None
+
+    async def send_message(self, text: str) -> bool:
         """Envía un mensaje proactivo al usuario autorizado asegurando los límites de tamaño."""
-        if not self.app or not self.allowed_user_id:
-            logger.warning("No se puede enviar mensaje por Telegram: bot no inicializado.")
-            return
+        self.reload_credentials()
+        bot = await self._get_bot()
+        if not bot or not self.allowed_user_id:
+            logger.warning("No se puede enviar mensaje por Telegram: credenciales incompletas o sin ID.")
+            return False
 
         chunks = [text[i:i + MAX_MESSAGE_LENGTH] for i in range(0, len(text), MAX_MESSAGE_LENGTH)]
         for chunk in chunks:
             try:
-                await self.app.bot.send_message(
+                await bot.send_message(
                     chat_id=self.allowed_user_id,
                     text=chunk,
                     parse_mode=ParseMode.HTML,
@@ -281,29 +339,35 @@ class TelegramJobBot:
                 )
             except TelegramError as e:
                 logger.error("Error de Telegram al enviar mensaje: %s", e)
+                raise
+        return True
 
-    async def send_document(self, file_path: str, caption: str = "") -> None:
+    async def send_document(self, file_path: str, caption: str = "") -> bool:
         """Envía un archivo PDF o Markdown directamente al chat privado del usuario."""
-        if not self.app or not self.allowed_user_id or not os.path.exists(file_path):
-            return
+        self.reload_credentials()
+        bot = await self._get_bot()
+        if not bot or not self.allowed_user_id or not os.path.exists(file_path):
+            return False
 
         file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
         if file_size_mb > 50:
             logger.error("Archivo %s excede los 50MB (%f MB). No se puede enviar.", file_path, file_size_mb)
-            return
+            return False
 
         safe_caption = caption[:MAX_CAPTION_LENGTH]
 
         try:
             with open(file_path, "rb") as doc:
-                await self.app.bot.send_document(
+                await bot.send_document(
                     chat_id=self.allowed_user_id,
                     document=doc,
                     caption=safe_caption,
                     parse_mode=ParseMode.HTML,
                 )
+            return True
         except TelegramError as e:
             logger.error("Error de Telegram al enviar documento %s: %s", file_path, e)
+            return False
 
     async def send_job_notification(
         self,

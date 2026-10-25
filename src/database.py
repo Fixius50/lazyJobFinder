@@ -1071,14 +1071,14 @@ class Database:
                 results.append(item)
             return results
 
-    def get_unevaluated_jobs(self, limit: int = 100) -> List[Dict[str, Any]]:
-        """Recupera ofertas descubiertas pendientes de evaluación o sin registro de evaluación."""
+    def get_unevaluated_jobs(self, limit: int = 500) -> List[Dict[str, Any]]:
+        """Recupera ofertas descubiertas pendientes de evaluación o sin registro de evaluación en orden cronológico (FIFO)."""
         with self._get_connection() as conn:
             query = """
                 SELECT j.* FROM jobs j
                 LEFT JOIN evaluations e ON j.id = e.job_id
                 WHERE e.id IS NULL AND j.status NOT IN ('evaluated', 'discarded', 'notified', 'rejected')
-                ORDER BY j.created_at DESC
+                ORDER BY j.id ASC
                 LIMIT ?
             """
             cursor = conn.execute(query, (limit,))

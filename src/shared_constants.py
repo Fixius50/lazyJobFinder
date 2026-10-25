@@ -78,7 +78,7 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
         "umbral_minimo_puntuacion": 65,
         "generar_documentos": True,
         "idioma_documentos": "es",
-        "concurrencia": 2,
+        "concurrencia": 1,
     },
     "notificaciones": {
         "guardar_en_interfaz": True,

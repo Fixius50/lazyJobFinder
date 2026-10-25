@@ -162,9 +162,14 @@ class JobPipelineRunner:
                 new_count = metrics["nuevas_guardadas"]
                 self.db.log_event("INFO", "pipeline", f"Descubrimiento completado: {total_found} ofertas encontradas ({new_count} nuevas registradas).")
 
-                # Combinar ofertas recién descubiertas con cualquier vacante pendiente de evaluación en BD
-                pending_jobs = await asyncio.to_thread(self.db.get_unevaluated_jobs, 100)
+                # Recuperar ofertas pendientes de evaluación previas (en orden cronológico)
+                # y garantizar que cualquier vacante que hubiera quedado en 'evaluating' se reinicie a 'discovered'
+                with self.db._get_connection() as conn:
+                    conn.execute("UPDATE jobs SET status = 'discovered' WHERE status = 'evaluating'")
+
+                pending_jobs = await asyncio.to_thread(self.db.get_unevaluated_jobs, 500)
                 job_dict = {}
+                # Priorizar vacantes pendientes de evaluación en orden cronológico (las que llevan más tiempo esperando)
                 for j in pending_jobs:
                     j_id = j.get("id") if isinstance(j, dict) else j["id"]
                     if j_id:
@@ -190,9 +195,9 @@ class JobPipelineRunner:
                 # 2. Evaluación paralela y delimitada con pre-filtro y Ollama (Fase 1: Scoring puro rápido)
                 min_score = self.settings.get("evaluacion", {}).get("umbral_minimo_puntuacion", 65)
                 generate_docs = self.settings.get("evaluacion", {}).get("generar_documentos", True)
-                concurrency = int(self.settings.get("evaluacion", {}).get("concurrencia", 2))
+                concurrency = int(self.settings.get("evaluacion", {}).get("concurrencia", 1))
                 semaphore = asyncio.Semaphore(concurrency)
-                self.db.log_event("INFO", "pipeline", f"Iniciando evaluación de {len(jobs_to_evaluate)} vacantes con IA (umbral: {min_score}%)...")
+                self.db.log_event("INFO", "pipeline", f"Iniciando evaluación de {len(jobs_to_evaluate)} vacantes ({len(pending_jobs)} pendientes en BD + {len(new_jobs)} nuevas) con IA (umbral: {min_score}%)...")
 
                 async def _evaluate_job(job: Dict[str, Any]) -> Optional[Tuple[Dict[str, Any], Dict[str, Any]]]:
                     async with semaphore:

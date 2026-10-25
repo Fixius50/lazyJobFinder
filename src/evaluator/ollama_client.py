@@ -63,7 +63,7 @@ class OllamaClient:
         format_json: bool = True,
         format_schema: Optional[Any] = None,
         temperature: float = 0.1,
-        timeout: int = 60,
+        timeout: int = 120,
     ) -> str:
         """
         Envía un prompt a Ollama y retorna la respuesta generada.

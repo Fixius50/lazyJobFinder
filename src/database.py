@@ -8,6 +8,7 @@ import logging
 import os
 import re
 import sqlite3
+import time
 from datetime import datetime, timedelta
 from typing import Any, Dict, Generator, List, Optional, Tuple
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
@@ -140,6 +141,7 @@ class Database:
 
     def __init__(self, db_path: Optional[str] = None):
         self.db_path = db_path or os.getenv("DATABASE_PATH", DEFAULT_DB_PATH)
+        self._last_prune_time: float = 0.0
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         self.init_db()
 
@@ -1185,7 +1187,7 @@ class Database:
         Por defecto, oculta visualmente ofertas descartadas o que no coinciden con el CV.
         """
         page = max(1, page)
-        page_size = min(max(5, page_size), 100)
+        page_size = min(max(5, page_size), 500)
         offset = (page - 1) * page_size
 
         allowed_sort_fields = {
@@ -1362,7 +1364,8 @@ class Database:
                     j.date_posted, j.created_at, j.updated_at, j.status,
                     j.duplicate_of_id, j.similarity_score, j.alternate_sources,
                     j.telegram_notified, j.ui_saved,
-                    e.score, e.fit_level, e.should_apply,
+                    j.description, j.contract_type, j.schedule, j.education_level,
+                    e.score, e.fit_level, e.should_apply, e.matched_skills,
                     d.cv_pdf_path, d.cv_md_path, d.letter_pdf_path, d.letter_md_path
                 FROM jobs j
                 LEFT JOIN evaluations e ON j.id = e.job_id
@@ -1442,11 +1445,17 @@ class Database:
             with self._get_connection() as conn:
                 conn.execute(sql, params)
 
-    def prune_old_system_logs(self, max_entries: int = 150, retention_hours: int = 24) -> int:
+    def prune_old_system_logs(self, max_entries: int = 150, retention_hours: int = 24, force: bool = False) -> int:
         """
         Elimina los logs antiguos conservando únicamente los registros recientes (últimas 24h).
         Garantiza que la consola web y los registros solo muestren eventos nuevos.
+        Está limitado en frecuencia a como máximo una vez cada 30 minutos para evitar bloqueo de disco.
         """
+        now = time.time()
+        if not force and (now - self._last_prune_time < 1800.0):
+            return 0
+
+        self._last_prune_time = now
         try:
             with self._get_connection() as conn:
                 # 1. Eliminar logs con más de retention_hours de antigüedad
@@ -1487,12 +1496,21 @@ class Database:
         limit: int = 150,
         level: Optional[str] = None,
         source: Optional[str] = None,
+        since_id: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
-        """Recupera los logs del sistema estructurados para la consola web de administración."""
-        # Mantener un histórico seguro de hasta 2000 eventos (no usar limit de la query de lectura)
-        self.prune_old_system_logs(max_entries=2000, retention_hours=48)
+        """Recupera los logs del sistema estructurados para la consola web de administración.
+        
+        Soporta since_id para streaming en tiempo real ultra eficiente vía SSE sin sobrecarga de disco.
+        """
+        # Mantenimiento automático diferido (máximo 1 vez cada 30 minutos)
+        if (time.time() - self._last_prune_time) > 1800.0:
+            self.prune_old_system_logs(max_entries=2000, retention_hours=48)
+
         where = ["1=1"]
         params: List[Any] = []
+        if since_id is not None:
+            where.append("id > ?")
+            params.append(since_id)
         if level:
             where.append("level = ?")
             params.append(level.upper())
@@ -1506,11 +1524,12 @@ class Database:
                 where.append("source = ?")
                 params.append(s_clean)
 
+        order_dir = "ASC" if since_id is not None else "DESC"
         sql = f"""
             SELECT id, timestamp, level, source, message, details
             FROM system_logs
             WHERE {' AND '.join(where)}
-            ORDER BY id DESC
+            ORDER BY id {order_dir}
             LIMIT ?
         """
         with self._get_connection() as conn:

@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+import re
 import yaml
 
 from ..connectors.manager import ConnectorManager
@@ -20,6 +21,57 @@ from ..tailoring.pdf_renderer import PDFRenderer
 from ..telegram_bot.bot import TelegramJobBot
 
 logger = logging.getLogger("lazyJobFinder.scheduler.runner")
+
+
+def _extract_cv_scoring_keywords(profile: Dict[str, Any], settings: Dict[str, Any]) -> List[str]:
+    """Extrae palabras clave y términos de búsqueda del CV activo para ordenar la cola de inferencia."""
+    keywords = set()
+    search_terms = settings.get("busqueda", {}).get("terminos", [])
+    if isinstance(search_terms, list):
+        for t in search_terms:
+            t_clean = str(t).strip().lower()
+            if len(t_clean) >= 3:
+                keywords.add(t_clean)
+
+    candidato = profile.get("candidato", {})
+    if candidato.get("titular"):
+        for word in re.findall(r"\w+", candidato["titular"].lower()):
+            if len(word) >= 4:
+                keywords.add(word)
+
+    competencias = profile.get("competencias_tecnicas", {})
+    if isinstance(competencias, dict):
+        for sk_list in competencias.values():
+            if isinstance(sk_list, list):
+                for sk in sk_list:
+                    sk_clean = str(sk).strip().lower()
+                    if 3 <= len(sk_clean) <= 25:
+                        keywords.add(sk_clean)
+
+    for exp in profile.get("experiencia_laboral", []):
+        puesto = (exp.get("puesto") or "").lower()
+        for word in re.findall(r"\w+", puesto):
+            if len(word) >= 4 and word not in ("responsable", "director", "empresa", "desde", "hasta"):
+                keywords.add(word)
+
+    return list(keywords)
+
+
+def _calculate_job_evaluation_priority(job: Dict[str, Any], keywords: List[str]) -> int:
+    """Calcula una prioridad numérica para ordenar el orden de inferencia.
+    NO descarta ninguna oferta. Las ofertas con mayor coincidencia con el CV
+    se evalúan primero para que los mejores empleos aparezcan en el panel de inmediato."""
+    if not keywords:
+        return 0
+    title = (job.get("title") or "").lower()
+    desc = (job.get("description") or "")[:500].lower()
+    score = 0
+    for kw in keywords:
+        if kw in title:
+            score += 10
+        elif kw in desc:
+            score += 2
+    return score
 
 
 class JobPipelineRunner:
@@ -177,6 +229,18 @@ class JobPipelineRunner:
                     if j_id:
                         job_dict[j_id] = dict(j)
                 jobs_to_evaluate = list(job_dict.values())
+                
+                # Ordenar por afinidad aparente con el CV activo para evaluar primero las más prometedoras.
+                # NO descarta ninguna oferta: todas se evalúan por la IA, pero el usuario recibe los mejores puestos primero.
+                try:
+                    cv_keywords = _extract_cv_scoring_keywords(self.profile, self.settings)
+                    if cv_keywords:
+                        jobs_to_evaluate.sort(
+                            key=lambda j: _calculate_job_evaluation_priority(j, cv_keywords),
+                            reverse=True,
+                        )
+                except Exception as sort_err:
+                    logger.debug("Error ordenando vacantes por prioridad aparente: %s", sort_err)
 
                 if not jobs_to_evaluate:
                     logger.info("No hay vacantes nuevas ni pendientes de evaluación en este ciclo.")

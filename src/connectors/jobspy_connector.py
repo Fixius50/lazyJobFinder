@@ -50,11 +50,12 @@ class JobSpyConnector(BaseConnector):
             site_offers_count = 0
             site_error = None
 
-            for term in search_terms:
+            for term_idx, term in enumerate(search_terms):
                 try:
                     logger.debug("JobSpy consultando portal '%s' para término '%s'...", site, term)
-                    # Pausa preventiva con jitter aleatorio para reducir la probabilidad de bloqueo anti-bot
-                    time.sleep(random.uniform(1.8, 3.2))
+                    if term_idx > 0:
+                        # Pausa preventiva razonable solo entre peticiones consecutivas al mismo portal
+                        time.sleep(random.uniform(1.2, 2.0))
 
                     kwargs = {
                         "site_name": [site],
@@ -145,6 +146,10 @@ class JobSpyConnector(BaseConnector):
                 except Exception as e:
                     site_error = str(e)
                     logger.warning("Fallo en portal '%s' de JobSpy para término '%s': %s", site, term, e)
+                    err_str = str(e).lower()
+                    if any(b in err_str for b in ("429", "rate limit", "too many requests", "blocked", "captcha", "cloudflare")):
+                        logger.warning("Portal '%s' bloqueado temporalmente (%s). Omitiendo términos restantes para este portal.", site, site_error[:40])
+                        break
 
             # Registrar el estado individual del portal
             if site_error:

@@ -76,14 +76,16 @@ class OllamaClient:
             "prompt": prompt,
             "system": system_prompt,
             "stream": False,
+            "keep_alive": "24h",
             "options": {
                 "temperature": temperature,
                 "top_p": 0.9,
-                "num_ctx": 4096,
+                "num_ctx": 2048,
+                "num_predict": 512,
             },
         }
 
-        # Soporte para salidas estructuradas nativas de Ollama (JSON Schema o boolean)
+        # Soporte para salidas estructuradas de Ollama (JSON Schema o boolean)
         if format_schema is not None:
             if isinstance(format_schema, dict):
                 payload["format"] = format_schema

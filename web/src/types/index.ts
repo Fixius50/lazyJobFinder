@@ -83,6 +83,11 @@ export interface JobListItem {
   should_apply?: number | null;
   has_cv: boolean;
   has_letter: boolean;
+  description?: string;
+  contract_type?: string | null;
+  schedule?: string | null;
+  education_level?: string | null;
+  matched_skills?: string[] | string | null;
 }
 
 export interface PaginatedJobsResponse {

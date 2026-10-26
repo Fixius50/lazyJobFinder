@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef, useMemo } from "react";
 import {
   Briefcase,
   RefreshCw,
@@ -56,8 +56,192 @@ const INITIAL_FILTERS: FilterState = {
   selectedContractTypes: [],
 };
 
+/**
+ * Filtra una vacante de empleo en memoria del navegador de forma instantánea
+ * sin realizar llamadas redundantes a la API de FastAPI.
+ */
+function filterJobLocally(job: JobListItem, filters: FilterState): boolean {
+  // 1. Puntuación mínima de afinidad IA
+  if (filters.minScore > 0 && (job.score ?? 0) < filters.minScore) {
+    return false;
+  }
+
+  // 2. Estado de postulación
+  if (filters.selectedStatus && filters.selectedStatus.trim()) {
+    if (job.status !== filters.selectedStatus) return false;
+  }
+
+  // 3. Portal / Fuente
+  if (filters.selectedSource && filters.selectedSource.trim()) {
+    const src = filters.selectedSource.toLowerCase().trim();
+    const jobSrc = (job.source || "").toLowerCase().trim();
+    if (src === "jobspy") {
+      if (!["indeed", "linkedin", "glassdoor", "google", "jobspy"].includes(jobSrc)) return false;
+    } else if (src === "infojobs" || src === "infojobs_api") {
+      if (!jobSrc.includes("infojobs")) return false;
+    } else if (src === "tecnoempleo" || src === "tecnoempleo_rss") {
+      if (!jobSrc.includes("tecnoempleo")) return false;
+    } else {
+      if (jobSrc !== src) return false;
+    }
+  }
+
+  const title = (job.title || "").toLowerCase();
+  const company = (job.company || "").toLowerCase();
+  const location = (job.location || "").toLowerCase();
+  const description = (job.description || "").toLowerCase();
+  const fullSearchText = `${title} ${company} ${location} ${description}`;
+
+  // 4. Términos de búsqueda (comas = coincidencia con al menos una frase)
+  if (filters.searchTerm && filters.searchTerm.trim()) {
+    const rawTerms = filters.searchTerm
+      .split(",")
+      .map((t) => t.trim().toLowerCase())
+      .filter(Boolean);
+    if (rawTerms.length > 0) {
+      const matchesAny = rawTerms.some((term) => {
+        const words = term.split(/\s+/).filter(Boolean);
+        return words.every((w) => fullSearchText.includes(w));
+      });
+      if (!matchesAny) return false;
+    }
+  }
+
+  // 5. Términos de exclusión (comas = descarta si contiene cualquiera de las palabras)
+  if (filters.exclusionTerm && filters.exclusionTerm.trim()) {
+    const exclusions = filters.exclusionTerm
+      .split(",")
+      .map((e) => e.trim().toLowerCase())
+      .filter(Boolean);
+    const excludeScope = `${title} ${description}`;
+    for (const exc of exclusions) {
+      if (excludeScope.includes(exc)) {
+        return false;
+      }
+    }
+  }
+
+  // 6. Ubicación y teletrabajo
+  if (!filters.isAllLocations && filters.locationName && filters.locationName.trim()) {
+    const loc = filters.locationName.trim().toLowerCase();
+    if (loc !== "all" && loc !== "todas" && loc !== "cualquiera" && loc !== "mi ubicación") {
+      const isRemote = job.is_remote === 1 || location.includes("remot") || location.includes("teletrabaj");
+      if (!isRemote && !location.includes(loc)) {
+        return false;
+      }
+    }
+  }
+
+  // 7. Modalidades (Checkboxes)
+  if (filters.selectedModalities && filters.selectedModalities.length > 0) {
+    const isRemote = job.is_remote === 1 || location.includes("remot") || location.includes("teletrabaj") || title.includes("remot") || title.includes("teletrabaj");
+    const isHybrid = /h[ií]brid/i.test(`${location} ${title} ${description}`);
+    const isPresencial = !isRemote && !isHybrid;
+
+    const matchesMod = filters.selectedModalities.some((mod) => {
+      const m = mod.toLowerCase();
+      if (m === "teletrabajo" || m === "remoto") return isRemote;
+      if (m === "hibrido") return isHybrid;
+      if (m === "presencial") return isPresencial;
+      return false;
+    });
+    if (!matchesMod) return false;
+  }
+
+  // 8. Categorías / Competencias
+  if (filters.selectedCategories && filters.selectedCategories.length > 0) {
+    const skillsText = Array.isArray(job.matched_skills)
+      ? job.matched_skills.join(" ").toLowerCase()
+      : typeof job.matched_skills === "string"
+      ? job.matched_skills.toLowerCase()
+      : "";
+    const catScope = `${title} ${description} ${skillsText}`;
+    const matchesCat = filters.selectedCategories.some((cat) => {
+      const c = cat.toLowerCase().trim();
+      return c && catScope.includes(c);
+    });
+    if (!matchesCat) return false;
+  }
+
+  // 9. Formación mínima
+  if (filters.selectedEducations && filters.selectedEducations.length > 0) {
+    const eduScope = `${job.education_level || ""} ${description}`.toLowerCase();
+    const matchesEdu = filters.selectedEducations.some((edu) => {
+      const e = edu.toLowerCase().trim();
+      return e && eduScope.includes(e);
+    });
+    if (!matchesEdu) return false;
+  }
+
+  // 10. Experiencia
+  if (filters.minExperienceStep > 0) {
+    const step = filters.minExperienceStep;
+    const expScope = `${title} ${description}`;
+    if (step === 1) {
+      if (!/junior|jr|pr[áa]cticas|beca|sin experiencia|reci[eé]n titulado|0-1 a[ñn]o/i.test(expScope)) return false;
+    } else if (step === 2) {
+      if (!/1\+?\s*a[ñn]o|al menos 1 a[ñn]o|m[íi]nimo 1 a[ñn]o/i.test(expScope)) return false;
+    } else if (step === 3) {
+      if (!/2\+?\s*a[ñn]o|al menos 2 a[ñn]o|m[íi]nimo 2 a[ñn]o/i.test(expScope)) return false;
+    } else if (step === 4) {
+      if (!/3\+?\s*a[ñn]o|al menos 3 a[ñn]o|m[íi]nimo 3 a[ñn]o/i.test(expScope)) return false;
+    } else if (step >= 5) {
+      if (!/5\+?\s*a[ñn]o|al menos 5 a[ñn]o|senior|lead/i.test(expScope)) return false;
+    }
+  }
+
+  // 11. Salario mínimo
+  if (filters.minSalaryStep > 0) {
+    const minVal = SALARY_STEPS[filters.minSalaryStep]?.value || 0;
+    if (minVal > 0) {
+      const maxSal = job.salary_max ?? 0;
+      const minSal = job.salary_min ?? 0;
+      if (maxSal < minVal && minSal < minVal) {
+        return false;
+      }
+    }
+  }
+
+  // 12. Jornada laboral
+  if (filters.selectedSchedules && filters.selectedSchedules.length > 0) {
+    const schedScope = `${job.schedule || ""} ${description}`.toLowerCase();
+    const matchesSched = filters.selectedSchedules.some((sc) => {
+      const s = sc.toLowerCase().trim();
+      return s && schedScope.includes(s);
+    });
+    if (!matchesSched) return false;
+  }
+
+  // 13. Tipo de contrato
+  if (filters.selectedContractTypes && filters.selectedContractTypes.length > 0) {
+    const contractScope = `${job.contract_type || ""} ${description}`.toLowerCase();
+    const matchesContract = filters.selectedContractTypes.some((ct) => {
+      const c = ct.toLowerCase().trim();
+      return c && contractScope.includes(c);
+    });
+    if (!matchesContract) return false;
+  }
+
+  // 14. Antigüedad
+  if (filters.timeRange && filters.timeRange !== "all") {
+    const dateStr = job.date_posted || job.created_at;
+    if (dateStr) {
+      const postedTime = new Date(dateStr).getTime();
+      const now = Date.now();
+      if (!isNaN(postedTime)) {
+        const diffHours = (now - postedTime) / (1000 * 60 * 60);
+        if (filters.timeRange === "24h" && diffHours > 24) return false;
+        if (filters.timeRange === "7d" && diffHours > 24 * 7) return false;
+        if (filters.timeRange === "30d" && diffHours > 24 * 30) return false;
+      }
+    }
+  }
+
+  return true;
+}
+
 export function ApplicationsView() {
-  const [jobsData, setJobsData] = useState<PaginatedJobsResponse | null>(null);
+  const [rawJobs, setRawJobs] = useState<JobListItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [apiError, setApiError] = useState<string | null>(null);
   const [showCvPanel, setShowCvPanel] = useState<boolean>(true);
@@ -76,6 +260,20 @@ export function ApplicationsView() {
     setFilters((prev) => ({ ...prev, [key]: value }));
     setCurrentPage(1);
   };
+
+  // Filtrado 100% reactivo en cliente sobre las ofertas traídas sin llamadas de red redundantes
+  const filteredJobs = useMemo(() => {
+    return rawJobs.filter((job) => filterJobLocally(job, filters));
+  }, [rawJobs, filters]);
+
+  const PAGE_SIZE = 20;
+  const totalPages = Math.max(1, Math.ceil(filteredJobs.length / PAGE_SIZE));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+
+  const paginatedItems = useMemo(() => {
+    const startIndex = (safeCurrentPage - 1) * PAGE_SIZE;
+    return filteredJobs.slice(startIndex, startIndex + PAGE_SIZE);
+  }, [filteredJobs, safeCurrentPage]);
 
   // Modal de Detalle
   const [detailModalOpen, setDetailModalOpen] = useState<boolean>(false);
@@ -120,37 +318,18 @@ export function ApplicationsView() {
     }
   };
 
-  const fetchJobs = async (silent: boolean = false, pageOverride?: number, customFilters?: FilterState) => {
+  const fetchJobs = async (silent: boolean = false) => {
     if (!silent) {
       setLoading(true);
     }
-    const current = customFilters ?? filters;
-    const targetPage = pageOverride ?? currentPageRef.current;
     try {
-      const expYears = current.minExperienceStep > 0 ? EXPERIENCE_STEPS[current.minExperienceStep]?.years : undefined;
-      const minSal = current.minSalaryStep > 0 ? SALARY_STEPS[current.minSalaryStep]?.value : undefined;
-
       const res = await api.listJobs({
-        search: current.searchTerm.trim() || undefined,
-        exclude: current.exclusionTerm.trim() || undefined,
-        location: !current.isAllLocations && current.locationName ? current.locationName : undefined,
-        source: current.selectedSource || undefined,
-        status: current.selectedStatus || undefined,
-        min_score: current.minScore > 0 ? current.minScore : undefined,
-        modalities: current.selectedModalities.length > 0 ? current.selectedModalities : undefined,
-        categories: current.selectedCategories.length > 0 ? current.selectedCategories : undefined,
-        educations: current.selectedEducations.length > 0 ? current.selectedEducations : undefined,
-        min_experience_years: expYears,
-        min_salary: minSal,
-        schedules: current.selectedSchedules.length > 0 ? current.selectedSchedules : undefined,
-        contract_types: current.selectedContractTypes.length > 0 ? current.selectedContractTypes : undefined,
-        time_range: current.timeRange !== "all" ? current.timeRange : undefined,
-        page: targetPage,
-        page_size: 20,
+        page: 1,
+        page_size: 500,
         sort_by: "created_at",
         sort_order: "desc",
       });
-      setJobsData(res);
+      setRawJobs(res.items || []);
       setApiError(null);
       if (res.has_cv !== undefined) {
         setHasActiveCv(res.has_cv);
@@ -166,12 +345,10 @@ export function ApplicationsView() {
   };
 
   const handlePageChange = (newPage: number) => {
-    currentPageRef.current = newPage;
     setCurrentPage(newPage);
-    fetchJobs(false, newPage);
   };
 
-  // Carga inicial desacoplada: sin peticiones redundantes
+  // Carga inicial y sincronización desacoplada
   useEffect(() => {
     loadFacets();
     fetchJobs();
@@ -188,31 +365,23 @@ export function ApplicationsView() {
       const isRunning = await pollSearchStatus();
       if (isRunning) {
         wasSearching = true;
-        fetchJobs(true, currentPageRef.current);
+        fetchJobs(true);
       } else if (wasSearching) {
         wasSearching = false;
         setSearching(false);
-        fetchJobs(false, currentPageRef.current);
+        fetchJobs(false);
         loadFacets();
       } else if (pollCount % 4 === 0) {
-        fetchJobs(true, currentPageRef.current);
+        fetchJobs(true);
       }
     }, 2500);
     return () => clearInterval(interval);
   }, []);
 
-  // Búsqueda reactiva con debounce de 300 ms ante cambios de filtros
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      fetchJobs();
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [filters, currentPage]);
-
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setCurrentPage(1);
-    fetchJobs();
+    // Filtrado en memoria sin llamar al backend
   };
 
   const handleResetFilters = () => {
@@ -258,7 +427,9 @@ export function ApplicationsView() {
       if (selectedJobDetail && selectedJobDetail.id === jobId) {
         setSelectedJobDetail({ ...selectedJobDetail, status: newStatus });
       }
-      fetchJobs();
+      setRawJobs((prev) =>
+        prev.map((j) => (j.id === jobId ? { ...j, status: newStatus } : j))
+      );
     } catch (err: any) {
       alert(`Error al actualizar estado: ${err.message}`);
     }
@@ -271,7 +442,7 @@ export function ApplicationsView() {
       setHasActiveCv(hasValidCv(cv));
       await pollSearchStatus();
       await loadFacets();
-      await fetchJobs(false, currentPageRef.current);
+      await fetchJobs(false);
     } catch (e) {
       console.error("Error al actualizar candidaturas:", e);
     } finally {
@@ -310,8 +481,8 @@ export function ApplicationsView() {
             </span>
             <span className="h-3 w-px bg-primary/30 hidden sm:inline-block" />
             <span className="text-2xs text-muted-foreground whitespace-nowrap hidden sm:inline-block">
-              {jobsData && jobsData.total > 0
-                ? `${jobsData.total} encontradas hasta el momento`
+              {rawJobs.length > 0
+                ? `${rawJobs.length} encontradas hasta el momento`
                 : "Rastreando Indeed, LinkedIn y Glassdoor..."}
             </span>
           </div>
@@ -404,7 +575,7 @@ export function ApplicationsView() {
             )}
 
             {/* Cuadrícula de Ofertas: Si hay ofertas encontradas, mostrar siempre una tarjeta por cada oferta encontrada */}
-            {jobsData && jobsData.items.length > 0 ? (
+            {paginatedItems.length > 0 ? (
               <div
                 className={`grid grid-cols-1 sm:grid-cols-2 ${
                   showCvPanel
@@ -412,7 +583,7 @@ export function ApplicationsView() {
                     : "lg:grid-cols-3 xl:grid-cols-5 2xl:grid-cols-5"
                 } gap-3 sm:gap-3.5`}
               >
-                {jobsData.items.map((job: JobListItem) => (
+                {paginatedItems.map((job: JobListItem) => (
                   <JobCard
                     key={job.id}
                     job={job}
@@ -475,30 +646,35 @@ export function ApplicationsView() {
               </Card>
             )}
 
-            {/* Paginación fluida */}
-            {jobsData && jobsData.total_pages > 1 && (
+            {/* Paginación fluida en cliente */}
+            {totalPages > 1 && (
               <div className="flex items-center justify-between pt-4 border-t text-xs text-muted-foreground">
                 <div>
-                  Mostrando {jobsData.items.length} de {jobsData.total} ofertas
+                  Mostrando {paginatedItems.length} de {filteredJobs.length} ofertas
+                  {filteredJobs.length !== rawJobs.length && (
+                    <span className="text-muted-foreground/75">
+                      {" "}(filtradas de {rawJobs.length} cargadas)
+                    </span>
+                  )}
                 </div>
                 <div className="flex items-center gap-1">
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() => handlePageChange(Math.max(1, currentPage - 1))}
-                    disabled={currentPage <= 1 || loading}
+                    onClick={() => handlePageChange(Math.max(1, safeCurrentPage - 1))}
+                    disabled={safeCurrentPage <= 1 || loading}
                     className="h-8 px-2"
                   >
                     <ChevronLeft className="h-4 w-4" />
                   </Button>
                   <span className="px-2 font-medium text-foreground">
-                    Página {currentPage} de {jobsData.total_pages}
+                    Página {safeCurrentPage} de {totalPages}
                   </span>
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() => handlePageChange(Math.min(jobsData.total_pages, currentPage + 1))}
-                    disabled={currentPage >= jobsData.total_pages || loading}
+                    onClick={() => handlePageChange(Math.min(totalPages, safeCurrentPage + 1))}
+                    disabled={safeCurrentPage >= totalPages || loading}
                     className="h-8 px-2"
                   >
                     <ChevronRight className="h-4 w-4" />

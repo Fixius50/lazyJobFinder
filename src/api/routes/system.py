@@ -637,12 +637,9 @@ async def stream_logs_sse(
         while True:
             await asyncio.sleep(2.0)
             try:
-                new_logs = db.get_system_logs(limit=30, source=source)
-                # Filtrar aquellos con ID mayor a last_seen_id
-                fresh = [l for l in new_logs if l["id"] > last_seen_id]
-                if fresh:
-                    fresh.reverse()  # Orden cronológico ascendente para el frontend
-                    for item in fresh:
+                fresh_logs = db.get_system_logs(limit=50, source=source, since_id=last_seen_id)
+                if fresh_logs:
+                    for item in fresh_logs:
                         last_seen_id = max(last_seen_id, item["id"])
                         yield f"event: log\ndata: {json.dumps(item)}\n\n"
             except Exception as e:

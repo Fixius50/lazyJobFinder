@@ -317,7 +317,13 @@ class ScoringEngine:
         utilizando exclusivamente el modelo de IA local de Ollama.
         Si Ollama no está operativo, no aplica reglas inventadas; mantiene las vacantes pendientes.
         """
-        jobs = self.db.get_all_jobs_for_scoring(limit=max_jobs)
+        from ..tailoring.cv_reader import get_active_cv_text_and_meta
+        cv_text, cv_meta = get_active_cv_text_and_meta()
+
+        has_cv = cv_meta.get("has_cv") and bool(cv_text.strip())
+        active_fn = cv_meta.get("filename") if has_cv else None
+
+        jobs = self.db.get_all_jobs_for_scoring(limit=max_jobs, cv_filename=active_fn)
         if not jobs:
             return 0
 
@@ -326,11 +332,6 @@ class ScoringEngine:
             logger.warning("[IA / Ollama] Ollama no está online; las ofertas permanecen pendientes de evaluar por la IA.")
             print("[IA / Ollama] Ollama no está online; las ofertas permanecen pendientes de evaluar por la IA.", flush=True)
             return 0
-
-        from ..tailoring.cv_reader import get_active_cv_text_and_meta
-        cv_text, cv_meta = get_active_cv_text_and_meta()
-
-        has_cv = cv_meta.get("has_cv") and bool(cv_text.strip())
 
         print(f"\n" + "=" * 65, flush=True)
         print(f"[CV / IA] >>> Evaluando con IA {len(jobs)} ofertas contra el CV activo '{cv_meta.get('filename')}'...", flush=True)

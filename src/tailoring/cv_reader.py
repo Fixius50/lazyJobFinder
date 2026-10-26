@@ -400,8 +400,9 @@ def extract_search_terms_from_cv(cv_text: str, filename: Optional[str] = None) -
                 "}\n\n"
                 "REGLAS OBLIGATORIAS:\n"
                 "- 'search_terms' debe contener de 2 a 4 títulos de búsqueda de empleo habituales en España que encajen estrictamente con este CV.\n"
-                "- Basa los títulos ÚNICAMENTE en la experiencia, formación o competencias descritas en el CV. No inventes oficios de otros sectores.\n\n"
-                f"TEXTO DEL CV:\n{cv_text[:2000]}"
+                "- Basa los títulos ÚNICAMENTE en la experiencia, formación o competencias descritas en el CV o sugeridas en el archivo. No inventes oficios de otros sectores no relacionados.\n\n"
+                f"NOMBRE DEL ARCHIVO: {filename or 'cv'}\n"
+                f"TEXTO DEL CV:\n{cv_text[:3000]}"
             )
             raw = ollama.generate(prompt=prompt, format_json=True, timeout=60)
             data = json.loads(raw)

@@ -1084,17 +1084,27 @@ class Database:
             cursor = conn.execute(query, (limit,))
             return [dict(row) for row in cursor.fetchall()]
 
-    def get_all_jobs_for_scoring(self, limit: int = 200) -> List[Dict[str, Any]]:
+    def get_all_jobs_for_scoring(self, limit: int = 200, cv_filename: Optional[str] = None) -> List[Dict[str, Any]]:
         """Recupera todas las ofertas activas registradas para contrastar afinidad con el CV activo."""
         with self._get_connection() as conn:
-            query = """
-                SELECT id, title, company, location, is_remote, description, source, created_at
-                FROM jobs
-                WHERE ui_saved = 1
-                ORDER BY id DESC
-                LIMIT ?
-            """
-            cursor = conn.execute(query, (limit,))
+            if cv_filename and cv_filename not in ("none", "Ninguno", ""):
+                query = """
+                    SELECT id, title, company, location, is_remote, description, source, created_at
+                    FROM jobs
+                    WHERE ui_saved = 1 AND cv_filename = ?
+                    ORDER BY id DESC
+                    LIMIT ?
+                """
+                cursor = conn.execute(query, (cv_filename, limit))
+            else:
+                query = """
+                    SELECT id, title, company, location, is_remote, description, source, created_at
+                    FROM jobs
+                    WHERE ui_saved = 1
+                    ORDER BY id DESC
+                    LIMIT ?
+                """
+                cursor = conn.execute(query, (limit,))
             return [dict(row) for row in cursor.fetchall()]
 
     def log_event(self, level: str, source: str, message: str, details: Optional[str] = None) -> None:

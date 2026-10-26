@@ -98,10 +98,13 @@ class ConnectorManager:
             }
 
         active_terms = cv_meta.get("search_terms") or []
-        configured_terms = busqueda_cfg.get("terminos") or []
+        if active_terms:
+            raw_terms = active_terms
+        else:
+            raw_terms = busqueda_cfg.get("terminos") or []
 
         combined_terms: List[str] = []
-        for t in list(active_terms) + list(configured_terms):
+        for t in raw_terms:
             clean_t = str(t).strip()
             if clean_t and clean_t.lower() not in [x.lower() for x in combined_terms]:
                 combined_terms.append(clean_t)

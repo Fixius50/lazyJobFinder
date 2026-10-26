@@ -331,6 +331,22 @@ export function ApplicationsView() {
     }
   };
 
+  const handleRefresh = async () => {
+    try {
+      setLoading(true);
+      const cv = await api.getActiveCV().catch(() => null);
+      const hasCv = Boolean(cv && cv.type !== "none" && cv.filename && cv.filename !== "Ninguno" && cv.filename !== "none");
+      setHasActiveCv(hasCv);
+      await pollSearchStatus();
+      await loadFacets();
+      await fetchJobs(false, currentPageRef.current);
+    } catch (e) {
+      console.error("Error al actualizar candidaturas:", e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="space-y-4 sm:space-y-6 w-full">
       {/* Encabezado fluido con Título + CV en una sola línea | Acciones globales */}
@@ -378,10 +394,7 @@ export function ApplicationsView() {
           <Button
             size="sm"
             variant="outline"
-            onClick={() => {
-              fetchJobs();
-              loadFacets();
-            }}
+            onClick={handleRefresh}
             disabled={loading}
             className="flex items-center gap-1.5 h-8 text-xs"
           >

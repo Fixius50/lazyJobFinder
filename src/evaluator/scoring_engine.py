@@ -216,7 +216,6 @@ class ScoringEngine:
             return None
 
         self.db.update_job_status(job["id"], "evaluating")
-        _, _, meta = self.prefilter(job)
 
         system_prompt = (
             "Eres un evaluador y seleccionador profesional de empleo independiente, riguroso y objetivo. "
@@ -340,24 +339,9 @@ class ScoringEngine:
         evaluated_count = 0
         for job in jobs:
             try:
-                if not has_cv:
-                    no_cv_eval = {
-                        "job_id": job["id"],
-                        "score": 0,
-                        "fit_level": "SIN_EVALUAR",
-                        "matched_skills": [],
-                        "missing_skills": [],
-                        "strengths": [],
-                        "gaps": ["No hay currículum activo configurado."],
-                        "reasoning": "Sin evaluar: Se requiere un currículum activo para calcular la afinidad y puntuación ATS.",
-                        "should_apply": False,
-                    }
-                    self.db.save_evaluation(no_cv_eval)
-                    self.db.update_job_status(job["id"], "discovered")
-                else:
-                    res = self.evaluate(job)
-                    if res:
-                        evaluated_count += 1
+                res = self.evaluate(job)
+                if res:
+                    evaluated_count += 1
             except Exception as e:
                 logger.error("Error evaluando oferta ID %s con Ollama: %s", job.get("id"), e)
 

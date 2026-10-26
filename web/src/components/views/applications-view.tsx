@@ -18,7 +18,43 @@ import { JobCard } from "@/components/features/jobs/job-card";
 import { JobFilters, EXPERIENCE_STEPS, SALARY_STEPS } from "@/components/features/jobs/job-filters";
 import { JobDetailDialog } from "@/components/features/jobs/job-detail-dialog";
 import { PurgeHistoryButton } from "@/components/features/maintenance/purge-history-card";
-import { JobListItem, JobDetail, PaginatedJobsResponse, FilterFacetsResponse, api } from "@/lib/api";
+import { JobListItem, JobDetail, PaginatedJobsResponse, FilterFacetsResponse, api, hasValidCv } from "@/lib/api";
+
+interface FilterState {
+  searchTerm: string;
+  exclusionTerm: string;
+  selectedSource: string;
+  selectedStatus: string;
+  minScore: number;
+  timeRange: string;
+  locationName: string;
+  isAllLocations: boolean;
+  selectedModalities: string[];
+  selectedCategories: string[];
+  selectedEducations: string[];
+  minExperienceStep: number;
+  minSalaryStep: number;
+  selectedSchedules: string[];
+  selectedContractTypes: string[];
+}
+
+const INITIAL_FILTERS: FilterState = {
+  searchTerm: "",
+  exclusionTerm: "",
+  selectedSource: "",
+  selectedStatus: "",
+  minScore: 0,
+  timeRange: "all",
+  locationName: "",
+  isAllLocations: true,
+  selectedModalities: [],
+  selectedCategories: [],
+  selectedEducations: [],
+  minExperienceStep: 0,
+  minSalaryStep: 0,
+  selectedSchedules: [],
+  selectedContractTypes: [],
+};
 
 export function ApplicationsView() {
   const [jobsData, setJobsData] = useState<PaginatedJobsResponse | null>(null);
@@ -27,13 +63,8 @@ export function ApplicationsView() {
   const [showCvPanel, setShowCvPanel] = useState<boolean>(true);
   const [facets, setFacets] = useState<FilterFacetsResponse | null>(null);
 
-  // Filtros y Paginación
-  const [searchTerm, setSearchTerm] = useState<string>("");
-  const [exclusionTerm, setExclusionTerm] = useState<string>("");
-  const [selectedSource, setSelectedSource] = useState<string>("");
-  const [selectedStatus, setSelectedStatus] = useState<string>("");
-  const [minScore, setMinScore] = useState<number>(0);
-  const [timeRange, setTimeRange] = useState<string>("all");
+  // Filtros unificados en un único estado atómico
+  const [filters, setFilters] = useState<FilterState>(INITIAL_FILTERS);
   const [currentPage, setCurrentPage] = useState<number>(1);
   const currentPageRef = useRef<number>(currentPage);
 
@@ -41,17 +72,10 @@ export function ApplicationsView() {
     currentPageRef.current = currentPage;
   }, [currentPage]);
 
-  // Filtros Avanzados y por Dimensiones
-  const [locationName, setLocationName] = useState<string>("");
-  const [isAllLocations, setIsAllLocations] = useState<boolean>(true);
-
-  const [selectedModalities, setSelectedModalities] = useState<string[]>([]);
-  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
-  const [selectedEducations, setSelectedEducations] = useState<string[]>([]);
-  const [minExperienceStep, setMinExperienceStep] = useState<number>(0);
-  const [minSalaryStep, setMinSalaryStep] = useState<number>(0);
-  const [selectedSchedules, setSelectedSchedules] = useState<string[]>([]);
-  const [selectedContractTypes, setSelectedContractTypes] = useState<string[]>([]);
+  const updateFilter = <K extends keyof FilterState>(key: K, value: FilterState[K]) => {
+    setFilters((prev) => ({ ...prev, [key]: value }));
+    setCurrentPage(1);
+  };
 
   // Modal de Detalle
   const [detailModalOpen, setDetailModalOpen] = useState<boolean>(false);
@@ -89,7 +113,6 @@ export function ApplicationsView() {
       setSearching(true);
       const res = await api.triggerSearch();
       alert(res.message || "Búsqueda de empleo iniciada en los portales con los términos del CV activo.");
-      // Consulta inmediata tras iniciar
       setTimeout(() => pollSearchStatus(), 800);
     } catch (e: any) {
       alert(`Error al iniciar búsqueda: ${e.message}`);
@@ -97,99 +120,11 @@ export function ApplicationsView() {
     }
   };
 
-  const filtersRef = useRef({
-    searchTerm,
-    exclusionTerm,
-    locationName,
-    isAllLocations,
-    selectedSource,
-    selectedStatus,
-    minScore,
-    timeRange,
-    selectedModalities,
-    selectedCategories,
-    selectedEducations,
-    minExperienceStep,
-    minSalaryStep,
-    selectedSchedules,
-    selectedContractTypes,
-  });
-
-  useEffect(() => {
-    filtersRef.current = {
-      searchTerm,
-      exclusionTerm,
-      locationName,
-      isAllLocations,
-      selectedSource,
-      selectedStatus,
-      minScore,
-      timeRange,
-      selectedModalities,
-      selectedCategories,
-      selectedEducations,
-      minExperienceStep,
-      minSalaryStep,
-      selectedSchedules,
-      selectedContractTypes,
-    };
-  }, [
-    searchTerm,
-    exclusionTerm,
-    locationName,
-    isAllLocations,
-    selectedSource,
-    selectedStatus,
-    minScore,
-    timeRange,
-    selectedModalities,
-    selectedCategories,
-    selectedEducations,
-    minExperienceStep,
-    minSalaryStep,
-    selectedSchedules,
-    selectedContractTypes,
-  ]);
-
-  useEffect(() => {
-    loadFacets();
-    fetchJobs();
-    api.getActiveCV().then((cv) => {
-      setHasActiveCv(Boolean(cv && cv.type !== "none" && cv.filename && cv.filename !== "Ninguno" && cv.filename !== "none"));
-    }).catch(() => setHasActiveCv(false));
-
-    // Comprobación periódica y monitorización del estado de búsqueda con auto-recarga reactiva
-    pollSearchStatus();
-    let wasSearching = false;
-    let pollCount = 0;
-
-    const interval = setInterval(async () => {
-      pollCount += 1;
-      const isRunning = await pollSearchStatus();
-      if (isRunning) {
-        wasSearching = true;
-        // Refrescar en segundo plano para ver las ofertas que se van descubriendo y calificando en tiempo real
-        fetchJobs(true, currentPageRef.current);
-        loadFacets();
-      } else if (wasSearching) {
-        // En cuanto termina la búsqueda o evaluación, forzar refresco completo inmediato
-        wasSearching = false;
-        setSearching(false);
-        fetchJobs(false, currentPageRef.current);
-        loadFacets();
-      } else if (pollCount % 4 === 0) {
-        // Cada ~10s, refrescar discretamente por si llegaron nuevas ofertas o evaluaciones
-        fetchJobs(true, currentPageRef.current);
-      }
-    }, 2500);
-    return () => clearInterval(interval);
-  }, []);
-
-  const fetchJobs = async (silent: boolean = false, pageOverride?: number) => {
+  const fetchJobs = async (silent: boolean = false, pageOverride?: number, customFilters?: FilterState) => {
     if (!silent) {
       setLoading(true);
     }
-    const current = filtersRef.current;
+    const current = customFilters ?? filters;
     const targetPage = pageOverride ?? currentPageRef.current;
     try {
       const expYears = current.minExperienceStep > 0 ? EXPERIENCE_STEPS[current.minExperienceStep]?.years : undefined;
@@ -220,8 +155,6 @@ export function ApplicationsView() {
       if (res.has_cv !== undefined) {
         setHasActiveCv(res.has_cv);
       }
-      // Sincronizar facetas con el total de ofertas devuelto
-      loadFacets();
     } catch (err: any) {
       console.error("[ApplicationsView] Error obteniendo ofertas:", err);
       setApiError(err.message || "Error al conectar con la API local de lazyJobFinder.");
@@ -238,29 +171,43 @@ export function ApplicationsView() {
     fetchJobs(false, newPage);
   };
 
+  // Carga inicial desacoplada: sin peticiones redundantes
+  useEffect(() => {
+    loadFacets();
+    fetchJobs();
+    api.getActiveCV()
+      .then((cv) => setHasActiveCv(hasValidCv(cv)))
+      .catch(() => setHasActiveCv(false));
+
+    pollSearchStatus();
+    let wasSearching = false;
+    let pollCount = 0;
+
+    const interval = setInterval(async () => {
+      pollCount += 1;
+      const isRunning = await pollSearchStatus();
+      if (isRunning) {
+        wasSearching = true;
+        fetchJobs(true, currentPageRef.current);
+      } else if (wasSearching) {
+        wasSearching = false;
+        setSearching(false);
+        fetchJobs(false, currentPageRef.current);
+        loadFacets();
+      } else if (pollCount % 4 === 0) {
+        fetchJobs(true, currentPageRef.current);
+      }
+    }, 2500);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Búsqueda reactiva con debounce de 300 ms ante cambios de filtros
   useEffect(() => {
     const timer = setTimeout(() => {
       fetchJobs();
     }, 300);
     return () => clearTimeout(timer);
-  }, [
-    searchTerm,
-    exclusionTerm,
-    selectedSource,
-    selectedStatus,
-    minScore,
-    timeRange,
-    selectedModalities,
-    selectedCategories,
-    selectedEducations,
-    minExperienceStep,
-    minSalaryStep,
-    selectedSchedules,
-    selectedContractTypes,
-    isAllLocations,
-    locationName,
-    currentPage,
-  ]);
+  }, [filters, currentPage]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -269,32 +216,18 @@ export function ApplicationsView() {
   };
 
   const handleResetFilters = () => {
-    setSearchTerm("");
-    setExclusionTerm("");
-    setSelectedSource("");
-    setSelectedStatus("");
-    setMinScore(0);
-    setTimeRange("all");
-    setIsAllLocations(true);
-    setLocationName("");
-    setSelectedModalities([]);
-    setSelectedCategories([]);
-    setSelectedEducations([]);
-    setMinExperienceStep(0);
-    setMinSalaryStep(0);
-    setSelectedSchedules([]);
-    setSelectedContractTypes([]);
+    setFilters(INITIAL_FILTERS);
     setCurrentPage(1);
   };
 
   const handleSaveCriteria = async () => {
     try {
-      const terminos = searchTerm.split(",").map((t) => t.trim()).filter(Boolean);
-      const exclusiones = exclusionTerm.split(",").map((e) => e.trim()).filter(Boolean);
+      const terminos = filters.searchTerm.split(",").map((t) => t.trim()).filter(Boolean);
+      const exclusiones = filters.exclusionTerm.split(",").map((e) => e.trim()).filter(Boolean);
 
       await api.updateSearchConfig({
         terminos: terminos,
-        ubicaciones: !isAllLocations ? [locationName] : ["Spain", "Remoto"],
+        ubicaciones: !filters.isAllLocations ? [filters.locationName] : ["Spain", "Remoto"],
         filtros_exclusion: exclusiones,
         antiguedad_horas: 48,
         limite_por_fuente: 15,
@@ -335,8 +268,7 @@ export function ApplicationsView() {
     try {
       setLoading(true);
       const cv = await api.getActiveCV().catch(() => null);
-      const hasCv = Boolean(cv && cv.type !== "none" && cv.filename && cv.filename !== "Ninguno" && cv.filename !== "none");
-      setHasActiveCv(hasCv);
+      setHasActiveCv(hasValidCv(cv));
       await pollSearchStatus();
       await loadFacets();
       await fetchJobs(false, currentPageRef.current);
@@ -362,14 +294,7 @@ export function ApplicationsView() {
           {/* Bloque en una sola línea del CV Activo: Currículum Activo, ?, Desplegable, Ojo, Subir, Borrar */}
           <CvManager
             onCvChanged={(activeInfo) => {
-              const hasCv = Boolean(
-                activeInfo &&
-                activeInfo.type !== "none" &&
-                activeInfo.filename &&
-                activeInfo.filename !== "Ninguno" &&
-                activeInfo.filename !== "none"
-              );
-              setHasActiveCv(hasCv);
+              setHasActiveCv(hasValidCv(activeInfo));
               loadFacets();
               fetchJobs();
             }}
@@ -447,75 +372,36 @@ export function ApplicationsView() {
           <aside className="lg:col-span-4 xl:col-span-3 space-y-4">
             <JobFilters
               facets={facets}
-              searchTerm={searchTerm}
-              onSearchTermChange={setSearchTerm}
-              exclusionTerm={exclusionTerm}
-              onExclusionTermChange={setExclusionTerm}
-              locationName={locationName}
-              onLocationChange={(loc) => {
-                setLocationName(loc);
-                setCurrentPage(1);
-              }}
-              isAllLocations={isAllLocations}
-              onToggleAllLocations={(all) => {
-                setIsAllLocations(all);
-                setCurrentPage(1);
-              }}
-              selectedModalities={selectedModalities}
-              onModalitiesChange={(mods) => {
-                setSelectedModalities(mods);
-                setCurrentPage(1);
-              }}
-              selectedCategories={selectedCategories}
-              onCategoriesChange={(cats) => {
-                setSelectedCategories(cats);
-                setCurrentPage(1);
-              }}
-              selectedEducations={selectedEducations}
-              onEducationsChange={(edus) => {
-                setSelectedEducations(edus);
-                setCurrentPage(1);
-              }}
-              minExperienceStep={minExperienceStep}
-              onMinExperienceStepChange={(step) => {
-                setMinExperienceStep(step);
-                setCurrentPage(1);
-              }}
-              minSalaryStep={minSalaryStep}
-              onMinSalaryStepChange={(step) => {
-                setMinSalaryStep(step);
-                setCurrentPage(1);
-              }}
-              selectedSchedules={selectedSchedules}
-              onSchedulesChange={(scheds) => {
-                setSelectedSchedules(scheds);
-                setCurrentPage(1);
-              }}
-              selectedContractTypes={selectedContractTypes}
-              onContractTypesChange={(cts) => {
-                setSelectedContractTypes(cts);
-                setCurrentPage(1);
-              }}
-              selectedSource={selectedSource}
-              onSourceChange={(source) => {
-                setSelectedSource(source);
-                setCurrentPage(1);
-              }}
-              selectedStatus={selectedStatus}
-              onStatusChange={(status) => {
-                setSelectedStatus(status);
-                setCurrentPage(1);
-              }}
-              minScore={minScore}
-              onMinScoreChange={(score) => {
-                setMinScore(score);
-                setCurrentPage(1);
-              }}
-              timeRange={timeRange}
-              onTimeRangeChange={(tr) => {
-                setTimeRange(tr);
-                setCurrentPage(1);
-              }}
+              searchTerm={filters.searchTerm}
+              onSearchTermChange={(val) => updateFilter("searchTerm", val)}
+              exclusionTerm={filters.exclusionTerm}
+              onExclusionTermChange={(val) => updateFilter("exclusionTerm", val)}
+              locationName={filters.locationName}
+              onLocationChange={(loc) => updateFilter("locationName", loc)}
+              isAllLocations={filters.isAllLocations}
+              onToggleAllLocations={(all) => updateFilter("isAllLocations", all)}
+              selectedModalities={filters.selectedModalities}
+              onModalitiesChange={(mods) => updateFilter("selectedModalities", mods)}
+              selectedCategories={filters.selectedCategories}
+              onCategoriesChange={(cats) => updateFilter("selectedCategories", cats)}
+              selectedEducations={filters.selectedEducations}
+              onEducationsChange={(edus) => updateFilter("selectedEducations", edus)}
+              minExperienceStep={filters.minExperienceStep}
+              onMinExperienceStepChange={(step) => updateFilter("minExperienceStep", step)}
+              minSalaryStep={filters.minSalaryStep}
+              onMinSalaryStepChange={(step) => updateFilter("minSalaryStep", step)}
+              selectedSchedules={filters.selectedSchedules}
+              onSchedulesChange={(scheds) => updateFilter("selectedSchedules", scheds)}
+              selectedContractTypes={filters.selectedContractTypes}
+              onContractTypesChange={(cts) => updateFilter("selectedContractTypes", cts)}
+              selectedSource={filters.selectedSource}
+              onSourceChange={(source) => updateFilter("selectedSource", source)}
+              selectedStatus={filters.selectedStatus}
+              onStatusChange={(status) => updateFilter("selectedStatus", status)}
+              minScore={filters.minScore}
+              onMinScoreChange={(score) => updateFilter("minScore", score)}
+              timeRange={filters.timeRange}
+              onTimeRangeChange={(tr) => updateFilter("timeRange", tr)}
               onSubmitSearch={handleSearchSubmit}
               onResetFilters={handleResetFilters}
               onSaveCriteria={handleSaveCriteria}

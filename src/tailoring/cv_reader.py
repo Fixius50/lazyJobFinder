@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import re
+import time
 from typing import Any, Dict, Optional, Tuple
 
 logger = logging.getLogger("lazyJobFinder.tailoring.cv_reader")
@@ -195,10 +196,10 @@ def extract_cv_text(file_path: str, force_refresh: bool = False, db: Optional[An
 
 
 def get_active_cv_status() -> Dict[str, Any]:
-    """Devuelve el estado y metadatos del CV activo sin parsear el archivo (operación ultraligera O(1)).
+    """Devuelve el estado canónico y metadatos del CV activo sin parsear el archivo (operación ultraligera O(1)).
     
-    Usar esta función en endpoints de listado, filtros o comprobaciones de salud para evitar
-    el coste innecesario de abrir y procesar archivos PDF en cada interacción.
+    Proporciona una única fuente de verdad tanto para la API REST como para los módulos internos
+    (scoring, discovery, runner) evitando lecturas repetidas de disco.
     """
     pointer = read_active_cv_pointer()
     selected_filename = pointer.get("selected_filename", "none")
@@ -206,18 +207,29 @@ def get_active_cv_status() -> Dict[str, Any]:
     if selected_filename and selected_filename not in ("none", "default"):
         custom_path = os.path.join(UPLOAD_DIR, os.path.basename(selected_filename))
         if os.path.exists(custom_path) and os.path.getsize(custom_path) > 0:
+            stat = os.stat(custom_path)
             return {
                 "has_cv": True,
+                "type": "custom",
                 "filename": os.path.basename(custom_path),
-                "path": custom_path,
+                "path": f"data/uploaded_cvs/{os.path.basename(custom_path)}",
+                "size_bytes": stat.st_size,
+                "modified_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stat.st_mtime)),
+                "is_default": False,
+                "description": "CV personalizado cargado localmente.",
                 "search_terms": pointer.get("search_terms", []),
                 "primary_role": pointer.get("primary_role", ""),
             }
 
     return {
         "has_cv": False,
+        "type": "none",
         "filename": "Ninguno",
         "path": "",
+        "size_bytes": 0,
+        "modified_at": "n/a",
+        "is_default": False,
+        "description": "Sin CV activo. Las ofertas se conservarán sin filtrar por currículum.",
         "search_terms": [],
         "primary_role": "",
     }

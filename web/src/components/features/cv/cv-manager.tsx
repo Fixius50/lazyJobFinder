@@ -15,7 +15,7 @@ import { Select } from "@/components/ui/select";
 import { Dialog } from "@/components/ui/dialog";
 import { InfoTooltip } from "@/components/ui/info-tooltip";
 import { CvProgressBar } from "@/components/features/cv/cv-progress-bar";
-import { ActiveCVInfo, api } from "@/lib/api";
+import { ActiveCVInfo, api, hasValidCv } from "@/lib/api";
 
 interface CvManagerProps {
   onCvChanged?: (activeCv: ActiveCVInfo | null) => void;
@@ -57,7 +57,8 @@ export function CvManager({ onCvChanged, className = "" }: CvManagerProps) {
   };
 
   useEffect(() => {
-    loadData(true);
+    // En montaje inicial no disparar onCvChanged para evitar tormenta de peticiones redundantes
+    loadData(false);
   }, []);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -225,7 +226,7 @@ export function CvManager({ onCvChanged, className = "" }: CvManagerProps) {
         {/* Desplegable de selección */}
         <div className="w-36 sm:w-48 md:w-56 lg:w-64">
           <Select
-            value={activeCV?.type === "none" || !activeCV ? "none" : activeCV?.filename}
+            value={!hasValidCv(activeCV) ? "none" : activeCV?.filename}
             onChange={(e) => handleSelectCV(e.target.value)}
             disabled={isUploading || isSelecting}
             className={`text-xs w-full h-8 bg-background/90 font-medium truncate ${isSelecting ? "opacity-60 cursor-wait" : ""}`}
@@ -245,9 +246,9 @@ export function CvManager({ onCvChanged, className = "" }: CvManagerProps) {
           size="sm"
           variant="outline"
           onClick={() => handlePreview(activeCV?.filename)}
-          disabled={!activeCV || activeCV.type === "none"}
+          disabled={!hasValidCv(activeCV)}
           className="h-8 w-8 p-0 shrink-0 text-primary hover:text-primary/80 hover:border-primary/50"
-          title={activeCV?.type !== "none" ? "Previsualizar texto extraído de este CV" : "Sin CV seleccionado"}
+          title={hasValidCv(activeCV) ? "Previsualizar texto extraído de este CV" : "Sin CV seleccionado"}
         >
           <Eye className="h-4 w-4" />
         </Button>
@@ -271,9 +272,9 @@ export function CvManager({ onCvChanged, className = "" }: CvManagerProps) {
           size="sm"
           variant="outline"
           onClick={() => activeCV?.filename && handleDeleteCV(activeCV.filename)}
-          disabled={!activeCV || activeCV.type === "none" || deletingFile === activeCV?.filename}
+          disabled={!hasValidCv(activeCV) || deletingFile === activeCV?.filename}
           className="h-8 w-8 p-0 shrink-0 text-muted-foreground hover:text-destructive hover:border-destructive/50"
-          title={activeCV?.type !== "none" ? `Eliminar "${activeCV?.filename}"` : "Ningún CV seleccionado"}
+          title={hasValidCv(activeCV) ? `Eliminar "${activeCV?.filename}"` : "Ningún CV seleccionado"}
         >
           <Trash2 className={`h-4 w-4 ${deletingFile ? "animate-spin text-destructive" : ""}`} />
         </Button>

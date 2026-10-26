@@ -39,39 +39,9 @@ def _ensure_upload_dir():
 
 
 def _get_active_cv_info() -> Dict[str, Any]:
-    """Recupera la información del CV actualmente seleccionado sin enviar datos a la IA."""
-    _ensure_upload_dir()
-    pointer = read_active_cv_pointer()
-    selected_filename = pointer.get("selected_filename", "none")
-
-    if selected_filename and selected_filename not in ("none", "default"):
-        target_path = os.path.join(UPLOAD_DIR, os.path.basename(selected_filename))
-        if os.path.exists(target_path):
-            stat = os.stat(target_path)
-            return {
-                "type": "custom",
-                "filename": os.path.basename(target_path),
-                "path": f"data/uploaded_cvs/{os.path.basename(target_path)}",
-                "size_bytes": stat.st_size,
-                "modified_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stat.st_mtime)),
-                "is_default": False,
-                "description": "CV personalizado cargado localmente.",
-                "search_terms": pointer.get("search_terms", []),
-                "primary_role": pointer.get("primary_role", ""),
-            }
-
-    # Si no hay CV cargado o seleccionado:
-    return {
-        "type": "none",
-        "filename": "Ninguno",
-        "path": "",
-        "size_bytes": 0,
-        "modified_at": "n/a",
-        "is_default": False,
-        "description": "Sin CV activo. Las ofertas se conservarán sin filtrar por currículum.",
-        "search_terms": [],
-        "primary_role": "",
-    }
+    """Recupera la información del CV activo delegando en la fuente de verdad get_active_cv_status."""
+    from ...tailoring.cv_reader import get_active_cv_status
+    return get_active_cv_status()
 
 
 def _sync_terms_and_update_settings(filename: str, file_path: Optional[str] = None) -> Dict[str, Any]:

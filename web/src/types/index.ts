@@ -163,6 +163,16 @@ export interface ActiveCVInfo {
   primary_role?: string;
 }
 
+export function hasValidCv(cv?: ActiveCVInfo | null): boolean {
+  return Boolean(
+    cv &&
+    cv.type !== "none" &&
+    cv.filename &&
+    cv.filename.toLowerCase() !== "ninguno" &&
+    cv.filename.toLowerCase() !== "none"
+  );
+}
+
 // =============================================================================
 // 4. CONFIGURACIÓN Y CANALES
 // =============================================================================

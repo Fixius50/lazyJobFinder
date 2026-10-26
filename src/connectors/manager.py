@@ -84,9 +84,9 @@ class ConnectorManager:
         Ejecuta la búsqueda en todas las fuentes configuradas, deduplica y guarda las nuevas ofertas.
         Retorna la lista de ofertas nuevas insertadas en base de datos y un resumen de métricas.
         """
-        # 1. Obtener CV activo y términos de búsqueda dinámicos adaptados
-        from ..tailoring.cv_reader import get_active_cv_text_and_meta
-        cv_text, cv_meta = get_active_cv_text_and_meta()
+        # 1. Obtener CV activo y términos de búsqueda dinámicos adaptados (operación ultraligera O(1))
+        from ..tailoring.cv_reader import get_active_cv_status
+        cv_meta = get_active_cv_status()
 
         busqueda_cfg = self.settings.get("busqueda", {})
         if not cv_meta.get("has_cv"):

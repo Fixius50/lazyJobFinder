@@ -88,73 +88,20 @@ def ensure_storage_dirs() -> None:
 # =============================================================================
 
 def _get_sqlite_state(key: str, default: Any = None) -> Any:
-    """Lee un valor persistente de app_state en SQLite (lazyjobfinder.db)."""
-    import sqlite3
-    if not os.path.exists(DB_PATH):
-        return default
-    conn = None
+    """Lee un valor persistente de app_state en SQLite a través de la capa canónica Database."""
     try:
-        conn = sqlite3.connect(DB_PATH, timeout=30.0)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA busy_timeout = 30000;")
-        cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='app_state'")
-        if not cursor.fetchone():
-            return default
-        cursor = conn.execute("SELECT value FROM app_state WHERE key = ?", (key,))
-        row = cursor.fetchone()
-        if not row:
-            return default
-        return json.loads(row["value"])
+        from .database import Database
+        return Database().get_app_state(key, default=default)
     except Exception as e:
         logger.debug("Error leyendo app_state (%s) en SQLite: %s", key, e)
         return default
-    finally:
-        if conn:
-            try:
-                conn.close()
-            except Exception:
-                pass
 
 
 def _set_sqlite_state(key: str, value: Any) -> None:
-    """Guarda un valor de app_state en SQLite de manera atómica sin reactivar modo WAL."""
-    import sqlite3
+    """Guarda un valor de app_state en SQLite de manera atómica a través de Database."""
     ensure_storage_dirs()
-    val_str = json.dumps(value, ensure_ascii=False)
-    conn = None
-    try:
-        conn = sqlite3.connect(DB_PATH, timeout=30.0)
-        conn.execute("PRAGMA busy_timeout = 30000;")
-        conn.execute("PRAGMA journal_mode = TRUNCATE;")
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS app_state (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL,
-                updated_at TEXT DEFAULT (datetime('now', 'localtime'))
-            );
-            """
-        )
-        conn.execute(
-            """
-            INSERT INTO app_state (key, value, updated_at)
-            VALUES (?, ?, datetime('now', 'localtime'))
-            ON CONFLICT(key) DO UPDATE SET
-                value = excluded.value,
-                updated_at = datetime('now', 'localtime')
-            """,
-            (key, val_str),
-        )
-        conn.commit()
-    except Exception as e:
-        logger.error("Error guardando app_state (%s) en SQLite: %s", key, e)
-        raise
-    finally:
-        if conn:
-            try:
-                conn.close()
-            except Exception:
-                pass
+    from .database import Database
+    Database().set_app_state(key, value)
 
 
 def read_persisted_secrets() -> Dict[str, str]:
@@ -162,22 +109,6 @@ def read_persisted_secrets() -> Dict[str, str]:
     data = _get_sqlite_state("secrets")
     if data is not None and isinstance(data, dict):
         return {str(k): str(v) for k, v in data.items() if v is not None}
-
-    # Migración transparente desde secrets.json legacy si existiese
-    if os.path.exists(SECRETS_FILE):
-        try:
-            with open(SECRETS_FILE, "r", encoding="utf-8") as f:
-                legacy = json.load(f)
-            if isinstance(legacy, dict) and legacy:
-                _set_sqlite_state("secrets", legacy)
-                try:
-                    os.remove(SECRETS_FILE)
-                except OSError:
-                    pass
-                return {str(k): str(v) for k, v in legacy.items() if v is not None}
-        except Exception as exc:
-            logger.warning("Error migrando data/secrets.json a SQLite: %s", exc)
-
     return {}
 
 
@@ -198,11 +129,6 @@ def save_persisted_secret(key: str, value: str) -> None:
     data = read_persisted_secrets()
     data[key] = value
     _set_sqlite_state("secrets", data)
-    if os.path.exists(SECRETS_FILE):
-        try:
-            os.remove(SECRETS_FILE)
-        except OSError:
-            pass
 
 
 def delete_persisted_secret(key: str) -> None:
@@ -211,11 +137,6 @@ def delete_persisted_secret(key: str) -> None:
     if key in data:
         data.pop(key, None)
         _set_sqlite_state("secrets", data)
-    if os.path.exists(SECRETS_FILE):
-        try:
-            os.remove(SECRETS_FILE)
-        except OSError:
-            pass
 
 
 def sync_secrets_to_env() -> None:
@@ -240,22 +161,6 @@ def read_active_cv_pointer() -> Dict[str, Any]:
     data = _get_sqlite_state("active_cv_pointer")
     if data is not None and isinstance(data, dict):
         return data
-
-    # Migración transparente desde active_cv.json legacy si existiese
-    if os.path.exists(ACTIVE_CV_FILE):
-        try:
-            with open(ACTIVE_CV_FILE, "r", encoding="utf-8") as f:
-                legacy = json.load(f)
-            if isinstance(legacy, dict) and legacy:
-                _set_sqlite_state("active_cv_pointer", legacy)
-                try:
-                    os.remove(ACTIVE_CV_FILE)
-                except OSError:
-                    pass
-                return legacy
-        except Exception as exc:
-            logger.debug("Error migrando active_cv.json a SQLite: %s", exc)
-
     return {"selected_filename": "none"}
 
 
@@ -273,11 +178,6 @@ def write_active_cv_pointer(
         "primary_role": primary_role if primary_role is not None else existing.get("primary_role", ""),
     }
     _set_sqlite_state("active_cv_pointer", payload)
-    if os.path.exists(ACTIVE_CV_FILE):
-        try:
-            os.remove(ACTIVE_CV_FILE)
-        except OSError:
-            pass
 
 
 def get_persisted_settings() -> Dict[str, Any]:

@@ -261,9 +261,36 @@ export function ApplicationsView() {
     setCurrentPage(1);
   };
 
-  // Filtrado 100% reactivo en cliente sobre las ofertas traídas sin llamadas de red redundantes
+  // Filtrado 100% reactivo en cliente sobre las ofertas traídas sin llamadas de red redundantes.
+  // Prioriza estrictamente el CV y carta antes, ordenados por mayor puntuación.
   const filteredJobs = useMemo(() => {
-    return rawJobs.filter((job) => filterJobLocally(job, filters));
+    const list = rawJobs.filter((job) => filterJobLocally(job, filters));
+    return list.sort((a, b) => {
+      // 1. Priorizar antes las ofertas que ya tienen CV o carta generados
+      const aDocs = (a.has_cv ? 2 : 0) + (a.has_letter ? 1 : 0);
+      const bDocs = (b.has_cv ? 2 : 0) + (b.has_letter ? 1 : 0);
+
+      if ((aDocs > 0) !== (bDocs > 0)) {
+        return (bDocs > 0 ? 1 : 0) - (aDocs > 0 ? 1 : 0);
+      }
+
+      // 2. Ordenar estrictamente por mayor puntuación (score descendente)
+      const aScore = a.score ?? -1;
+      const bScore = b.score ?? -1;
+      if (aScore !== bScore) {
+        return bScore - aScore;
+      }
+
+      // Si hay empate de puntuación, priorizar la que tenga más documentos (CV + Carta)
+      if (aDocs !== bDocs) {
+        return bDocs - aDocs;
+      }
+
+      // Desempate por fecha de creación más reciente
+      const aTime = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const bTime = b.created_at ? new Date(b.created_at).getTime() : 0;
+      return bTime - aTime;
+    });
   }, [rawJobs, filters]);
 
   const PAGE_SIZE = 20;

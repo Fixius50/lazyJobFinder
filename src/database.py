@@ -1142,6 +1142,36 @@ class Database:
                 cursor = conn.execute(query, (limit,))
             return [dict(row) for row in cursor.fetchall()]
 
+    def get_evaluated_jobs_needing_docs(
+        self, min_score: int = 50, cv_filename: Optional[str] = None, limit: int = 50
+    ) -> List[Dict[str, Any]]:
+        """Recupera ofertas evaluadas con score >= min_score que aún no tienen documentos generados,
+        ordenadas estrictamente por puntuación descendente para priorizar siempre las de mayor nota."""
+        with self._get_connection() as conn:
+            where = ["e.score >= ?", "d.id IS NULL", "j.ui_saved = 1"]
+            params: List[Any] = [min_score]
+            if cv_filename and cv_filename not in ("none", "Ninguno", ""):
+                where.append("j.cv_filename = ?")
+                params.append(cv_filename)
+
+            sql = f"""
+                SELECT 
+                    j.id, j.title, j.company, j.location, j.is_remote, j.description, j.source,
+                    e.score, e.fit_level, e.should_apply, e.matched_skills, e.missing_skills,
+                    e.strengths, e.gaps, e.reasoning
+                FROM jobs j
+                JOIN evaluations e ON j.id = e.job_id
+                LEFT JOIN generated_documents d ON j.id = d.job_id
+                WHERE {' AND '.join(where)}
+                ORDER BY e.score DESC, j.id DESC
+                LIMIT ?
+            """
+            cursor = conn.execute(sql, params + [limit])
+            items = []
+            for row in cursor.fetchall():
+                items.append(_decode_row_json_fields(dict(row)))
+            return items
+
     def log_event(self, level: str, source: str, message: str, details: Optional[str] = None) -> None:
         """Registra un evento o error del sistema de forma persistente."""
         try:

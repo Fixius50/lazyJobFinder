@@ -298,12 +298,52 @@ class JobPipelineRunner:
                 
                 qualified_candidates.sort(key=lambda x: x[1].get("score", 0), reverse=True)
 
-                # 3. Fase 2: Adaptación documental (CV y Cartas) solo si score >= 50%
+                # 3. Fase 2: Adaptación documental (CV y Cartas)
+                # Priorizar estrictamente por mayor puntuación
                 from ..tailoring.cv_reader import get_active_cv_status
                 cv_status = get_active_cv_status()
                 can_generate_docs = generate_docs and (cv_status.get("has_cv") or bool(self.profile))
 
+                docs_candidates_dict = {}
                 for job, eval_res in qualified_candidates:
+                    if eval_res.get("score", 0) >= 50 and eval_res.get("should_apply"):
+                        docs_candidates_dict[job["id"]] = (job, eval_res)
+
+                if can_generate_docs:
+                    try:
+                        pending_docs_db = await asyncio.to_thread(
+                            self.db.get_evaluated_jobs_needing_docs,
+                            50,
+                            active_cv_name,
+                            50,
+                        )
+                        for item in pending_docs_db:
+                            j_id = item["id"]
+                            if j_id not in docs_candidates_dict:
+                                eval_dict = {
+                                    "score": item.get("score", 0),
+                                    "fit_level": item.get("fit_level", "BUENO"),
+                                    "should_apply": bool(item.get("should_apply", True)),
+                                    "matched_skills": item.get("matched_skills", []),
+                                    "missing_skills": item.get("missing_skills", []),
+                                    "strengths": item.get("strengths", []),
+                                    "gaps": item.get("gaps", []),
+                                    "reasoning": item.get("reasoning", ""),
+                                }
+                                docs_candidates_dict[j_id] = (item, eval_dict)
+                    except Exception as pend_err:
+                        logger.debug("Error obteniendo vacantes evaluadas pendientes de docs: %s", pend_err)
+
+                # ORDENAR ESTRICTAMENTE POR PUNTUACIÓN DESCENDENTE:
+                # El CV y carta se priorizan y generan antes para las ofertas con mayor puntuación
+                all_docs_queue = list(docs_candidates_dict.values())
+                all_docs_queue.sort(key=lambda x: x[1].get("score", 0), reverse=True)
+
+                if all_docs_queue:
+                    self.db.log_event("INFO", "pipeline", f"Iniciando generación de CVs y cartas para {len(all_docs_queue)} vacantes ordenadas por mayor puntuación...")
+                    print(f"\n[Docs / Prioridad] Generando CV y carta para {len(all_docs_queue)} ofertas priorizando las de mayor puntuación...", flush=True)
+
+                for job, eval_res in all_docs_queue:
                     relevant_matches.append(job)
                     doc_paths = None
                     score = eval_res.get("score", 0)
@@ -312,6 +352,7 @@ class JobPipelineRunner:
                     if can_generate_docs and score >= 50:
                         try:
                             self.db.update_job_status(job["id"], "generating_docs")
+                            print(f"[Docs / Generación] -> Oferta #{job['id']} ('{job.get('title')}', {job.get('company')}) - Score {score}/100: Adaptando CV y carta...", flush=True)
                             cv_md, diff_audit = await asyncio.to_thread(self.cv_tailorer.tailor, job, eval_res)
                             letter_md = await asyncio.to_thread(self.letter_generator.generate, job, eval_res)
 

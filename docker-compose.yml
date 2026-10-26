@@ -60,6 +60,8 @@ services:
       - ./data:/app/data
       # Frontend compilado estático para servicio unificado en http://localhost:8000
       - ./web/out:/app/web/out:ro
+      # Montaje de la suite de pruebas unitarias
+      - ./tests:/app/tests:ro
       # Acceso al socket de Docker para consultar logs y estado desde el backend
       - /var/run/docker.sock:/var/run/docker.sock:ro
     depends_on:

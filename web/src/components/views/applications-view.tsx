@@ -153,19 +153,35 @@ export function ApplicationsView() {
 
   useEffect(() => {
     loadFacets();
+    fetchJobs();
     api.getActiveCV().then((cv) => {
       setHasActiveCv(Boolean(cv && cv.type !== "none" && cv.filename && cv.filename !== "Ninguno" && cv.filename !== "none"));
     }).catch(() => setHasActiveCv(false));
 
-    // Comprobación inicial y monitorización del estado de búsqueda
+    // Comprobación periódica y monitorización del estado de búsqueda con auto-recarga reactiva
     pollSearchStatus();
+    let wasSearching = false;
+    let pollCount = 0;
+
     const interval = setInterval(async () => {
+      pollCount += 1;
       const isRunning = await pollSearchStatus();
       if (isRunning) {
-        // Refrescar silenciosamente conservando exactamente la página activa en tiempo real y los filtros actuales
+        wasSearching = true;
+        // Refrescar en segundo plano para ver las ofertas que se van descubriendo y calificando en tiempo real
+        fetchJobs(true, currentPageRef.current);
+        loadFacets();
+      } else if (wasSearching) {
+        // En cuanto termina la búsqueda o evaluación, forzar refresco completo inmediato
+        wasSearching = false;
+        setSearching(false);
+        fetchJobs(false, currentPageRef.current);
+        loadFacets();
+      } else if (pollCount % 4 === 0) {
+        // Cada ~10s, refrescar discretamente por si llegaron nuevas ofertas o evaluaciones
         fetchJobs(true, currentPageRef.current);
       }
-    }, 3000);
+    }, 2500);
     return () => clearInterval(interval);
   }, []);
 

@@ -38,7 +38,7 @@ class ProfileVerifier:
         stop_lines_pattern = re.compile(
             r"(\bduración\s+del\s+curso\b|\bfecha\s*:|\bfirma\b|\bfdo\s*:|\bconforme\s+ha\s+cursado\b|"
             r"\bcalle\b|\bavenida\b|\b\d{5}\b|\bdni\b|\bnie\b|\bnif\b|"
-            r"\bdomicilio\b|\btel[eé]fono\b|\bemail\b|\bcorreo\b|\bhttp\b|\bwww\b)",
+            r"\bdomicilio\b|\btel[eé]fono\b|\bemail\b|\bcorreo\b|\bhttp\b|\bwww\b|\bhttps?://)",
             re.IGNORECASE,
         )
 
@@ -51,58 +51,58 @@ class ProfileVerifier:
             "genérico", "generico", "lugares", "equipos", "trabajo", "trabajos", "especialidad",
             "madrid", "barcelona", "valencia", "sevilla", "bilbao", "málaga", "zaragoza", "españa", "spain",
             "dni", "nie", "horas", "min", "minutos", "consta", "nivel", "medio", "básico", "alto", "avanzado", "profesional",
-            "candidato", "titular", "año", "años", "experiencia", "conocimientos", "habilidades", "competencias"
+            "candidato", "titular", "año", "años", "experiencia", "conocimientos", "habilidades", "competencias", "nativo"
         }
 
         in_skills_section = False
-        has_explicit_sections = bool(
-            re.search(
-                r"(contenido|módulo|modulo|curso|formación|formacion|habilidad|competencia|conocimiento|skill|herramienta|aptitud|destreza|funciones|tareas)",
-                self.cv_text,
-                re.IGNORECASE,
-            )
+        section_start_pattern = re.compile(
+            r"^(aptitudes|competencias|habilidades|skills|conocimientos|herramientas|tecnolog[íi]as|destrezas|funciones|m[óo]dulos)\b",
+            re.IGNORECASE,
+        )
+        section_end_pattern = re.compile(
+            r"^(educaci[óo]n|experiencia|contacto|sobre\s+m[íi]|perfil|proyectos|trayectoria|idiomas)\b",
+            re.IGNORECASE,
         )
 
         for line in lines:
             clean_line = line.strip()
             if not clean_line or stop_lines_pattern.search(clean_line):
+                continue
+
+            if section_start_pattern.search(clean_line):
+                in_skills_section = True
+                if not (":" in clean_line and clean_line.split(":", 1)[1].strip()):
+                    continue
+
+            if section_end_pattern.search(clean_line) and not (":" in clean_line and in_skills_section):
                 in_skills_section = False
                 continue
 
-            # Detección de encabezado de sección relevante
-            if re.search(r"(contenidos|módulos|competencias|habilidades|skills|conocimientos|herramientas|funciones|formación)\s*:?$", clean_line, re.IGNORECASE):
-                in_skills_section = True
-                continue
-
             is_bullet = clean_line.startswith(("-", "*", "•", "·", "1.", "2.", "3.", "4.", "5."))
-            if has_explicit_sections and not in_skills_section and not is_bullet:
+            has_colon = ":" in clean_line
+
+            if not in_skills_section and not is_bullet and not has_colon:
                 continue
 
-            clean_content = re.sub(r"^[\-\*•·0-9\.\s]+", "", clean_line)
-            chunks = re.split(r"[,;•|·\*\–/\t]|\s{2,}", clean_content)
+            content = clean_line
+            if has_colon:
+                parts = clean_line.split(":", 1)
+                prefix = parts[0].strip().lower()
+                # Si el prefijo parece una categoría técnica o laboral, tomar el contenido tras el colon
+                if in_skills_section or any(kw in prefix for kw in ["desarrollo", "base", "sistema", "herramienta", "lenguaje", "competencia", "software", "maquinaria", "conocimiento", "backend", "frontend", "mobile", "móvil"]):
+                    content = parts[1].strip()
+
+            clean_content = re.sub(r"^[\-\*•·0-9\.\s]+", "", content)
+            chunks = re.split(r"[,;•|·\*\–/\t]|\s+y\s+|\s{2,}", clean_content)
             for chunk in chunks:
-                sub_chunks = re.split(r"(?<=[a-zñáéíóú0-9])\s+(?=[A-ZÁÉÍÓÚ][a-zñáéíóú])", chunk)
-                for sc in sub_chunks:
-                    cand = sc.strip().lower()
-                    cand = re.sub(r"^(nivel|conocimientos en|experiencia en|avanzado|medio|básico|alto|dominio de|especialidad)\s+", "", cand).strip()
-                    cand = re.sub(r"[\(\)\[\]\{\}\"\']", "", cand).strip(" -.,;:•|·/*")
-                    if not cand or len(cand) < 3 or stop_lines_pattern.search(cand):
-                        continue
+                cand = chunk.strip(" -.,;:•|·/*\"'()[]{}").lower()
+                cand = re.sub(r"^(nivel|conocimientos en|experiencia en|avanzado|medio|básico|alto|dominio de|especialidad)\s+", "", cand).strip()
+                if not cand or len(cand) < 2 or stop_lines_pattern.search(cand):
+                    continue
+                if cand not in stop_words and not cand.isdigit() and len(cand) <= 35:
+                    skills.add(cand)
 
-                    if ":" in cand:
-                        parts = [p.strip() for p in cand.split(":") if p.strip()]
-                        for p in parts:
-                            p_clean = re.sub(r"[\(\)\[\]\{\}\"\']", "", p).strip(" -.,;:•|·/*")
-                            if p_clean not in stop_words and len(p_clean) >= 3 and not stop_lines_pattern.search(p_clean):
-                                skills.add(p_clean)
-                    else:
-                        if cand not in stop_words and not stop_lines_pattern.search(cand):
-                            skills.add(cand)
-
-        return {
-            s for s in skills
-            if s not in stop_words and len(s) >= 3 and not s.isdigit()
-        }
+        return skills
 
     def _extract_allowed_institutions(self) -> Set[str]:
         inst = set()

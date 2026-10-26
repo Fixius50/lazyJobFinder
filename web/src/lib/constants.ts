@@ -7,12 +7,9 @@ export const APPLICATION_STATUSES = {
   evaluating: { label: "Evaluando...", badge: "warning" as const },
   generating_docs: { label: "Generando documentos...", badge: "warning" as const },
   evaluated: { label: "Evaluada", badge: "outline" as const },
-  notified: { label: "Notificada", badge: "warning" as const },
-  applied: { label: "Postulada", badge: "default" as const },
   interview: { label: "Entrevista", badge: "success" as const },
   discarded: { label: "Descartada", badge: "destructive" as const },
   rejected: { label: "Rechazada", badge: "destructive" as const },
-  archived: { label: "Archivada", badge: "secondary" as const },
 };
 
 export type ApplicationStatusKey = keyof typeof APPLICATION_STATUSES;

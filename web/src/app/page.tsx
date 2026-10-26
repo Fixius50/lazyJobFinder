@@ -56,7 +56,7 @@ export default function UnifiedDashboard() {
               LJ
             </div>
             <span className="font-bold text-sm tracking-tight text-foreground leading-none">
-              lazyJobFinder
+              LazyJobFinder
             </span>
           </div>
 

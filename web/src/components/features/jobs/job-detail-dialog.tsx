@@ -9,10 +9,9 @@ import {
 } from "lucide-react";
 import { Dialog } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Select } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { JobDetail } from "@/types";
-import { APPLICATION_STATUSES } from "@/lib/constants";
+import { APPLICATION_STATUSES, ApplicationStatusKey } from "@/lib/constants";
 import { api } from "@/lib/api";
 
 interface JobDetailDialogProps {
@@ -20,7 +19,7 @@ interface JobDetailDialogProps {
   onOpenChange: (open: boolean) => void;
   jobDetail: JobDetail | null;
   loading: boolean;
-  onUpdateStatus: (id: number, status: string) => void;
+  onUpdateStatus?: (id: number, status: string) => void;
 }
 
 export function JobDetailDialog({
@@ -30,6 +29,30 @@ export function JobDetailDialog({
   loading,
   onUpdateStatus,
 }: JobDetailDialogProps) {
+  const getStatusBadge = (status: string) => {
+    if (status === "evaluating") {
+      return (
+        <Badge variant="warning" className="animate-pulse flex items-center gap-1 text-2xs">
+          <RefreshCw className="h-3 w-3 animate-spin" />
+          Evaluando...
+        </Badge>
+      );
+    }
+    if (status === "generating_docs") {
+      return (
+        <Badge variant="warning" className="animate-pulse flex items-center gap-1 text-2xs">
+          <RefreshCw className="h-3 w-3 animate-spin" />
+          Generando documentos...
+        </Badge>
+      );
+    }
+    const meta = APPLICATION_STATUSES[status as ApplicationStatusKey];
+    if (meta) {
+      return <Badge variant={meta.badge} className="text-2xs">{meta.label}</Badge>;
+    }
+    return <Badge variant="secondary" className="text-2xs">{status}</Badge>;
+  };
+
   const getScoreBadge = (score?: number | null) => {
     if (jobDetail?.status === "evaluating") {
       return (
@@ -68,17 +91,7 @@ export function JobDetailDialog({
           <div className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-lg bg-muted/40 border">
             <div className="flex items-center gap-2">
               <span className="text-muted-foreground font-medium">Estado:</span>
-              <Select
-                value={jobDetail.status}
-                onChange={(e) => onUpdateStatus(jobDetail.id, e.target.value)}
-                className="h-7 text-xs bg-background"
-              >
-                {Object.entries(APPLICATION_STATUSES).map(([key, meta]) => (
-                  <option key={key} value={key}>
-                    {meta.label}
-                  </option>
-                ))}
-              </Select>
+              {getStatusBadge(jobDetail.status)}
             </div>
 
             <div className="flex items-center gap-2">

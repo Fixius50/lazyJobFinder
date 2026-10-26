@@ -1077,7 +1077,7 @@ class Database:
             query = """
                 SELECT j.* FROM jobs j
                 LEFT JOIN evaluations e ON j.id = e.job_id
-                WHERE e.id IS NULL AND j.status NOT IN ('evaluated', 'discarded', 'notified', 'rejected')
+                WHERE e.id IS NULL AND j.status NOT IN ('evaluated', 'discarded', 'rejected')
                 ORDER BY j.id ASC
                 LIMIT ?
             """

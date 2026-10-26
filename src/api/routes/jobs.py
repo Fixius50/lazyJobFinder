@@ -17,7 +17,7 @@ from ...storage import DOCUMENTS_DIR, PROJECT_ROOT as BASE_DIR, is_safe_path
 
 
 class UpdateJobStatusRequest(BaseModel):
-    status: str  # e.g., "discovered", "evaluated", "notified", "applied", "interview", "rejected", "archived"
+    status: str  # e.g., "discovered", "evaluated", "interview", "discarded", "rejected"
 
 
 class UpdateJobChannelRequest(BaseModel):

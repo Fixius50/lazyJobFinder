@@ -2,12 +2,9 @@
   "application_statuses": {
     "discovered": { "label": "Descubierta", "badge": "secondary" },
     "evaluated": { "label": "Evaluada", "badge": "outline" },
-    "notified": { "label": "Notificada", "badge": "warning" },
-    "applied": { "label": "Postulada", "badge": "default" },
     "interview": { "label": "Entrevista", "badge": "success" },
     "discarded": { "label": "Descartada", "badge": "destructive" },
-    "rejected": { "label": "Rechazada", "badge": "destructive" },
-    "archived": { "label": "Archivada", "badge": "secondary" }
+    "rejected": { "label": "Rechazada", "badge": "destructive" }
   },
   "portal_sources": {
     "tecnoempleo": { "label": "Tecnoempleo", "type": "rss" },

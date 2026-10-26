@@ -7,12 +7,9 @@ APPLICATION_STATUSES: Set[str] = {
     "evaluating",
     "generating_docs",
     "evaluated",
-    "notified",
-    "applied",
     "interview",
     "discarded",
     "rejected",
-    "archived",
 }
 
 SERVICES: Set[str] = {"ollama", "lazyjobfinder"}
@@ -50,9 +47,9 @@ PORTAL_SOURCES: Dict[str, Any] = {
 }
 
 SCORING_THRESHOLDS: Dict[str, int] = {
-    "default_threshold": 65,
+    "default_threshold": 50,
     "high_fit_threshold": 80,
-    "moderate_fit_threshold": 65,
+    "moderate_fit_threshold": 50,
 }
 
 DEFAULT_SETTINGS: Dict[str, Any] = {
@@ -75,7 +72,7 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
         },
     },
     "evaluacion": {
-        "umbral_minimo_puntuacion": 65,
+        "umbral_minimo_puntuacion": 50,
         "generar_documentos": True,
         "idioma_documentos": "es",
         "concurrencia": 1,

@@ -58,20 +58,7 @@ export function StatusGuideDialog({ open, onOpenChange }: StatusGuideDialogProps
                 <span className="text-3xs text-muted-foreground font-mono">evaluated</span>
               </div>
               <p className="text-muted-foreground text-2xs leading-relaxed">
-                El modelo IA local (Ollama) evaluó la oferta contra tu CV, otorgándole una puntuación de afinidad (0 a 100) y pros/contras. Supera el umbral mínimo pero no se notificó por Telegram (ej. si Telegram está desactivado).
-              </p>
-            </div>
-
-            {/* Notificada */}
-            <div className="p-2.5 rounded-lg border bg-amber-500/10 border-amber-500/20 space-y-1">
-              <div className="flex items-center gap-2">
-                <Badge variant="warning" className="text-3xs py-0 px-1.5 font-medium">
-                  Notificada
-                </Badge>
-                <span className="text-3xs text-muted-foreground font-mono">notified</span>
-              </div>
-              <p className="text-muted-foreground text-2xs leading-relaxed">
-                La vacante superó el umbral de afinidad (≥65), se generaron los documentos adaptados (CV y carta en PDF) y se envió la ficha con adjuntos a tu bot de Telegram.
+                El modelo IA local (Ollama) evaluó la vacante contra tu currículum activo, otorgándole una puntuación de afinidad (0 a 100), pros y contras. Supera el umbral mínimo configurado.
               </p>
             </div>
 
@@ -85,38 +72,25 @@ export function StatusGuideDialog({ open, onOpenChange }: StatusGuideDialogProps
               </div>
               <p className="text-muted-foreground text-2xs leading-relaxed">
                 Descartada automáticamente por dos posibles razones:
-                <br />• <strong>Pre-filtro:</strong> Contiene términos de exclusión (ej. Senior, 10 años experiencia...).
+                <br />• <strong>Pre-filtro:</strong> Contiene términos de exclusión (ej. Senior, Lead...).
                 <br />• <strong>Baja afinidad:</strong> El análisis de Ollama determinó que tu perfil no encaja o la puntuación quedó bajo el umbral mínimo (&lt;65).
               </p>
             </div>
           </div>
         </div>
 
-        {/* Sección 2: Estados Manuales de Seguimiento del Candidato */}
+        {/* Sección 2: Estados de Seguimiento del Candidato */}
         <div className="space-y-2.5">
           <div className="flex items-center gap-1.5 font-semibold text-foreground text-sm border-b pb-1.5">
             <UserCheck className="h-4 w-4 text-emerald-400" />
-            <span>Estados Manuales de Seguimiento (Control del Usuario)</span>
+            <span>Estados de Seguimiento del Candidato</span>
           </div>
 
           <p className="text-2xs text-muted-foreground">
-            Puedes cambiar manualmente estos estados desde la tarjeta pulsando en <strong>«Ver Detalles y Documentos»</strong> para llevar el control de tus candidaturas reales:
+            Estados para llevar el control de tus candidaturas reales tras la evaluación de la IA:
           </p>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-            {/* Postulada */}
-            <div className="p-2.5 rounded-lg border bg-muted/30 space-y-1">
-              <div className="flex items-center gap-2">
-                <Badge variant="default" className="text-3xs py-0 px-1.5 font-medium">
-                  Postulada
-                </Badge>
-                <span className="text-3xs text-muted-foreground font-mono">applied</span>
-              </div>
-              <p className="text-muted-foreground text-2xs leading-relaxed">
-                Márcala cuando hayas entrado al portal o enviado tu CV a la empresa para saber que ya estás inscrito.
-              </p>
-            </div>
-
             {/* Entrevista */}
             <div className="p-2.5 rounded-lg border bg-emerald-500/10 border-emerald-500/20 space-y-1">
               <div className="flex items-center gap-2">
@@ -139,20 +113,7 @@ export function StatusGuideDialog({ open, onOpenChange }: StatusGuideDialogProps
                 <span className="text-3xs text-muted-foreground font-mono">rejected</span>
               </div>
               <p className="text-muted-foreground text-2xs leading-relaxed">
-                Márcala si la empresa te comunica que no continúas en el proceso o han decidido cerrar la posición.
-              </p>
-            </div>
-
-            {/* Archivada */}
-            <div className="p-2.5 rounded-lg border bg-muted/30 space-y-1">
-              <div className="flex items-center gap-2">
-                <Badge variant="secondary" className="text-3xs py-0 px-1.5 font-medium">
-                  Archivada
-                </Badge>
-                <span className="text-3xs text-muted-foreground font-mono">archived</span>
-              </div>
-              <p className="text-muted-foreground text-2xs leading-relaxed">
-                Para guardar ofertas antiguas o no prioritarias fuera de la vista principal sin borrarlas de la base de datos.
+                Márcala si la empresa te comunica que no continúas en el proceso de selección o cierran la posición.
               </p>
             </div>
           </div>
@@ -164,16 +125,14 @@ export function StatusGuideDialog({ open, onOpenChange }: StatusGuideDialogProps
             <Sparkles className="h-3.5 w-3.5" />
             <span>Flujo habitual de una oferta:</span>
           </div>
-          <div className="flex flex-wrap items-center gap-1 text-2xs text-muted-foreground">
+          <div className="flex flex-wrap items-center gap-1.5 text-2xs text-muted-foreground">
             <span className="font-medium text-foreground">Portal</span>
             <ArrowRight className="h-3 w-3" />
             <span>Descubierta</span>
             <ArrowRight className="h-3 w-3" />
             <span>Filtros &amp; Ollama</span>
             <ArrowRight className="h-3 w-3" />
-            <span>Evaluada / Notificada</span>
-            <ArrowRight className="h-3 w-3" />
-            <span>Postulada</span>
+            <span>Evaluada / Descartada</span>
             <ArrowRight className="h-3 w-3" />
             <span className="text-emerald-400 font-semibold">Entrevista</span>
           </div>

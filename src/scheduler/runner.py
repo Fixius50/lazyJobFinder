@@ -192,8 +192,8 @@ class JobPipelineRunner:
                     )
                     return
 
-                # 2. Evaluación paralela y delimitada con pre-filtro y Ollama (Fase 1: Scoring puro rápido)
-                min_score = self.settings.get("evaluacion", {}).get("umbral_minimo_puntuacion", 65)
+                # 2. Evaluación paralela y delimitada con Ollama (Fase 1: Scoring puro rápido)
+                min_score = int(self.settings.get("evaluacion", {}).get("umbral_minimo_puntuacion", 50))
                 generate_docs = self.settings.get("evaluacion", {}).get("generar_documentos", True)
                 concurrency = int(self.settings.get("evaluacion", {}).get("concurrencia", 1))
                 semaphore = asyncio.Semaphore(concurrency)
@@ -205,6 +205,10 @@ class JobPipelineRunner:
                         try:
                             self.db.update_job_status(job["id"], "evaluating")
                             eval_res = await asyncio.to_thread(self.scoring_engine.evaluate, job)
+                            if not eval_res or eval_res.get("score") is None:
+                                self.db.update_job_status(job["id"], "discovered")
+                                return None
+
                             score = eval_res.get("score", 0)
 
                             if score >= min_score and eval_res.get("should_apply"):
@@ -233,7 +237,7 @@ class JobPipelineRunner:
                 
                 qualified_candidates.sort(key=lambda x: x[1].get("score", 0), reverse=True)
 
-                # 3. Fase 2: Adaptación documental (CV y Cartas) solo para los mejores candidatos
+                # 3. Fase 2: Adaptación documental (CV y Cartas) solo si score >= 50%
                 from ..tailoring.cv_reader import get_active_cv_status
                 cv_status = get_active_cv_status()
                 can_generate_docs = generate_docs and (cv_status.get("has_cv") or bool(self.profile))
@@ -244,7 +248,7 @@ class JobPipelineRunner:
                     score = eval_res.get("score", 0)
                     telegram_status = 0
 
-                    if can_generate_docs:
+                    if can_generate_docs and score >= 50:
                         try:
                             self.db.update_job_status(job["id"], "generating_docs")
                             cv_md, diff_audit = await asyncio.to_thread(self.cv_tailorer.tailor, job, eval_res)
@@ -288,7 +292,7 @@ class JobPipelineRunner:
                         telegram_notified=telegram_status,
                         ui_saved=ui_saved_val,
                     )
-                    self.db.update_job_status(job["id"], "notified" if telegram_status == 1 else "evaluated")
+                    self.db.update_job_status(job["id"], "evaluated")
                     self.db.log_event("INFO", "pipeline", f"Oferta ID {job['id']} procesada con éxito: {score}/100.")
 
                 elapsed = time.time() - start_time

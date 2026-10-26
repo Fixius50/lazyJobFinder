@@ -349,8 +349,8 @@ export function ApplicationsView() {
 
   return (
     <div className="space-y-4 sm:space-y-6 w-full">
-      {/* Encabezado fluido con Título + CV en una sola línea | Acciones globales */}
-      <div className="flex flex-col 2xl:flex-row 2xl:items-center justify-between gap-3 pb-3 border-b border-border/50">
+      {/* Encabezado fluido con Título + CV | Indicador IA minimalista en el centro | Acciones globales */}
+      <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3 pb-3 border-b border-border/50">
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-1.5 shrink-0">
             <h2 className="text-lg sm:text-xl font-bold tracking-tight">Candidaturas y Ofertas</h2>
@@ -375,6 +375,22 @@ export function ApplicationsView() {
             }}
           />
         </div>
+
+        {/* Indicador minimalista en el hueco superior: entre el CV y las acciones (Actualizar, etc.) */}
+        {searching && (
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-full border border-primary/30 bg-primary/10 text-primary text-xs shadow-xs animate-in fade-in duration-200">
+            <Sparkles className="h-3.5 w-3.5 animate-spin text-primary shrink-0" />
+            <span className="font-medium whitespace-nowrap">
+              Buscando ofertas con IA...
+            </span>
+            <span className="h-3 w-px bg-primary/30 hidden sm:inline-block" />
+            <span className="text-2xs text-muted-foreground whitespace-nowrap hidden sm:inline-block">
+              {jobsData && jobsData.total > 0
+                ? `${jobsData.total} encontradas hasta el momento`
+                : "Rastreando Indeed, LinkedIn y Glassdoor..."}
+            </span>
+          </div>
+        )}
 
         <div className="flex flex-wrap items-center gap-2">
           {/* Botón Buscar Ofertas Ahora (visible solo si hay CV activo y NO se está buscando ofertas) */}
@@ -510,20 +526,6 @@ export function ApplicationsView() {
         <section className={`${hasActiveCv && showCvPanel ? "lg:col-span-8 xl:col-span-9" : "lg:col-span-12"} space-y-4`}>
           {/* Listado de Ofertas en cuadrícula */}
           <div className="space-y-3">
-            {/* Banner de progreso mientras busca o evalúa en segundo plano */}
-            {searching && (
-              <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-lg border border-primary/30 bg-primary/5">
-                <div className="flex items-center gap-2 text-xs font-semibold text-primary">
-                  <Sparkles className="h-4 w-4 animate-spin text-primary" />
-                  <span>Buscando ofertas compatibles en portales de empleo y evaluando con IA...</span>
-                </div>
-                <span className="text-2xs text-muted-foreground animate-pulse">
-                  {jobsData && jobsData.total > 0
-                    ? `${jobsData.total} ofertas encontradas hasta el momento`
-                    : "Rastreando Indeed, LinkedIn y Glassdoor..."}
-                </span>
-              </div>
-            )}
 
             {/* Banner de error explícito de comunicación sin fallbacks engañosos */}
             {apiError && (

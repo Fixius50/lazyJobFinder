@@ -75,19 +75,59 @@ def _get_active_cv_info() -> Dict[str, Any]:
 
 
 def _sync_terms_and_update_settings(filename: str, file_path: Optional[str] = None) -> Dict[str, Any]:
-    """Analiza el CV, extrae términos de búsqueda universales y los sincroniza en active_cv.json y settings.yaml."""
-    from ...tailoring.cv_reader import extract_cv_text, extract_search_terms_from_cv
-    from ...storage import write_active_cv_pointer, SETTINGS_FILE
-    import yaml
+    """Analiza el CV, extrae términos de búsqueda universales y los sincroniza en SQLite con caché instantánea (O(1))."""
+    from ...tailoring.cv_reader import extract_cv_text, _extract_terms_universally_from_text, extract_search_terms_from_cv
+    from ...storage import write_active_cv_pointer
 
     if filename in ("none", "Ninguno", "", "default") or not file_path or not os.path.exists(file_path):
         write_active_cv_pointer("none", search_terms=[], primary_role="")
         return {"search_terms": [], "primary_role": ""}
 
-    text = extract_cv_text(file_path)
-    profile_info = extract_search_terms_from_cv(text, filename=filename)
-    terms = profile_info.get("search_terms", [])
-    primary_role = profile_info.get("primary_role", "")
+    db = get_db()
+    mtime = os.path.getmtime(file_path)
+    size = os.path.getsize(file_path)
+
+    # 1. Caché persistente SQLite: Si ya fue extraído previamente, responder en < 2 ms sin invocar IA
+    cached = db.get_cv_cache(filename, file_mtime=mtime, file_size=size)
+    if cached and cached.get("profile"):
+        prof = cached["profile"]
+        terms = prof.get("search_terms", [])
+        primary_role = prof.get("primary_role", "")
+        if terms:
+            write_active_cv_pointer(filename, search_terms=terms, primary_role=primary_role)
+            return prof
+
+    # 2. Extracción de texto con caché en memoria / SQLite (0 ms si no cambió el archivo)
+    text = extract_cv_text(file_path, db=db)
+
+    # 3. Extracción universal ultrarrápida NLP/ocupaciones (2 ms, sin bloquear con IA en CPU)
+    terms_info = _extract_terms_universally_from_text(text, filename=filename)
+    terms = terms_info.get("search_terms", [])
+    primary_role = terms_info.get("primary_role", "")
+
+    # Solo si el extractor universal no detectó términos, intentar con extract_search_terms_from_cv
+    if not terms:
+        profile_info = extract_search_terms_from_cv(text, filename=filename)
+        terms = profile_info.get("search_terms", [])
+        primary_role = profile_info.get("primary_role", "")
+
+    # 4. Guardar en cv_cache de SQLite para garantizar O(1) en cualquier selección posterior
+    try:
+        import hashlib
+        file_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        existing_profile = (cached.get("profile") if cached else None) or {}
+        existing_profile["search_terms"] = terms
+        existing_profile["primary_role"] = primary_role
+        db.save_cv_cache(
+            filename=filename,
+            file_hash=file_hash,
+            file_mtime=mtime,
+            file_size=size,
+            extracted_text=text,
+            profile_data=existing_profile,
+        )
+    except Exception as save_err:
+        logger.debug("Error persistiendo search_terms en cv_cache: %s", save_err)
 
     write_active_cv_pointer(
         filename,
@@ -96,7 +136,7 @@ def _sync_terms_and_update_settings(filename: str, file_path: Optional[str] = No
     )
     print(f"[CV Auto-Config] Sincronizados términos para '{filename}': {terms}", flush=True)
 
-    return profile_info
+    return {"search_terms": terms, "primary_role": primary_role}
 
 
 @router.get("/active")
@@ -239,9 +279,6 @@ async def upload_cv_file(file: UploadFile = File(...)) -> Dict[str, Any]:
     db = get_db()
     db.log_event("INFO", "cv", f"Archivo CV subido y activado: {safe_filename} ({total_bytes} bytes)")
 
-    # Reevaluar ofertas existentes adaptándolas al nuevo CV
-    re_evaluated = _reevaluate_jobs_with_active_cv(db)
-
     # Disparar automáticamente la búsqueda de empleo en los portales con los nuevos términos
     try:
         from ..deps import get_runner
@@ -259,7 +296,7 @@ async def upload_cv_file(file: UploadFile = File(...)) -> Dict[str, Any]:
         "original_name": filename,
         "size_bytes": total_bytes,
         "type": ext.lstrip(".").upper(),
-        "re_evaluated_jobs": re_evaluated,
+        "re_evaluated_jobs": 0,
         "active_info": _get_active_cv_info(),
         "message": f"CV '{safe_filename}' subido y activado. Búsqueda en portales iniciada.",
     }
@@ -325,16 +362,13 @@ def select_active_cv(req: SelectCVRequest) -> Dict[str, Any]:
     db = get_db()
     db.log_event("INFO", "cv", f"CV activo actualizado a: {choice}")
 
-    # Reevaluar ofertas adaptándolas al nuevo CV seleccionado
-    re_evaluated = _reevaluate_jobs_with_active_cv(db)
-
-    # Disparar automáticamente la búsqueda de empleo en los portales si no está ya en ejecución
+    # Retorno instantáneo: el cambio de CV filtra localmente las ofertas ya almacenadas (Regla 12)
     return {
         "success": True,
         "selected": choice,
         "active_info": _get_active_cv_info(),
-        "re_evaluated_jobs": re_evaluated,
-        "message": f"CV activo actualizado a '{choice}'. {re_evaluated} ofertas adaptadas.",
+        "re_evaluated_jobs": 0,
+        "message": f"CV activo actualizado a '{choice}'.",
     }
 
 

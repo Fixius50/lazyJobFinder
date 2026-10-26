@@ -159,6 +159,8 @@ export interface ActiveCVInfo {
   modified_at: string;
   is_default: boolean;
   description: string;
+  search_terms?: string[];
+  primary_role?: string;
 }
 
 // =============================================================================

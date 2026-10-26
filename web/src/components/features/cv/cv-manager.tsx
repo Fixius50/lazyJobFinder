@@ -26,6 +26,7 @@ export function CvManager({ onCvChanged, className = "" }: CvManagerProps) {
   const [activeCV, setActiveCV] = useState<ActiveCVInfo | null>(null);
   const [cvList, setCvList] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isSelecting, setIsSelecting] = useState<boolean>(false);
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [uploadProgress, setUploadProgress] = useState<number>(0);
   const [uploadStage, setUploadStage] = useState<string>("");
@@ -114,6 +115,37 @@ export function CvManager({ onCvChanged, className = "" }: CvManagerProps) {
   };
 
   const handleSelectCV = async (filename: string) => {
+    setIsSelecting(true);
+    // Actualización optimista inmediata en la UI (0 ms de respuesta visual)
+    if (filename === "none") {
+      setActiveCV({
+        type: "none",
+        filename: "Ninguno",
+        path: "",
+        size_bytes: 0,
+        modified_at: "n/a",
+        is_default: false,
+        description: "Sin CV activo.",
+        search_terms: [],
+        primary_role: "",
+      });
+    } else {
+      const found = cvList.find((c) => c.filename === filename);
+      if (found) {
+        setActiveCV((prev) => ({
+          type: "custom",
+          filename: found.filename,
+          path: `data/uploaded_cvs/${found.filename}`,
+          size_bytes: found.size_bytes,
+          modified_at: found.modified_at,
+          is_default: false,
+          description: "CV personalizado cargado localmente.",
+          search_terms: prev?.filename === found.filename ? prev?.search_terms : [],
+          primary_role: prev?.filename === found.filename ? prev?.primary_role : "",
+        }));
+      }
+    }
+
     try {
       const res = await api.selectActiveCV(filename);
       const countMsg = res.re_evaluated_jobs !== undefined ? ` • ${res.re_evaluated_jobs} ofertas adaptadas` : "";
@@ -125,6 +157,9 @@ export function CvManager({ onCvChanged, className = "" }: CvManagerProps) {
     } catch (err: any) {
       console.error("[CvManager] Error seleccionando CV:", err);
       alert(`Error seleccionando CV: ${err.message}`);
+      await loadData(true);
+    } finally {
+      setIsSelecting(false);
     }
   };
 
@@ -192,7 +227,8 @@ export function CvManager({ onCvChanged, className = "" }: CvManagerProps) {
           <Select
             value={activeCV?.type === "none" || !activeCV ? "none" : activeCV?.filename}
             onChange={(e) => handleSelectCV(e.target.value)}
-            className="text-xs w-full h-8 bg-background/90 font-medium truncate"
+            disabled={isUploading || isSelecting}
+            className={`text-xs w-full h-8 bg-background/90 font-medium truncate ${isSelecting ? "opacity-60 cursor-wait" : ""}`}
           >
             <option value="none">Sin CV (Sin filtrado)</option>
             {customCvs.map((c) => (

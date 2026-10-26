@@ -172,6 +172,10 @@ def extract_cv_text(file_path: str, force_refresh: bool = False, db: Optional[An
     profile_data = None
     try:
         profile_data = _extract_profile_from_raw_text(normalized, filename)
+        terms_data = _extract_terms_universally_from_text(normalized, filename)
+        if terms_data.get("search_terms"):
+            profile_data["search_terms"] = terms_data["search_terms"]
+            profile_data["primary_role"] = terms_data.get("primary_role", "")
     except Exception as prof_err:
         logger.debug("Error pre-extrayendo perfil estructurado: %s", prof_err)
 

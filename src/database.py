@@ -21,7 +21,7 @@ except ImportError:
 
 logger = logging.getLogger("lazyJobFinder.database")
 
-from .storage import DB_PATH as DEFAULT_DB_PATH, CONSTANTS_FILE
+from .storage import DB_PATH as DEFAULT_DB_PATH
 
 
 def _load_shared_constants() -> Dict[str, Any]:
@@ -1044,21 +1044,41 @@ class Database:
                 time.sleep(0.1 * (attempt + 1))
         return default_stats
 
-    def get_top_recent_jobs(self, limit: int = 10, min_score: int = 65) -> List[Dict[str, Any]]:
-        """Devuelve las mejores ofertas recientes que superan el umbral."""
+    def reset_evaluating_jobs(self) -> int:
+        """Reinicia a 'discovered' cualquier vacante que hubiera quedado bloqueada en 'evaluating'."""
         with self._get_connection() as conn:
-            query = """
-                SELECT j.id, j.title, j.company, j.location, j.canonical_url, j.source, j.created_at,
-                       e.score, e.fit_level, e.reasoning, e.matched_skills, e.missing_skills,
-                       d.cv_pdf_path, d.letter_pdf_path
-                FROM jobs j
-                INNER JOIN evaluations e ON j.id = e.job_id
-                LEFT JOIN generated_documents d ON j.id = d.job_id
-                WHERE e.score >= ?
-                ORDER BY e.score DESC, j.created_at DESC
-                LIMIT ?
-            """
-            cursor = conn.execute(query, (min_score, limit))
+            cursor = conn.execute("UPDATE jobs SET status = 'discovered' WHERE status = 'evaluating'")
+            return cursor.rowcount
+
+    def get_top_recent_jobs(self, limit: int = 10, min_score: int = 65, cv_filename: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Devuelve las mejores ofertas recientes que superan el umbral, opcionalmente filtradas por CV activo."""
+        with self._get_connection() as conn:
+            if cv_filename and cv_filename not in ("none", "Ninguno", ""):
+                query = """
+                    SELECT j.id, j.title, j.company, j.location, j.canonical_url, j.source, j.created_at,
+                           e.score, e.fit_level, e.reasoning, e.matched_skills, e.missing_skills,
+                           d.cv_pdf_path, d.letter_pdf_path
+                    FROM jobs j
+                    INNER JOIN evaluations e ON j.id = e.job_id
+                    LEFT JOIN generated_documents d ON j.id = d.job_id
+                    WHERE e.score >= ? AND j.cv_filename = ?
+                    ORDER BY e.score DESC, j.created_at DESC
+                    LIMIT ?
+                """
+                cursor = conn.execute(query, (min_score, cv_filename, limit))
+            else:
+                query = """
+                    SELECT j.id, j.title, j.company, j.location, j.canonical_url, j.source, j.created_at,
+                           e.score, e.fit_level, e.reasoning, e.matched_skills, e.missing_skills,
+                           d.cv_pdf_path, d.letter_pdf_path
+                    FROM jobs j
+                    INNER JOIN evaluations e ON j.id = e.job_id
+                    LEFT JOIN generated_documents d ON j.id = d.job_id
+                    WHERE e.score >= ?
+                    ORDER BY e.score DESC, j.created_at DESC
+                    LIMIT ?
+                """
+                cursor = conn.execute(query, (min_score, limit))
             results = []
             for row in cursor.fetchall():
                 item = dict(row)
@@ -1071,17 +1091,30 @@ class Database:
                 results.append(item)
             return results
 
-    def get_unevaluated_jobs(self, limit: int = 500) -> List[Dict[str, Any]]:
-        """Recupera ofertas descubiertas pendientes de evaluación o sin registro de evaluación en orden cronológico (FIFO)."""
+    def get_unevaluated_jobs(self, limit: int = 500, cv_filename: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Recupera ofertas descubiertas pendientes de evaluación o sin registro de evaluación en orden cronológico (FIFO),
+        filtrando por cv_filename si se especifica."""
         with self._get_connection() as conn:
-            query = """
-                SELECT j.* FROM jobs j
-                LEFT JOIN evaluations e ON j.id = e.job_id
-                WHERE e.id IS NULL AND j.status NOT IN ('evaluated', 'discarded', 'rejected')
-                ORDER BY j.id ASC
-                LIMIT ?
-            """
-            cursor = conn.execute(query, (limit,))
+            if cv_filename and cv_filename not in ("none", "Ninguno", ""):
+                query = """
+                    SELECT j.* FROM jobs j
+                    LEFT JOIN evaluations e ON j.id = e.job_id
+                    WHERE e.id IS NULL 
+                      AND j.status NOT IN ('evaluated', 'discarded', 'rejected')
+                      AND (j.cv_filename = ? OR j.cv_filename IS NULL OR j.cv_filename = '')
+                    ORDER BY j.id ASC
+                    LIMIT ?
+                """
+                cursor = conn.execute(query, (cv_filename, limit))
+            else:
+                query = """
+                    SELECT j.* FROM jobs j
+                    LEFT JOIN evaluations e ON j.id = e.job_id
+                    WHERE e.id IS NULL AND j.status NOT IN ('evaluated', 'discarded', 'rejected')
+                    ORDER BY j.id ASC
+                    LIMIT ?
+                """
+                cursor = conn.execute(query, (limit,))
             return [dict(row) for row in cursor.fetchall()]
 
     def get_all_jobs_for_scoring(self, limit: int = 200, cv_filename: Optional[str] = None) -> List[Dict[str, Any]]:

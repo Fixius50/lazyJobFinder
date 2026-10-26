@@ -26,7 +26,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { APPLICATION_STATUSES } from "@/lib/constants";
-import type { FilterFacetsResponse, FacetItem } from "@/lib/api";
+import type { FilterFacetsResponse, FacetItem, FilterState } from "@/lib/api";
 
 export const EXPERIENCE_STEPS = [
   { step: 0, years: 0, label: "Sin especificar" },
@@ -81,38 +81,8 @@ export const DEFAULT_CONTRACTS: FacetItem[] = [
 
 export interface JobFiltersProps {
   facets?: FilterFacetsResponse | null;
-  searchTerm: string;
-  onSearchTermChange: (term: string) => void;
-  exclusionTerm?: string;
-  onExclusionTermChange?: (term: string) => void;
-
-  locationName: string;
-  onLocationChange: (location: string) => void;
-  isAllLocations: boolean;
-  onToggleAllLocations: (all: boolean) => void;
-
-  selectedModalities: string[];
-  onModalitiesChange: (modalities: string[]) => void;
-  selectedCategories: string[];
-  onCategoriesChange: (categories: string[]) => void;
-  selectedEducations: string[];
-  onEducationsChange: (educations: string[]) => void;
-  minExperienceStep: number;
-  onMinExperienceStepChange: (step: number) => void;
-  minSalaryStep: number;
-  onMinSalaryStepChange: (step: number) => void;
-  selectedSchedules: string[];
-  onSchedulesChange: (schedules: string[]) => void;
-  selectedContractTypes: string[];
-  onContractTypesChange: (contractTypes: string[]) => void;
-  selectedSource: string;
-  onSourceChange: (source: string) => void;
-  selectedStatus: string;
-  onStatusChange: (status: string) => void;
-  minScore: number;
-  onMinScoreChange: (score: number) => void;
-  timeRange?: string;
-  onTimeRangeChange?: (range: string) => void;
+  filters: FilterState;
+  onFilterChange: <K extends keyof FilterState>(key: K, value: FilterState[K]) => void;
   onSubmitSearch: (e: React.FormEvent) => void;
   onResetFilters?: () => void;
   onSaveCriteria?: () => void;
@@ -213,40 +183,30 @@ function FacetSection({
 
 export function JobFilters({
   facets,
-  searchTerm,
-  onSearchTermChange,
-  exclusionTerm = "",
-  onExclusionTermChange,
-  locationName,
-  onLocationChange,
-  isAllLocations,
-  onToggleAllLocations,
-  selectedModalities,
-  onModalitiesChange,
-  selectedCategories,
-  onCategoriesChange,
-  selectedEducations,
-  onEducationsChange,
-  minExperienceStep,
-  onMinExperienceStepChange,
-  minSalaryStep,
-  onMinSalaryStepChange,
-  selectedSchedules,
-  onSchedulesChange,
-  selectedContractTypes,
-  onContractTypesChange,
-  selectedSource,
-  onSourceChange,
-  selectedStatus,
-  onStatusChange,
-  minScore,
-  onMinScoreChange,
-  timeRange = "all",
-  onTimeRangeChange,
+  filters,
+  onFilterChange,
   onSubmitSearch,
   onResetFilters,
   onSaveCriteria,
 }: JobFiltersProps) {
+  const {
+    searchTerm,
+    exclusionTerm,
+    locationName,
+    isAllLocations,
+    selectedModalities,
+    selectedCategories,
+    selectedEducations,
+    minExperienceStep,
+    minSalaryStep,
+    selectedSchedules,
+    selectedContractTypes,
+    selectedSource,
+    selectedStatus,
+    minScore,
+    timeRange = "all",
+  } = filters;
+
   const [filterSearchQuery, setFilterSearchQuery] = useState<string>("");
   const [isLocating, setIsLocating] = useState<boolean>(false);
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
@@ -262,11 +222,15 @@ export function JobFilters({
     setOpenSections((prev) => ({ ...prev, [section]: !prev[section] }));
   };
 
-  const toggleArrayItem = (list: string[], item: string, setter: (val: string[]) => void) => {
+  const toggleArrayItem = <K extends "selectedModalities" | "selectedCategories" | "selectedEducations" | "selectedSchedules" | "selectedContractTypes">(
+    key: K,
+    item: string
+  ) => {
+    const list = filters[key];
     if (list.includes(item)) {
-      setter(list.filter((x) => x !== item));
+      onFilterChange(key, list.filter((x) => x !== item) as FilterState[K]);
     } else {
-      setter([...list, item]);
+      onFilterChange(key, [...list, item] as FilterState[K]);
     }
   };
 
@@ -291,15 +255,15 @@ export function JobFilters({
             const data = await res.json();
             const addr = data.address || {};
             const city = addr.city || addr.town || addr.village || addr.state || "Mi ciudad";
-            onLocationChange(city);
-            onToggleAllLocations(false);
+            onFilterChange("locationName", city);
+            onFilterChange("isAllLocations", false);
           } else {
-            onLocationChange("Mi ubicación");
-            onToggleAllLocations(false);
+            onFilterChange("locationName", "Mi ubicación");
+            onFilterChange("isAllLocations", false);
           }
         } catch {
-          onLocationChange("Mi ubicación");
-          onToggleAllLocations(false);
+          onFilterChange("locationName", "Mi ubicación");
+          onFilterChange("isAllLocations", false);
         } finally {
           setIsLocating(false);
         }
@@ -430,7 +394,7 @@ export function JobFilters({
                 type="text"
                 placeholder="Puesto o habilidades (ej: Mozo de almacén, Logística...)"
                 value={searchTerm}
-                onChange={(e) => onSearchTermChange(e.target.value)}
+                onChange={(e) => onFilterChange("searchTerm", e.target.value)}
                 className="pl-8 text-xs h-7.5 w-full bg-background"
               />
             </div>
@@ -448,8 +412,8 @@ export function JobFilters({
                 <button
                   type="button"
                   onClick={() => {
-                    onToggleAllLocations(true);
-                    onLocationChange("");
+                    onFilterChange("isAllLocations", true);
+                    onFilterChange("locationName", "");
                   }}
                   className={`text-3xs px-1.5 py-0.5 rounded border transition-colors flex items-center gap-1 ${
                     isAllLocations
@@ -481,8 +445,8 @@ export function JobFilters({
                 placeholder="Ciudad, provincia o país..."
                 value={isAllLocations ? "" : locationName}
                 onChange={(e) => {
-                  onLocationChange(e.target.value);
-                  onToggleAllLocations(false);
+                  onFilterChange("locationName", e.target.value);
+                  onFilterChange("isAllLocations", false);
                 }}
                 className="pl-8 text-xs h-7.5 w-full bg-background"
               />
@@ -499,11 +463,11 @@ export function JobFilters({
                       type="button"
                       onClick={() => {
                         if (isSelected) {
-                          onToggleAllLocations(true);
-                          onLocationChange("");
+                          onFilterChange("isAllLocations", true);
+                          onFilterChange("locationName", "");
                         } else {
-                          onLocationChange(loc.name);
-                          onToggleAllLocations(false);
+                          onFilterChange("locationName", loc.name);
+                          onFilterChange("isAllLocations", false);
                         }
                       }}
                       className={`text-3xs px-2 py-0.5 rounded-full border transition-all flex items-center gap-1 ${
@@ -556,7 +520,7 @@ export function JobFilters({
                   <button
                     key={opt.id}
                     type="button"
-                    onClick={() => onTimeRangeChange && onTimeRangeChange(opt.id)}
+                    onClick={() => onFilterChange("timeRange", opt.id)}
                     className={`text-2xs py-1 px-1.5 rounded-md border text-center transition-all font-medium ${
                       isSelected
                         ? "bg-primary text-primary-foreground border-primary shadow-xs"
@@ -593,7 +557,7 @@ export function JobFilters({
               max={EXPERIENCE_STEPS.length - 1}
               step="1"
               value={minExperienceStep}
-              onChange={(e) => onMinExperienceStepChange(parseInt(e.target.value, 10))}
+              onChange={(e) => onFilterChange("minExperienceStep", parseInt(e.target.value, 10))}
               className="w-full h-1.5 rounded-lg cursor-pointer accent-primary bg-muted hover:bg-muted/80 transition-all focus:outline-none"
             />
           </div>
@@ -621,7 +585,7 @@ export function JobFilters({
               max={SALARY_STEPS.length - 1}
               step="1"
               value={minSalaryStep}
-              onChange={(e) => onMinSalaryStepChange(parseInt(e.target.value, 10))}
+              onChange={(e) => onFilterChange("minSalaryStep", parseInt(e.target.value, 10))}
               className="w-full h-1.5 rounded-lg cursor-pointer accent-emerald-500 bg-muted hover:bg-muted/80 transition-all focus:outline-none"
             />
           </div>
@@ -632,8 +596,8 @@ export function JobFilters({
             icon={<Building2 className="h-3.5 w-3.5 text-primary" />}
             items={filteredModalities}
             selected={selectedModalities}
-            onToggleItem={(id) => toggleArrayItem(selectedModalities, id, onModalitiesChange)}
-            onClear={() => onModalitiesChange([])}
+            onToggleItem={(id) => toggleArrayItem("selectedModalities", id)}
+            onClear={() => onFilterChange("selectedModalities", [])}
             isOpen={openSections.modalidad}
             onToggleOpen={() => toggleSection("modalidad")}
           />
@@ -643,8 +607,8 @@ export function JobFilters({
             icon={<Briefcase className="h-3.5 w-3.5 text-primary" />}
             items={filteredCategories}
             selected={selectedCategories}
-            onToggleItem={(id) => toggleArrayItem(selectedCategories, id, onCategoriesChange)}
-            onClear={() => onCategoriesChange([])}
+            onToggleItem={(id) => toggleArrayItem("selectedCategories", id)}
+            onClear={() => onFilterChange("selectedCategories", [])}
             isOpen={openSections.categoria}
             onToggleOpen={() => toggleSection("categoria")}
           />
@@ -654,8 +618,8 @@ export function JobFilters({
             icon={<GraduationCap className="h-3.5 w-3.5 text-primary" />}
             items={filteredEducations}
             selected={selectedEducations}
-            onToggleItem={(id) => toggleArrayItem(selectedEducations, id, onEducationsChange)}
-            onClear={() => onEducationsChange([])}
+            onToggleItem={(id) => toggleArrayItem("selectedEducations", id)}
+            onClear={() => onFilterChange("selectedEducations", [])}
             isOpen={openSections.formacion}
             onToggleOpen={() => toggleSection("formacion")}
           />
@@ -665,8 +629,8 @@ export function JobFilters({
             icon={<Clock className="h-3.5 w-3.5 text-primary" />}
             items={filteredSchedules}
             selected={selectedSchedules}
-            onToggleItem={(id) => toggleArrayItem(selectedSchedules, id, onSchedulesChange)}
-            onClear={() => onSchedulesChange([])}
+            onToggleItem={(id) => toggleArrayItem("selectedSchedules", id)}
+            onClear={() => onFilterChange("selectedSchedules", [])}
             isOpen={openSections.jornada}
             onToggleOpen={() => toggleSection("jornada")}
           />
@@ -676,8 +640,8 @@ export function JobFilters({
             icon={<FileText className="h-3.5 w-3.5 text-primary" />}
             items={filteredContracts}
             selected={selectedContractTypes}
-            onToggleItem={(id) => toggleArrayItem(selectedContractTypes, id, onContractTypesChange)}
-            onClear={() => onContractTypesChange([])}
+            onToggleItem={(id) => toggleArrayItem("selectedContractTypes", id)}
+            onClear={() => onFilterChange("selectedContractTypes", [])}
             isOpen={openSections.contrato}
             onToggleOpen={() => toggleSection("contrato")}
           />
@@ -709,7 +673,7 @@ export function JobFilters({
                   <label className="text-2xs font-medium text-muted-foreground">Portal de origen:</label>
                   <Select
                     value={selectedSource}
-                    onChange={(e) => onSourceChange(e.target.value)}
+                    onChange={(e) => onFilterChange("selectedSource", e.target.value)}
                     className="text-xs h-7.5 w-full bg-background"
                   >
                     <option value="">Todos los portales</option>
@@ -726,7 +690,7 @@ export function JobFilters({
                   <label className="text-2xs font-medium text-muted-foreground">Estado:</label>
                   <Select
                     value={selectedStatus}
-                    onChange={(e) => onStatusChange(e.target.value)}
+                    onChange={(e) => onFilterChange("selectedStatus", e.target.value)}
                     className="text-xs h-7.5 w-full bg-background"
                   >
                     <option value="">Todos los estados</option>
@@ -750,27 +714,25 @@ export function JobFilters({
                     max="90"
                     step="5"
                     value={minScore}
-                    onChange={(e) => onMinScoreChange(parseInt(e.target.value, 10))}
+                    onChange={(e) => onFilterChange("minScore", parseInt(e.target.value, 10))}
                     className="w-full h-1.5 rounded-lg cursor-pointer accent-primary bg-muted"
                   />
                 </div>
 
                 {/* Palabras a excluir */}
-                {onExclusionTermChange && (
-                  <div className="space-y-1">
-                    <label className="text-2xs font-medium text-muted-foreground flex items-center gap-1">
-                      <Ban className="h-3 w-3 text-destructive" />
-                      <span>Excluir términos:</span>
-                    </label>
-                    <Input
-                      type="text"
-                      placeholder="ej: senior, php, wordpress..."
-                      value={exclusionTerm}
-                      onChange={(e) => onExclusionTermChange(e.target.value)}
-                      className="text-xs h-7 w-full bg-background border-destructive/20 focus:border-destructive"
-                    />
-                  </div>
-                )}
+                <div className="space-y-1">
+                  <label className="text-2xs font-medium text-muted-foreground flex items-center gap-1">
+                    <Ban className="h-3 w-3 text-destructive" />
+                    <span>Excluir términos:</span>
+                  </label>
+                  <Input
+                    type="text"
+                    placeholder="ej: senior, php, wordpress..."
+                    value={exclusionTerm}
+                    onChange={(e) => onFilterChange("exclusionTerm", e.target.value)}
+                    className="text-xs h-7 w-full bg-background border-destructive/20 focus:border-destructive"
+                  />
+                </div>
 
                 {/* Guardar criterios en conectores */}
                 {onSaveCriteria && (

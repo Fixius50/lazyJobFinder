@@ -38,16 +38,8 @@ WEB_OUT_DIR = os.getenv("WEB_OUT_DIR", os.path.join(PROJECT_ROOT, "web", "out"))
 DOCUMENTS_DIR = os.getenv("DOCUMENTS_DIR", os.path.join(DATA_DIR, "documents"))
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", os.path.join(DATA_DIR, "uploaded_cvs"))
 
-# Archivos de datos persistentes
+# Base de datos unificada SQLite
 DB_PATH = os.getenv("DATABASE_PATH", os.path.join(DATA_DIR, "lazyjobfinder.db"))
-SECRETS_FILE = os.getenv("SECRETS_FILE", os.path.join(DATA_DIR, "secrets.json"))
-ACTIVE_CV_FILE = os.getenv("ACTIVE_CV_FILE", os.path.join(DATA_DIR, "active_cv.json"))
-
-# Archivos de configuración y compatibilidad
-SETTINGS_FILE = os.path.join(DATA_DIR, "settings.yaml")
-PROFILE_FILE = os.path.join(DATA_DIR, "profile.yaml")
-BASE_CV_FILE = os.path.join(DATA_DIR, "cv_base.md")
-CONSTANTS_FILE = os.path.join(DATA_DIR, "shared_constants.json")
 
 
 # =============================================================================

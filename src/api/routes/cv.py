@@ -17,8 +17,6 @@ logger = logging.getLogger("lazyJobFinder.api.cv")
 router = APIRouter(prefix="/cv", tags=["CV y Perfil"])
 
 from ...storage import (
-    ACTIVE_CV_FILE as ACTIVE_CV_CONFIG_FILE,
-    BASE_CV_FILE as BASE_CV_PATH,
     PROJECT_ROOT as BASE_DIR,
     UPLOAD_DIR,
     ensure_storage_dirs,

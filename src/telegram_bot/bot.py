@@ -218,7 +218,10 @@ class TelegramJobBot:
             return
 
         umbral = self.settings.get("evaluacion", {}).get("umbral_minimo_puntuacion", 65)
-        top_jobs = self.db.get_top_recent_jobs(limit=5, min_score=umbral)
+        from ..tailoring.cv_reader import get_active_cv_status
+        cv_status = get_active_cv_status()
+        cv_name = cv_status.get("filename") if cv_status.get("has_cv") else None
+        top_jobs = self.db.get_top_recent_jobs(limit=5, min_score=umbral, cv_filename=cv_name)
 
         if not top_jobs:
             await update.message.reply_text(

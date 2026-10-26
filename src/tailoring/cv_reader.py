@@ -15,8 +15,6 @@ from typing import Any, Dict, Optional, Tuple
 logger = logging.getLogger("lazyJobFinder.tailoring.cv_reader")
 
 from ..storage import (
-    ACTIVE_CV_FILE as ACTIVE_CV_CONFIG_FILE,
-    BASE_CV_FILE as BASE_CV_PATH,
     PROJECT_ROOT as BASE_DIR,
     UPLOAD_DIR,
     read_active_cv_pointer,
@@ -701,21 +699,18 @@ def get_active_profile(profile_path: Optional[str] = None) -> Dict[str, Any]:
     Garantiza que el generador de CVs y cartas trabaje siempre con los datos
     reales del candidato que subió el documento y sin valores forzados en duro.
     """
-    import yaml
-    from ..storage import PROFILE_FILE
-
-    profile_file = profile_path or PROFILE_FILE
     profile_data: Dict[str, Any] = {}
-    if os.path.exists(profile_file):
+    if profile_path and os.path.exists(profile_path):
         try:
-            with open(profile_file, "r", encoding="utf-8") as f:
+            import yaml
+            with open(profile_path, "r", encoding="utf-8") as f:
                 loaded = yaml.safe_load(f)
                 if isinstance(loaded, dict):
                     profile_data = loaded
         except Exception as e:
-            logger.debug("Error leyendo profile.yaml: %s", e)
+            logger.debug("Error leyendo profile_path (%s): %s", profile_path, e)
 
-    # Si profile.yaml ya contenía un candidato con nombre, respetarlo
+    # Si profile_path contenía un candidato con nombre, respetarlo
     if profile_data.get("candidato", {}).get("nombre_completo"):
         return profile_data
 

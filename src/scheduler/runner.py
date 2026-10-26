@@ -129,17 +129,15 @@ class JobPipelineRunner:
             save_ui_pref = self.settings.get("notificaciones", {}).get("guardar_en_interfaz", True)
 
             try:
-                # Recargar configuración fresca desde disco para respetar cambios recientes o del CV activo
-                import yaml
-                from ..storage import SETTINGS_FILE
-                if os.path.exists(SETTINGS_FILE):
-                    try:
-                        with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
-                            fresh = yaml.safe_load(f) or {}
-                            self.settings = fresh
-                            self.connectors_mgr.settings = fresh
-                    except Exception as s_err:
-                        logger.debug("Error recargando settings en runner: %s", s_err)
+                # Recargar configuración fresca desde SQLite para respetar cambios recientes
+                from ..storage import get_persisted_settings
+                try:
+                    fresh = get_persisted_settings()
+                    if fresh:
+                        self.settings = fresh
+                        self.connectors_mgr.settings = fresh
+                except Exception as s_err:
+                    logger.debug("Error recargando settings en runner: %s", s_err)
 
                 try:
                     from ..tailoring.cv_reader import get_active_profile
@@ -164,10 +162,10 @@ class JobPipelineRunner:
 
                 # Recuperar ofertas pendientes de evaluación previas (en orden cronológico)
                 # y garantizar que cualquier vacante que hubiera quedado en 'evaluating' se reinicie a 'discovered'
-                with self.db._get_connection() as conn:
-                    conn.execute("UPDATE jobs SET status = 'discovered' WHERE status = 'evaluating'")
+                self.db.reset_evaluating_jobs()
 
-                pending_jobs = await asyncio.to_thread(self.db.get_unevaluated_jobs, 500)
+                active_cv_name = cv_status.get("filename") if cv_status.get("has_cv") else None
+                pending_jobs = await asyncio.to_thread(self.db.get_unevaluated_jobs, 500, active_cv_name)
                 job_dict = {}
                 # Priorizar vacantes pendientes de evaluación en orden cronológico (las que llevan más tiempo esperando)
                 for j in pending_jobs:
@@ -213,16 +211,15 @@ class JobPipelineRunner:
 
                             if score >= min_score and eval_res.get("should_apply"):
                                 self.db.update_job_status(job["id"], "evaluated")
-                                self.db.log_event("INFO", "pipeline", f"Oferta ID {job['id']} ('{job.get('title', '')[:30]}') puntuada: {score}/100 -> APTO.")
+                                logger.info("Oferta ID %d ('%s') puntuada: %d/100 -> APTO.", job["id"], job.get("title", "")[:30], score)
                                 return (job, eval_res)
                             else:
                                 self.db.update_job_status(job["id"], "discarded")
-                                self.db.log_event("INFO", "pipeline", f"Oferta ID {job['id']} ('{job.get('title', '')[:30]}') puntuada: {score}/100 -> Descartada (< {min_score}).")
+                                logger.info("Oferta ID %d ('%s') puntuada: %d/100 -> Descartada (< %d).", job["id"], job.get("title", "")[:30], score, min_score)
                                 return None
 
                         except Exception as eval_err:
                             logger.error("Error evaluando oferta ID %d: %s", job.get("id"), eval_err)
-                            self.db.log_event("ERROR", "evaluator", f"Fallo evaluando oferta ID {job.get('id')}: {str(eval_err)}")
                             self.db.update_job_status(job.get("id"), "discovered")
                             return None
 
@@ -293,7 +290,7 @@ class JobPipelineRunner:
                         ui_saved=ui_saved_val,
                     )
                     self.db.update_job_status(job["id"], "evaluated")
-                    self.db.log_event("INFO", "pipeline", f"Oferta ID {job['id']} procesada con éxito: {score}/100.")
+                    logger.info("Oferta ID %d procesada con éxito: %d/100.", job["id"], score)
 
                 elapsed = time.time() - start_time
                 self.db.finish_pipeline_run(

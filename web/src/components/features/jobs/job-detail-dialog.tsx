@@ -14,6 +14,8 @@ import { JobDetail } from "@/types";
 import { APPLICATION_STATUSES, ApplicationStatusKey } from "@/lib/constants";
 import { api } from "@/lib/api";
 
+import { JobScoreBadge, JobStatusBadge } from "./job-badges";
+
 interface JobDetailDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -29,51 +31,6 @@ export function JobDetailDialog({
   loading,
   onUpdateStatus,
 }: JobDetailDialogProps) {
-  const getStatusBadge = (status: string) => {
-    if (status === "evaluating") {
-      return (
-        <Badge variant="warning" className="animate-pulse flex items-center gap-1 text-2xs">
-          <RefreshCw className="h-3 w-3 animate-spin" />
-          Evaluando...
-        </Badge>
-      );
-    }
-    if (status === "generating_docs") {
-      return (
-        <Badge variant="warning" className="animate-pulse flex items-center gap-1 text-2xs">
-          <RefreshCw className="h-3 w-3 animate-spin" />
-          Generando documentos...
-        </Badge>
-      );
-    }
-    const meta = APPLICATION_STATUSES[status as ApplicationStatusKey];
-    if (meta) {
-      return <Badge variant={meta.badge} className="text-2xs">{meta.label}</Badge>;
-    }
-    return <Badge variant="secondary" className="text-2xs">{status}</Badge>;
-  };
-
-  const getScoreBadge = (score?: number | null) => {
-    if (jobDetail?.status === "evaluating") {
-      return (
-        <Badge variant="warning" className="animate-pulse flex items-center gap-1">
-          <RefreshCw className="h-3 w-3 animate-spin" />
-          Evaluando...
-        </Badge>
-      );
-    }
-    if (score === null || score === undefined) {
-      return <Badge variant="secondary">Sin evaluar</Badge>;
-    }
-    if (score >= 80) {
-      return <Badge variant="success">{score} / 100</Badge>;
-    }
-    if (score >= 65) {
-      return <Badge variant="warning">{score} / 100</Badge>;
-    }
-    return <Badge variant="destructive">{score} / 100</Badge>;
-  };
-
   return (
     <Dialog
       open={open}
@@ -91,12 +48,16 @@ export function JobDetailDialog({
           <div className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-lg bg-muted/40 border">
             <div className="flex items-center gap-2">
               <span className="text-muted-foreground font-medium">Estado:</span>
-              {getStatusBadge(jobDetail.status)}
+              <JobStatusBadge status={jobDetail.status} size="md" />
             </div>
 
             <div className="flex items-center gap-2">
               <span className="text-muted-foreground font-medium">Afinidad ATS:</span>
-              {getScoreBadge(jobDetail.score)}
+              <JobScoreBadge
+                score={jobDetail.score}
+                isEvaluating={jobDetail.status === "evaluating"}
+                size="md"
+              />
             </div>
           </div>
 

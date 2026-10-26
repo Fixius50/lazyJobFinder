@@ -18,6 +18,8 @@ import { formatDateTime } from "@/lib/utils";
 import { APPLICATION_STATUSES, PORTAL_SOURCES, ApplicationStatusKey } from "@/lib/constants";
 import { api } from "@/lib/api";
 
+import { JobScoreBadge, JobStatusBadge } from "./job-badges";
+
 interface JobCardProps {
   job: JobListItem;
   onOpenDetail: (id: number) => void;
@@ -29,75 +31,6 @@ export function JobCard({ job, onOpenDetail }: JobCardProps) {
   const isEvaluating = job.status === "evaluating";
   const isGeneratingDocs = job.status === "generating_docs";
 
-  const getScoreBadge = (score?: number | null) => {
-    if (isEvaluating) {
-      return (
-        <Badge variant="warning" className="text-3xs py-0 px-1.5 font-mono animate-pulse flex items-center gap-1">
-          <RefreshCw className="h-2.5 w-2.5 animate-spin" />
-          Evaluando...
-        </Badge>
-      );
-    }
-    if (score === null || score === undefined) {
-      return (
-        <Badge variant="secondary" className="text-3xs py-0 px-1.5 font-mono">
-          Sin evaluar
-        </Badge>
-      );
-    }
-    if (score >= 80) {
-      return (
-        <Badge variant="success" className="text-3xs py-0 px-1.5 font-mono font-bold">
-          {score} / 100
-        </Badge>
-      );
-    }
-    if (score >= 65) {
-      return (
-        <Badge variant="warning" className="text-3xs py-0 px-1.5 font-mono font-bold">
-          {score} / 100
-        </Badge>
-      );
-    }
-    return (
-      <Badge variant="destructive" className="text-3xs py-0 px-1.5 font-mono font-bold">
-        {score} / 100
-      </Badge>
-    );
-  };
-
-  const getStatusBadge = (status: string) => {
-    if (status === "evaluating") {
-      return (
-        <Badge variant="warning" className="text-3xs py-0 px-1.5 animate-pulse flex items-center gap-1">
-          <RefreshCw className="h-2.5 w-2.5 animate-spin" />
-          Evaluando...
-        </Badge>
-      );
-    }
-    if (status === "generating_docs") {
-      return (
-        <Badge variant="warning" className="text-3xs py-0 px-1.5 animate-pulse flex items-center gap-1">
-          <RefreshCw className="h-2.5 w-2.5 animate-spin" />
-          Generando docs...
-        </Badge>
-      );
-    }
-    const meta = APPLICATION_STATUSES[status as ApplicationStatusKey];
-    if (meta) {
-      return (
-        <Badge variant={meta.badge} className="text-3xs py-0 px-1.5">
-          {meta.label}
-        </Badge>
-      );
-    }
-    return (
-      <Badge variant="secondary" className="text-3xs py-0 px-1.5">
-        {status}
-      </Badge>
-    );
-  };
-
   return (
     <Card className="group flex flex-col justify-between hover:border-primary/50 hover:shadow-md transition-all duration-200 bg-card/80 backdrop-blur-sm border rounded-xl overflow-hidden h-full">
       <CardContent className="p-3 sm:p-3.5 flex flex-col h-full justify-between space-y-3">
@@ -105,8 +38,8 @@ export function JobCard({ job, onOpenDetail }: JobCardProps) {
         <div className="space-y-2.5">
           <div className="flex items-center justify-between gap-1 flex-wrap">
             <div className="flex items-center gap-1 flex-wrap">
-              {getScoreBadge(job.score)}
-              {getStatusBadge(job.status)}
+              <JobScoreBadge score={job.score} isEvaluating={isEvaluating} size="sm" />
+              <JobStatusBadge status={job.status} size="sm" />
             </div>
             <div className="flex items-center gap-1">
               <span className="text-3xs font-medium px-1.5 py-0.5 rounded bg-muted/90 text-muted-foreground shrink-0">

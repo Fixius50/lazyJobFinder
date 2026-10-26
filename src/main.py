@@ -46,6 +46,8 @@ _RELOAD_REQUESTED = False
 async def _code_reload_watcher(stop_event: asyncio.Event) -> None:
     """Monitoriza modificaciones en archivos de código (.py) y solicita reinicio automático si cambian."""
     global _RELOAD_REQUESTED
+    if os.getenv("ENABLE_HOT_RELOAD", "false").lower() not in ("true", "1"):
+        return
 
     def _get_mtimes() -> dict:
         mtimes = {}

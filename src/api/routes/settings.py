@@ -15,45 +15,11 @@ from ...storage import (
     CONFIG_DIR,
     DATA_DIR,
     PROJECT_ROOT as BASE_DIR,
-    SECRETS_FILE,
-    SETTINGS_FILE,
     delete_persisted_secret as _delete_persisted_secret,
     get_secret as _get_secret,
     read_persisted_secrets as _read_persisted_secrets,
     save_persisted_secret as _save_persisted_secret,
 )
-
-
-def _update_env_file(key: str, value: str) -> None:
-    """Actualiza una variable en el archivo local .env sin tocar otros valores."""
-    env_path = os.path.join(BASE_DIR, ".env")
-    lines = []
-    if os.path.exists(env_path):
-        try:
-            with open(env_path, "r", encoding="utf-8") as f:
-                lines = f.readlines()
-        except Exception as e:
-            logger.warning("No se pudo leer .env para actualizar %s: %s", key, e)
-            return
-
-    new_lines = []
-    found = False
-    for line in lines:
-        stripped = line.strip()
-        if stripped.startswith(f"{key}=") or stripped.startswith(f"#{key}="):
-            new_lines.append(f"{key}={value}\n")
-            found = True
-        else:
-            new_lines.append(line)
-
-    if not found and value:
-        new_lines.append(f"{key}={value}\n")
-
-    try:
-        with open(env_path, "w", encoding="utf-8") as f:
-            f.writelines(new_lines)
-    except Exception as e:
-        logger.warning("No se pudo escribir en .env: %s", e)
 
 
 

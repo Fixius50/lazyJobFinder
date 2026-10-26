@@ -372,36 +372,8 @@ export function ApplicationsView() {
           <aside className="lg:col-span-4 xl:col-span-3 space-y-4">
             <JobFilters
               facets={facets}
-              searchTerm={filters.searchTerm}
-              onSearchTermChange={(val) => updateFilter("searchTerm", val)}
-              exclusionTerm={filters.exclusionTerm}
-              onExclusionTermChange={(val) => updateFilter("exclusionTerm", val)}
-              locationName={filters.locationName}
-              onLocationChange={(loc) => updateFilter("locationName", loc)}
-              isAllLocations={filters.isAllLocations}
-              onToggleAllLocations={(all) => updateFilter("isAllLocations", all)}
-              selectedModalities={filters.selectedModalities}
-              onModalitiesChange={(mods) => updateFilter("selectedModalities", mods)}
-              selectedCategories={filters.selectedCategories}
-              onCategoriesChange={(cats) => updateFilter("selectedCategories", cats)}
-              selectedEducations={filters.selectedEducations}
-              onEducationsChange={(edus) => updateFilter("selectedEducations", edus)}
-              minExperienceStep={filters.minExperienceStep}
-              onMinExperienceStepChange={(step) => updateFilter("minExperienceStep", step)}
-              minSalaryStep={filters.minSalaryStep}
-              onMinSalaryStepChange={(step) => updateFilter("minSalaryStep", step)}
-              selectedSchedules={filters.selectedSchedules}
-              onSchedulesChange={(scheds) => updateFilter("selectedSchedules", scheds)}
-              selectedContractTypes={filters.selectedContractTypes}
-              onContractTypesChange={(cts) => updateFilter("selectedContractTypes", cts)}
-              selectedSource={filters.selectedSource}
-              onSourceChange={(source) => updateFilter("selectedSource", source)}
-              selectedStatus={filters.selectedStatus}
-              onStatusChange={(status) => updateFilter("selectedStatus", status)}
-              minScore={filters.minScore}
-              onMinScoreChange={(score) => updateFilter("minScore", score)}
-              timeRange={filters.timeRange}
-              onTimeRangeChange={(tr) => updateFilter("timeRange", tr)}
+              filters={filters}
+              onFilterChange={updateFilter}
               onSubmitSearch={handleSearchSubmit}
               onResetFilters={handleResetFilters}
               onSaveCriteria={handleSaveCriteria}

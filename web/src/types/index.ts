@@ -147,6 +147,24 @@ export interface FilterFacetsResponse {
   total_jobs: number;
 }
 
+export interface FilterState {
+  searchTerm: string;
+  exclusionTerm: string;
+  selectedSource: string;
+  selectedStatus: string;
+  minScore: number;
+  timeRange: string;
+  locationName: string;
+  isAllLocations: boolean;
+  selectedModalities: string[];
+  selectedCategories: string[];
+  selectedEducations: string[];
+  minExperienceStep: number;
+  minSalaryStep: number;
+  selectedSchedules: string[];
+  selectedContractTypes: string[];
+}
+
 // =============================================================================
 // 3. CURRÍCULUM VITAE (CV)
 // =============================================================================

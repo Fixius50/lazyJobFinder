@@ -53,6 +53,12 @@ app.add_middleware(
 
 @app.on_event("startup")
 def on_app_startup():
+    from .deps import get_db
+    try:
+        get_db().clean_startup_artifacts()
+    except Exception as e:
+        logger.debug("Error limpiando artefactos al inicio de la app: %s", e)
+
     idle_sec = int(os.getenv("IDLE_SHUTDOWN_SECONDS", "180"))
     if idle_sec > 0:
         system.start_port_activity_watchdog(idle_seconds=idle_sec, startup_grace_seconds=180)

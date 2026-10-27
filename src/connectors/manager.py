@@ -142,7 +142,27 @@ class ConnectorManager:
         )
         print(f"\n[Escáner de Empleo] Buscando en portales ofertas para el CV '{cv_meta.get('filename')}': {search_terms}", flush=True)
 
-        locations = busqueda_cfg.get("ubicaciones", ["Spain"])
+        # Ubicaciones de búsqueda: centrar prioritariamente en la región del candidato para optimizar resultados
+        configured_locations = [l.strip() for l in busqueda_cfg.get("ubicaciones", []) if l and l.strip()]
+        is_generic_location = not configured_locations or all(l.lower() in ("spain", "españa", "espana", "remoto", "remote") for l in configured_locations)
+
+        if is_generic_location:
+            candidate_city = ""
+            try:
+                from ..tailoring.cv_reader import get_active_profile
+                prof = get_active_profile()
+                if prof:
+                    candidate_city = prof.get("candidato", {}).get("ciudad", "").strip()
+            except Exception:
+                pass
+            if candidate_city and candidate_city.lower() not in ("spain", "españa"):
+                locations = [candidate_city, "Remoto"]
+                logger.info("Enfocando búsqueda regionalmente en la ciudad del CV activo: %s", locations)
+            else:
+                locations = configured_locations or ["Spain"]
+        else:
+            locations = list(configured_locations)
+
         hours_old = busqueda_cfg.get("antiguedad_horas", 48)
         limit_per_source = busqueda_cfg.get("limite_por_fuente", 15)
 

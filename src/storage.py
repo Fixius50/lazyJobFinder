@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import sys
+import threading
 import time
 from typing import Any, Dict, Optional
 
@@ -79,11 +80,25 @@ def ensure_storage_dirs() -> None:
 # 4. GESTIÓN DE ESTADO Y SECRETOS EN SQLITE (lazyjobfinder.db -> app_state)
 # =============================================================================
 
+_storage_db: Optional[Any] = None
+_storage_db_lock = threading.Lock()
+
+
+def _get_storage_db() -> Any:
+    """Retorna la instancia reutilizable de Database para operaciones de almacenamiento."""
+    global _storage_db
+    if _storage_db is None:
+        with _storage_db_lock:
+            if _storage_db is None:
+                from .database import Database
+                _storage_db = Database()
+    return _storage_db
+
+
 def _get_sqlite_state(key: str, default: Any = None) -> Any:
     """Lee un valor persistente de app_state en SQLite a través de la capa canónica Database."""
     try:
-        from .database import Database
-        return Database().get_app_state(key, default=default)
+        return _get_storage_db().get_app_state(key, default=default)
     except Exception as e:
         logger.debug("Error leyendo app_state (%s) en SQLite: %s", key, e)
         return default
@@ -92,8 +107,7 @@ def _get_sqlite_state(key: str, default: Any = None) -> Any:
 def _set_sqlite_state(key: str, value: Any) -> None:
     """Guarda un valor de app_state en SQLite de manera atómica a través de Database."""
     ensure_storage_dirs()
-    from .database import Database
-    Database().set_app_state(key, value)
+    _get_storage_db().set_app_state(key, value)
 
 
 def read_persisted_secrets() -> Dict[str, str]:

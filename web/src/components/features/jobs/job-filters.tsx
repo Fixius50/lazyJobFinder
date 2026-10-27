@@ -2,7 +2,6 @@
 
 import React, { useState, useMemo } from "react";
 import {
-  Search,
   SlidersHorizontal,
   MapPin,
   RotateCcw,
@@ -15,17 +14,10 @@ import {
   FileText,
   DollarSign,
   Globe,
-  Crosshair,
-  Navigation,
   Sparkles,
-  Ban,
-  Save,
 } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Select } from "@/components/ui/select";
-import { APPLICATION_STATUSES } from "@/lib/constants";
 import type { FilterFacetsResponse, FacetItem, FilterState } from "@/lib/api";
 
 export const EXPERIENCE_STEPS = [
@@ -177,8 +169,6 @@ export function JobFilters({
     timeRange = "all",
   } = filters;
 
-  const [filterSearchQuery, setFilterSearchQuery] = useState<string>("");
-  const [isLocating, setIsLocating] = useState<boolean>(false);
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
     modalidad: true,
     categoria: false,
@@ -204,48 +194,6 @@ export function JobFilters({
     }
   };
 
-  // Geolocalización del navegador para "Mi ubicación"
-  const handleDetectCurrentLocation = () => {
-    if (typeof window === "undefined" || !navigator.geolocation) {
-      alert("Tu navegador no soporta geolocalización.");
-      return;
-    }
-
-    setIsLocating(true);
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        try {
-          const lat = pos.coords.latitude;
-          const lon = pos.coords.longitude;
-          const res = await fetch(
-            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=10`,
-            { headers: { "User-Agent": "lazyJobFinder-LocalApp" } }
-          );
-          if (res.ok) {
-            const data = await res.json();
-            const addr = data.address || {};
-            const city = addr.city || addr.town || addr.village || addr.state || "Mi ciudad";
-            onFilterChange("locationName", city);
-            onFilterChange("isAllLocations", false);
-          } else {
-            onFilterChange("locationName", "Mi ubicación");
-            onFilterChange("isAllLocations", false);
-          }
-        } catch {
-          onFilterChange("locationName", "Mi ubicación");
-          onFilterChange("isAllLocations", false);
-        } finally {
-          setIsLocating(false);
-        }
-      },
-      (err) => {
-        setIsLocating(false);
-        alert(`No se pudo obtener tu ubicación: ${err.message}.`);
-      },
-      { timeout: 8000 }
-    );
-  };
-
   // Opciones adaptadas dinámicamente según las ofertas reales en SQLite
   const dynamicSources = facets?.sources && facets.sources.length > 0 ? facets.sources : [];
   const dynamicModalities = facets?.modalities && facets.modalities.length > 0 ? facets.modalities : [];
@@ -254,38 +202,6 @@ export function JobFilters({
   const dynamicSchedules = facets?.schedules && facets.schedules.length > 0 ? facets.schedules : [];
   const dynamicContracts = facets?.contract_types && facets.contract_types.length > 0 ? facets.contract_types : [];
   const dynamicLocations = facets?.top_locations || [];
-
-  const normQuery = filterSearchQuery.trim().toLowerCase();
-
-  const filteredLocations = useMemo(() => {
-    if (!normQuery) return dynamicLocations;
-    return dynamicLocations.filter((l) => l.name.toLowerCase().includes(normQuery));
-  }, [normQuery, dynamicLocations]);
-
-  const filteredModalities = useMemo(() => {
-    if (!normQuery) return dynamicModalities;
-    return dynamicModalities.filter((opt) => opt.label.toLowerCase().includes(normQuery));
-  }, [normQuery, dynamicModalities]);
-
-  const filteredCategories = useMemo(() => {
-    if (!normQuery) return dynamicCategories;
-    return dynamicCategories.filter((opt) => opt.label.toLowerCase().includes(normQuery));
-  }, [normQuery, dynamicCategories]);
-
-  const filteredEducations = useMemo(() => {
-    if (!normQuery) return dynamicEducations;
-    return dynamicEducations.filter((opt) => opt.label.toLowerCase().includes(normQuery));
-  }, [normQuery, dynamicEducations]);
-
-  const filteredSchedules = useMemo(() => {
-    if (!normQuery) return dynamicSchedules;
-    return dynamicSchedules.filter((opt) => opt.label.toLowerCase().includes(normQuery));
-  }, [normQuery, dynamicSchedules]);
-
-  const filteredContracts = useMemo(() => {
-    if (!normQuery) return dynamicContracts;
-    return dynamicContracts.filter((opt) => opt.label.toLowerCase().includes(normQuery));
-  }, [normQuery, dynamicContracts]);
 
   const hasActiveFilters =
     Boolean(searchTerm) ||
@@ -340,98 +256,36 @@ export function JobFilters({
       </CardHeader>
 
       <CardContent className="p-3 sm:p-4 space-y-3">
-        {/* BUSCADOR GLOBAL DE FILTROS EN TIEMPO REAL */}
-        <div className="relative w-full">
-          <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
-          <Input
-            type="text"
-            placeholder="Buscar filtros (remoto, madrid, turnos, indefinido...)"
-            value={filterSearchQuery}
-            onChange={(e) => setFilterSearchQuery(e.target.value)}
-            className="pl-8 text-xs h-7.5 w-full bg-background border-primary/20 focus:border-primary"
-          />
-          {filterSearchQuery && (
-            <button
-              type="button"
-              onClick={() => setFilterSearchQuery("")}
-              className="absolute right-2.5 top-2 text-xs text-muted-foreground hover:text-foreground"
-            >
-              ×
-            </button>
-          )}
-        </div>
-
         <form onSubmit={onSubmitSearch} className="space-y-3">
-          {/* PALABRAS CLAVE */}
-          <div className="space-y-1">
-            <div className="relative w-full">
-              <Search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-muted-foreground" />
-              <Input
-                type="text"
-                placeholder="Puesto o habilidades (ej: Mozo de almacén, Logística...)"
-                value={searchTerm}
-                onChange={(e) => onFilterChange("searchTerm", e.target.value)}
-                className="pl-8 text-xs h-7.5 w-full bg-background"
-              />
-            </div>
-          </div>
-
-          {/* LUGAR Y UBICACIÓN INTEGRADA */}
-          <div className="space-y-1.5 pt-1">
+          {/* LUGAR Y UBICACIÓN INTEGRADA DESDE SQLITE */}
+          <div className="space-y-1.5 pt-0.5">
             <div className="flex items-center justify-between">
               <label className="text-2xs font-semibold text-foreground flex items-center gap-1.5">
                 <MapPin className="h-3.5 w-3.5 text-primary" />
                 <span>Ubicación</span>
               </label>
 
-              <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => {
-                    onFilterChange("isAllLocations", true);
-                    onFilterChange("locationName", "");
-                  }}
-                  className={`text-3xs px-1.5 py-0.5 rounded border transition-colors flex items-center gap-1 ${
-                    isAllLocations
-                      ? "bg-primary/15 border-primary/40 text-primary font-medium"
-                      : "text-muted-foreground hover:text-foreground border-transparent hover:bg-muted/50"
-                  }`}
-                >
-                  <Globe className="h-3 w-3" />
-                  <span>Todos</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleDetectCurrentLocation}
-                  disabled={isLocating}
-                  className="text-3xs px-1.5 py-0.5 rounded border border-border/50 text-muted-foreground hover:text-foreground hover:bg-muted/50 flex items-center gap-1 transition-colors"
-                  title="Detectar mi ubicación actual vía GPS"
-                >
-                  <Crosshair className={`h-3 w-3 text-primary ${isLocating ? "animate-spin" : ""}`} />
-                  <span>Mi ubicación</span>
-                </button>
-              </div>
-            </div>
-
-            <div className="relative">
-              <Navigation className="absolute left-2.5 top-2 h-3.5 w-3.5 text-muted-foreground" />
-              <Input
-                type="text"
-                placeholder="Ciudad, provincia o país..."
-                value={isAllLocations ? "" : locationName}
-                onChange={(e) => {
-                  onFilterChange("locationName", e.target.value);
-                  onFilterChange("isAllLocations", false);
+              <button
+                type="button"
+                onClick={() => {
+                  onFilterChange("isAllLocations", true);
+                  onFilterChange("locationName", "");
                 }}
-                className="pl-8 text-xs h-7.5 w-full bg-background"
-              />
+                className={`text-3xs px-2 py-0.5 rounded border transition-colors flex items-center gap-1 ${
+                  isAllLocations
+                    ? "bg-primary/15 border-primary/40 text-primary font-medium"
+                    : "text-muted-foreground hover:text-foreground border-transparent hover:bg-muted/50"
+                }`}
+              >
+                <Globe className="h-3 w-3" />
+                <span>Todas</span>
+              </button>
             </div>
 
-            {/* Chips de ubicaciones reales encontradas en las ofertas */}
-            {filteredLocations.length > 0 && (
-              <div className="flex flex-wrap gap-1 pt-0.5 max-h-24 overflow-y-auto pr-0.5">
-                {filteredLocations.slice(0, 10).map((loc) => {
+            {/* Chips de ubicaciones reales extraídas de la base de datos */}
+            {dynamicLocations.length > 0 ? (
+              <div className="flex flex-wrap gap-1 pt-0.5 max-h-32 overflow-y-auto pr-0.5">
+                {dynamicLocations.map((loc) => {
                   const isSelected = !isAllLocations && locationName.toLowerCase() === loc.name.toLowerCase();
                   return (
                     <button
@@ -457,6 +311,10 @@ export function JobFilters({
                     </button>
                   );
                 })}
+              </div>
+            ) : (
+              <div className="text-2xs text-muted-foreground/60 py-1 pl-1 italic">
+                Sin ubicaciones registradas aún
               </div>
             )}
           </div>
@@ -576,7 +434,7 @@ export function JobFilters({
           <FacetSection
             title="Modalidad"
             icon={<Building2 className="h-3.5 w-3.5 text-primary" />}
-            items={filteredModalities}
+            items={dynamicModalities}
             selected={selectedModalities}
             onToggleItem={(id) => toggleArrayItem("selectedModalities", id)}
             onClear={() => onFilterChange("selectedModalities", [])}
@@ -587,7 +445,7 @@ export function JobFilters({
           <FacetSection
             title="Categoría / Funciones"
             icon={<Briefcase className="h-3.5 w-3.5 text-primary" />}
-            items={filteredCategories}
+            items={dynamicCategories}
             selected={selectedCategories}
             onToggleItem={(id) => toggleArrayItem("selectedCategories", id)}
             onClear={() => onFilterChange("selectedCategories", [])}
@@ -598,7 +456,7 @@ export function JobFilters({
           <FacetSection
             title="Formación Mínima"
             icon={<GraduationCap className="h-3.5 w-3.5 text-primary" />}
-            items={filteredEducations}
+            items={dynamicEducations}
             selected={selectedEducations}
             onToggleItem={(id) => toggleArrayItem("selectedEducations", id)}
             onClear={() => onFilterChange("selectedEducations", [])}
@@ -609,7 +467,7 @@ export function JobFilters({
           <FacetSection
             title="Jornada Laboral"
             icon={<Clock className="h-3.5 w-3.5 text-primary" />}
-            items={filteredSchedules}
+            items={dynamicSchedules}
             selected={selectedSchedules}
             onToggleItem={(id) => toggleArrayItem("selectedSchedules", id)}
             onClear={() => onFilterChange("selectedSchedules", [])}
@@ -620,7 +478,7 @@ export function JobFilters({
           <FacetSection
             title="Tipo de Contrato"
             icon={<FileText className="h-3.5 w-3.5 text-primary" />}
-            items={filteredContracts}
+            items={dynamicContracts}
             selected={selectedContractTypes}
             onToggleItem={(id) => toggleArrayItem("selectedContractTypes", id)}
             onClear={() => onFilterChange("selectedContractTypes", [])}
@@ -628,7 +486,7 @@ export function JobFilters({
             onToggleOpen={() => toggleSection("contrato")}
           />
 
-          {/* FILTROS ADICIONALES (PORTALES, ESTADO, AFINIDAD ATS, EXCLUSIÓN) */}
+          {/* EVALUACIÓN Y AFINIDAD IA */}
           <div className="pt-2 border-t border-border/30">
             <div
               onClick={() => toggleSection("avanzados")}
@@ -636,10 +494,10 @@ export function JobFilters({
             >
               <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
                 <Sparkles className="h-3.5 w-3.5 text-primary" />
-                <span>Portal, Estado y Afinidad</span>
+                <span>Evaluación y Afinidad</span>
               </div>
               <div className="flex items-center gap-1">
-                {(selectedSource || selectedStatus || minScore > 0 || exclusionTerm) && (
+                {minScore > 0 && (
                   <span className="text-3xs font-mono px-1.5 py-0.5 rounded-full bg-primary/20 text-primary font-bold">
                     activo
                   </span>
@@ -650,40 +508,6 @@ export function JobFilters({
 
             {openSections.avanzados && (
               <div className="space-y-2.5 pt-2 pl-1 pr-1">
-                {/* Portal Fuente dinámico */}
-                <div className="space-y-1">
-                  <label className="text-2xs font-medium text-muted-foreground">Portal de origen:</label>
-                  <Select
-                    value={selectedSource}
-                    onChange={(e) => onFilterChange("selectedSource", e.target.value)}
-                    className="text-xs h-7.5 w-full bg-background"
-                  >
-                    <option value="">Todos los portales</option>
-                    {dynamicSources.map((src) => (
-                      <option key={src.id} value={src.id}>
-                        {src.label} ({src.count})
-                      </option>
-                    ))}
-                  </Select>
-                </div>
-
-                {/* Estado de la candidatura */}
-                <div className="space-y-1">
-                  <label className="text-2xs font-medium text-muted-foreground">Estado:</label>
-                  <Select
-                    value={selectedStatus}
-                    onChange={(e) => onFilterChange("selectedStatus", e.target.value)}
-                    className="text-xs h-7.5 w-full bg-background"
-                  >
-                    <option value="">Todos los estados</option>
-                    {Object.entries(APPLICATION_STATUSES).map(([id, info]) => (
-                      <option key={id} value={id}>
-                        {info.label}
-                      </option>
-                    ))}
-                  </Select>
-                </div>
-
                 {/* Distribución por Afinidad evaluada por la IA */}
                 {Boolean(facets?.fit_levels && facets.fit_levels.length > 0) && (
                   <div className="space-y-1">
@@ -723,36 +547,6 @@ export function JobFilters({
                     className="w-full h-1.5 rounded-lg cursor-pointer accent-primary bg-muted"
                   />
                 </div>
-
-                {/* Palabras a excluir */}
-                <div className="space-y-1">
-                  <label className="text-2xs font-medium text-muted-foreground flex items-center gap-1">
-                    <Ban className="h-3 w-3 text-destructive" />
-                    <span>Excluir términos:</span>
-                  </label>
-                  <Input
-                    type="text"
-                    placeholder="ej: senior, php, wordpress..."
-                    value={exclusionTerm}
-                    onChange={(e) => onFilterChange("exclusionTerm", e.target.value)}
-                    className="text-xs h-7 w-full bg-background border-destructive/20 focus:border-destructive"
-                  />
-                </div>
-
-                {/* Guardar criterios en conectores */}
-                {onSaveCriteria && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={onSaveCriteria}
-                    className="w-full text-2xs h-7 flex items-center justify-center gap-1.5 border-dashed border-primary/30 text-primary hover:bg-primary/10"
-                    title="Guardar estos criterios para las búsquedas automáticas en segundo plano"
-                  >
-                    <Save className="h-3 w-3" />
-                    <span>Guardar criterios en conectores</span>
-                  </Button>
-                )}
               </div>
             )}
           </div>

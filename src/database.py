@@ -8,6 +8,7 @@ import logging
 import os
 import re
 import sqlite3
+import threading
 import time
 from datetime import datetime, timedelta
 from typing import Any, Dict, Generator, List, Optional, Tuple
@@ -139,11 +140,19 @@ def compute_description_hash(description: str) -> str:
 class Database:
     """Gestor de base de datos SQLite con conexión segura y soporte WAL."""
 
+    _initialized_paths: set = set()
+    _init_lock = threading.Lock()
+
     def __init__(self, db_path: Optional[str] = None):
         self.db_path = db_path or os.getenv("DATABASE_PATH", DEFAULT_DB_PATH)
         self._last_prune_time: float = 0.0
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
-        self.init_db()
+        norm_path = os.path.abspath(self.db_path)
+        if norm_path not in Database._initialized_paths or not os.path.exists(norm_path):
+            with Database._init_lock:
+                if norm_path not in Database._initialized_paths or not os.path.exists(norm_path):
+                    self.init_db()
+                    Database._initialized_paths.add(norm_path)
 
     @contextlib.contextmanager
     def _get_connection(self) -> Generator[sqlite3.Connection, None, None]:
@@ -317,8 +326,6 @@ class Database:
         except Exception as e:
             logger.debug("Comprobación de columnas en jobs completada: %s", e)
 
-        # Recuperar ejecuciones interrumpidas y limpiar estados de arranques previos
-        self.clean_startup_artifacts()
         self.prune_old_system_logs()
 
         logger.info("Base de datos inicializada correctamente en %s", self.db_path)
@@ -1336,9 +1343,12 @@ class Database:
             elif min_experience_years >= 5:
                 where_clauses.append("(LOWER(j.description) LIKE '%5 año%' OR LOWER(j.description) LIKE '%5+ año%' OR LOWER(j.description) LIKE '%al menos 5 año%' OR LOWER(j.title) LIKE '%senior%' OR LOWER(j.title) LIKE '%lead%')")
 
-        # 5. Filtro de Salario mínimo (Deslizante / Slider)
+        # 5. Filtro de Salario mínimo (Deslizante / Slider) con normalización anualizada homogénea
         if min_salary and min_salary > 0:
-            where_clauses.append("(j.salary_max >= ? OR j.salary_min >= ?)")
+            where_clauses.append(
+                "((CASE WHEN j.salary_max <= 100 THEN j.salary_max * 1800 WHEN j.salary_max < 6000 THEN j.salary_max * 12 ELSE j.salary_max END) >= ? "
+                "OR (CASE WHEN j.salary_min <= 100 THEN j.salary_min * 1800 WHEN j.salary_min < 6000 THEN j.salary_min * 12 ELSE j.salary_min END) >= ?)"
+            )
             params.extend([min_salary, min_salary])
 
         # 6. Filtro de Jornada laboral (Checkboxes) - Columna real y descripción

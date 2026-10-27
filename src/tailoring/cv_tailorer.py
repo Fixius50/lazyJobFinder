@@ -236,11 +236,12 @@ class CVTailorer:
                     if not puesto and not empresa:
                         continue
                     head = puesto or "Puesto"
+                    exp_line = f"- **{head}**"
                     if empresa:
-                        head += f" — *{empresa}*"
+                        exp_line += f" — *{empresa}*"
                     if periodo:
-                        head += f" ({periodo})"
-                    exp_lines.append(f"- **{head}**")
+                        exp_line += f" ({periodo})"
+                    exp_lines.append(exp_line)
                     if exp.get("ubicacion"):
                         exp_lines.append(f"  *{exp.get('ubicacion')}*")
                     if exp.get("descripcion"):

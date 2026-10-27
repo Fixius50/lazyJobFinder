@@ -96,11 +96,28 @@ class JobSpyConnector(BaseConnector):
 
                             salary_min = None
                             salary_max = None
+                            interval = str(row.get("interval") or "").lower().strip()
                             try:
                                 if row.get("min_amount") is not None and not str(row.get("min_amount")).lower() == "nan":
-                                    salary_min = float(row.get("min_amount"))
+                                    val_min = float(row.get("min_amount"))
+                                    if val_min > 0:
+                                        salary_min = val_min
                                 if row.get("max_amount") is not None and not str(row.get("max_amount")).lower() == "nan":
-                                    salary_max = float(row.get("max_amount"))
+                                    val_max = float(row.get("max_amount"))
+                                    if val_max > 0:
+                                        salary_max = val_max
+
+                                # Normalización homogénea a base anual (EUR/año)
+                                ref_val = salary_max or salary_min or 0
+                                is_hourly = "hour" in interval or (0 < ref_val <= 100)
+                                is_monthly = "month" in interval or (100 < ref_val < 6000 and "year" not in interval)
+
+                                if is_hourly:
+                                    salary_min = round(salary_min * 1800, 2) if salary_min else None
+                                    salary_max = round(salary_max * 1800, 2) if salary_max else None
+                                elif is_monthly:
+                                    salary_min = round(salary_min * 12, 2) if salary_min else None
+                                    salary_max = round(salary_max * 12, 2) if salary_max else None
                             except Exception:
                                 pass
 

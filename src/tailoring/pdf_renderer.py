@@ -184,6 +184,14 @@ class PDFRenderer:
             spaceAfter=3,
         )
 
+        def add_paragraph(html_text: str, style):
+            try:
+                story.append(Paragraph(html_text, style))
+            except Exception as pe:
+                logger.debug("Error de parseo ReportLab para '%s': %s. Usando texto sanitizado.", html_text[:60], pe)
+                clean_text = re.sub(r"<[^>]+>", "", html_text)
+                story.append(Paragraph(html.escape(clean_text), style))
+
         story = []
         lines = md_content.split("\n")
 
@@ -196,7 +204,7 @@ class PDFRenderer:
 
             if line.startswith("# "):
                 text = line[2:].strip()
-                story.append(Paragraph(html.escape(text), style_title))
+                add_paragraph(html.escape(text), style_title)
             elif line.startswith("## "):
                 text = line[3:].strip()
                 story.append(
@@ -208,22 +216,22 @@ class PDFRenderer:
                         spaceAfter=5,
                     )
                 )
-                story.append(Paragraph(html.escape(text), style_h2))
+                add_paragraph(html.escape(text), style_h2)
             elif line.startswith("### "):
                 text = line[4:].strip()
-                story.append(Paragraph(html.escape(text), style_h3))
+                add_paragraph(html.escape(text), style_h3)
             elif line.startswith("---"):
                 pass
             elif line.startswith("- ") or line.startswith("* "):
                 bullet_text = line[2:].strip()
                 bullet_html = self._safe_md_to_html(bullet_text)
-                story.append(Paragraph(f"• {bullet_html}", style_bullet))
+                add_paragraph(f"• {bullet_html}", style_bullet)
             elif line.startswith("**") and " | " in line:
                 contact_html = self._safe_md_to_html(line)
-                story.append(Paragraph(contact_html, style_contact))
+                add_paragraph(contact_html, style_contact)
             else:
                 body_html = self._safe_md_to_html(line)
-                story.append(Paragraph(body_html, style_body))
+                add_paragraph(body_html, style_body)
 
             i += 1
 
@@ -234,6 +242,9 @@ class PDFRenderer:
         Escapa caracteres XML para evitar que ReportLab falle con parse errors (&, <, >),
         y traduce selectivamente negritas y cursivas.
         """
+        if not text:
+            return ""
+
         # 1. Extraer enlaces y convertirlos antes de escapar
         links = []
         def _save_link(m):
@@ -249,10 +260,10 @@ class PDFRenderer:
         for idx, l_text in enumerate(links):
             escaped = escaped.replace(f"__LINK_{idx}__", f"<u>{html.escape(l_text)}</u>")
 
-        # 4. Traducir negritas **texto** -> <b>texto</b>
-        escaped = re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", escaped)
+        # 4. Traducir negritas **texto** -> <b>texto</b> sin cruzar asteriscos
+        escaped = re.sub(r"\*\*([^\*]+?)\*\*", r"<b>\1</b>", escaped)
 
-        # 5. Traducir cursivas *texto* -> <i>texto</i>
-        escaped = re.sub(r"\*(.*?)\*", r"<i>\1</i>", escaped)
+        # 5. Traducir cursivas *texto* -> <i>texto</i> sin cruzar asteriscos ni tocar <b>
+        escaped = re.sub(r"(?<!\*)\*([^\*<]+?)\*(?!\*)", r"<i>\1</i>", escaped)
 
         return escaped

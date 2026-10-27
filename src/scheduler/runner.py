@@ -239,11 +239,114 @@ class JobPipelineRunner:
                         seen_job_ids.add(j_id)
                         loop.call_soon_threadsafe(eval_queue.put_nowait, job_dict)
 
-                # Parámetros de evaluación
+                # Parámetros de evaluación y generación documental
                 min_score = int(self.settings.get("evaluacion", {}).get("umbral_minimo_puntuacion", 50))
                 generate_docs = self.settings.get("evaluacion", {}).get("generar_documentos", True)
                 concurrency = max(1, int(self.settings.get("evaluacion", {}).get("concurrencia", 1)))
                 qualified_candidates: List[Tuple[Dict[str, Any], Dict[str, Any]]] = []
+
+                from ..tailoring.cv_reader import get_active_cv_status
+                cv_status = get_active_cv_status()
+                can_generate_docs = generate_docs and (cv_status.get("has_cv") or bool(self.profile))
+
+                # Cola concurrente de generación de documentos en tiempo real
+                docs_queue: asyncio.Queue[Optional[Tuple[Dict[str, Any], Dict[str, Any]]]] = asyncio.Queue()
+                queued_doc_job_ids = set()
+
+                # Precargar ofertas ya evaluadas en la BD que aún necesiten documentos
+                if can_generate_docs:
+                    try:
+                        pending_docs_db = await asyncio.to_thread(
+                            self.db.get_evaluated_jobs_needing_docs,
+                            50,
+                            active_cv_name,
+                            50,
+                        )
+                        for item in pending_docs_db:
+                            j_id = item["id"]
+                            if j_id not in queued_doc_job_ids:
+                                queued_doc_job_ids.add(j_id)
+                                eval_dict = {
+                                    "score": item.get("score", 0),
+                                    "fit_level": item.get("fit_level", "BUENO"),
+                                    "should_apply": bool(item.get("should_apply", True)),
+                                    "matched_skills": item.get("matched_skills", []),
+                                    "missing_skills": item.get("missing_skills", []),
+                                    "strengths": item.get("strengths", []),
+                                    "gaps": item.get("gaps", []),
+                                    "reasoning": item.get("reasoning", ""),
+                                }
+                                docs_queue.put_nowait((item, eval_dict))
+                        if pending_docs_db:
+                            logger.info("Precargadas %d ofertas evaluadas pendientes de documentos en la cola en tiempo real.", len(pending_docs_db))
+                    except Exception as pend_err:
+                        logger.debug("Error precargando vacantes pendientes de docs: %s", pend_err)
+
+                # Generador y guardador individual de documentos en tiempo real
+                async def _generate_docs_for_item(job: Dict[str, Any], eval_res: Dict[str, Any]) -> None:
+                    score = eval_res.get("score", 0)
+                    doc_paths = None
+                    try:
+                        self.db.update_job_status(job["id"], "generating_docs")
+                        print(f"[Docs / En Vivo] -> Oferta #{job['id']} ('{job.get('title')}', {job.get('company')}) - Score {score}/100: Generando CV y carta...", flush=True)
+                        logger.info("Generando CV y carta en tiempo real para oferta ID %d ('%s')", job["id"], job.get("title"))
+
+                        cv_md, diff_audit = await asyncio.to_thread(self.cv_tailorer.tailor, job, eval_res)
+                        letter_md = await asyncio.to_thread(self.letter_generator.generate, job, eval_res)
+
+                        doc_paths = await asyncio.to_thread(
+                            self.pdf_renderer.render_cv_and_letter,
+                            job=job,
+                            cv_md=cv_md,
+                            diff_audit=diff_audit,
+                            letter_md=letter_md,
+                        )
+
+                        self.db.save_documents({
+                            "job_id": job["id"],
+                            "cv_pdf_path": doc_paths["cv_pdf_path"],
+                            "cv_md_path": doc_paths["cv_md_path"],
+                            "letter_pdf_path": doc_paths["letter_pdf_path"],
+                            "letter_md_path": doc_paths["letter_md_path"],
+                            "diff_summary": yaml.dump(diff_audit, allow_unicode=True),
+                        })
+                        logger.info("CV y carta guardados exitosamente para oferta ID %d.", job["id"])
+                    except Exception as doc_err:
+                        logger.error("Error generando documentos para oferta ID %d: %s", job["id"], doc_err)
+
+                    # Notificación opcional por Telegram
+                    telegram_status = 0
+                    if send_tg_pref and self.telegram_bot.is_configured():
+                        try:
+                            await self.telegram_bot.send_job_notification(
+                                job=job,
+                                eval_result=eval_res,
+                                doc_paths=doc_paths,
+                            )
+                            telegram_status = 1
+                        except Exception as tg_err:
+                            logger.error("Error enviando notificación Telegram para ID %d: %s", job["id"], tg_err)
+                            telegram_status = -1
+
+                    ui_saved_val = 1 if save_ui_pref else 0
+                    self.db.update_job_channel_status(
+                        job_id=job["id"],
+                        telegram_notified=telegram_status,
+                        ui_saved=ui_saved_val,
+                    )
+                    self.db.update_job_status(job["id"], "evaluated")
+
+                # Tarea Consumidora Documental en vivo
+                async def _docs_worker():
+                    while True:
+                        item = await docs_queue.get()
+                        if item is None:
+                            docs_queue.task_done()
+                            break
+                        j, er = item
+                        relevant_matches.append(j)
+                        await _generate_docs_for_item(j, er)
+                        docs_queue.task_done()
 
                 # Tarea Productora: Rastreo en portales con guardado incremental en tiempo real
                 async def _run_discovery_task():
@@ -275,6 +378,10 @@ class JobPipelineRunner:
                                     self.db.update_job_status(job["id"], "evaluated")
                                     logger.info("Oferta ID %d ('%s') puntuada: %d/100 -> APTO.", job["id"], job.get("title", "")[:30], score)
                                     qualified_candidates.append((job, eval_res))
+                                    # Encolar para generación de CV y carta mientras se siguen buscando ofertas
+                                    if can_generate_docs and job["id"] not in queued_doc_job_ids:
+                                        queued_doc_job_ids.add(job["id"])
+                                        docs_queue.put_nowait((job, eval_res))
                                 else:
                                     self.db.update_job_status(job["id"], "discarded")
                                     logger.info("Oferta ID %d ('%s') puntuada: %d/100 -> Descartada (< %d).", job["id"], job.get("title", "")[:30], score, min_score)
@@ -284,17 +391,22 @@ class JobPipelineRunner:
                         finally:
                             eval_queue.task_done()
 
-                # Ejecutar descubrimiento y evaluación de ofertas concurrentemente
+                # Ejecutar descubrimiento, evaluación y generación documental concurrentemente
                 discovery_task = asyncio.create_task(_run_discovery_task())
                 eval_tasks = [asyncio.create_task(_eval_worker()) for _ in range(concurrency)]
+                docs_task = asyncio.create_task(_docs_worker())
 
                 discovery_result, *_ = await asyncio.gather(discovery_task, *eval_tasks)
                 new_jobs, metrics = discovery_result
                 total_found = metrics["total_encontradas"]
                 new_count = metrics["nuevas_guardadas"]
 
+                # Indicar a la tarea de documentos que ya no entrarán más ofertas nuevas y esperar a que vacíe la cola
+                await docs_queue.put(None)
+                await docs_task
+
                 # Si no hubo ofertas evaluadas ni pendientes ni nuevas, finalizar run
-                if not seen_job_ids and not new_jobs:
+                if not seen_job_ids and not new_jobs and not relevant_matches:
                     logger.info("No hay vacantes nuevas ni pendientes de evaluación en este ciclo.")
                     self.db.log_event("INFO", "pipeline", "No hay vacantes nuevas ni pendientes de evaluación en este ciclo.")
                     self.db.finish_pipeline_run(
@@ -305,108 +417,6 @@ class JobPipelineRunner:
                         relevant_jobs=0,
                     )
                     return
-
-                # Ordenar los candidatos evaluados aptos por puntuación descendente
-                qualified_candidates.sort(key=lambda x: x[1].get("score", 0), reverse=True)
-
-                # 2. Fase 2: Adaptación documental (CV y Cartas)
-                # Priorizar estrictamente por mayor puntuación
-                from ..tailoring.cv_reader import get_active_cv_status
-                cv_status = get_active_cv_status()
-                can_generate_docs = generate_docs and (cv_status.get("has_cv") or bool(self.profile))
-
-                docs_candidates_dict = {}
-                for job, eval_res in qualified_candidates:
-                    if eval_res.get("score", 0) >= 50 and eval_res.get("should_apply"):
-                        docs_candidates_dict[job["id"]] = (job, eval_res)
-
-                if can_generate_docs:
-                    try:
-                        pending_docs_db = await asyncio.to_thread(
-                            self.db.get_evaluated_jobs_needing_docs,
-                            50,
-                            active_cv_name,
-                            50,
-                        )
-                        for item in pending_docs_db:
-                            j_id = item["id"]
-                            if j_id not in docs_candidates_dict:
-                                eval_dict = {
-                                    "score": item.get("score", 0),
-                                    "fit_level": item.get("fit_level", "BUENO"),
-                                    "should_apply": bool(item.get("should_apply", True)),
-                                    "matched_skills": item.get("matched_skills", []),
-                                    "missing_skills": item.get("missing_skills", []),
-                                    "strengths": item.get("strengths", []),
-                                    "gaps": item.get("gaps", []),
-                                    "reasoning": item.get("reasoning", ""),
-                                }
-                                docs_candidates_dict[j_id] = (item, eval_dict)
-                    except Exception as pend_err:
-                        logger.debug("Error obteniendo vacantes evaluadas pendientes de docs: %s", pend_err)
-
-                # ORDENAR ESTRICTAMENTE POR PUNTUACIÓN DESCENDENTE:
-                # El CV y carta se priorizan y generan antes para las ofertas con mayor puntuación
-                all_docs_queue = list(docs_candidates_dict.values())
-                all_docs_queue.sort(key=lambda x: x[1].get("score", 0), reverse=True)
-
-                if all_docs_queue:
-                    self.db.log_event("INFO", "pipeline", f"Iniciando generación de CVs y cartas para {len(all_docs_queue)} vacantes ordenadas por mayor puntuación...")
-                    print(f"\n[Docs / Prioridad] Generando CV y carta para {len(all_docs_queue)} ofertas priorizando las de mayor puntuación...", flush=True)
-
-                for job, eval_res in all_docs_queue:
-                    relevant_matches.append(job)
-                    doc_paths = None
-                    score = eval_res.get("score", 0)
-                    telegram_status = 0
-
-                    if can_generate_docs and score >= 50:
-                        try:
-                            self.db.update_job_status(job["id"], "generating_docs")
-                            print(f"[Docs / Generación] -> Oferta #{job['id']} ('{job.get('title')}', {job.get('company')}) - Score {score}/100: Adaptando CV y carta...", flush=True)
-                            cv_md, diff_audit = await asyncio.to_thread(self.cv_tailorer.tailor, job, eval_res)
-                            letter_md = await asyncio.to_thread(self.letter_generator.generate, job, eval_res)
-
-                            doc_paths = await asyncio.to_thread(
-                                self.pdf_renderer.render_cv_and_letter,
-                                job=job,
-                                cv_md=cv_md,
-                                diff_audit=diff_audit,
-                                letter_md=letter_md,
-                            )
-
-                            self.db.save_documents({
-                                "job_id": job["id"],
-                                "cv_pdf_path": doc_paths["cv_pdf_path"],
-                                "cv_md_path": doc_paths["cv_md_path"],
-                                "letter_pdf_path": doc_paths["letter_pdf_path"],
-                                "letter_md_path": doc_paths["letter_md_path"],
-                                "diff_summary": yaml.dump(diff_audit, allow_unicode=True),
-                            })
-                        except Exception as doc_err:
-                            logger.error("Error generando documentos para oferta ID %d: %s", job["id"], doc_err)
-
-                    # Notificación opcional por Telegram
-                    if send_tg_pref and self.telegram_bot.is_configured():
-                        try:
-                            await self.telegram_bot.send_job_notification(
-                                job=job,
-                                eval_result=eval_res,
-                                doc_paths=doc_paths,
-                            )
-                            telegram_status = 1
-                        except Exception as tg_err:
-                            logger.error("Error enviando notificación Telegram para oferta ID %d: %s", job["id"], tg_err)
-                            telegram_status = -1
-
-                    ui_saved_val = 1 if save_ui_pref else 0
-                    self.db.update_job_channel_status(
-                        job_id=job["id"],
-                        telegram_notified=telegram_status,
-                        ui_saved=ui_saved_val,
-                    )
-                    self.db.update_job_status(job["id"], "evaluated")
-                    logger.info("Oferta ID %d procesada con éxito: %d/100.", job["id"], score)
 
                 elapsed = time.time() - start_time
                 self.db.finish_pipeline_run(

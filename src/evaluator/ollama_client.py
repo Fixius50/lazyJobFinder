@@ -7,20 +7,30 @@ import time
 from typing import Any, Dict, List, Optional
 try:
     import requests
+    from requests.adapters import HTTPAdapter
 except ImportError:
     requests = None
+    HTTPAdapter = None
 
 logger = logging.getLogger("lazyJobFinder.evaluator.ollama")
 
 
 class OllamaClient:
-    """Cliente para interactuar con la API REST de Ollama en contenedor local."""
+    """Cliente para interactuar con la API REST de Ollama en contenedor local con connection pooling."""
 
     def __init__(self, base_url: Optional[str] = None, default_model: Optional[str] = None):
         self.base_url = (base_url or os.getenv("OLLAMA_BASE_URL", "http://ollama:11434")).rstrip("/")
         self.default_model = default_model or os.getenv("OLLAMA_MODEL", "qwen2.5:3b-instruct")
         self._last_health_check_time: float = 0.0
         self._cached_health: Optional[Dict[str, Any]] = None
+
+        if requests and HTTPAdapter:
+            self._session = requests.Session()
+            adapter = HTTPAdapter(pool_connections=5, pool_maxsize=10, max_retries=0)
+            self._session.mount("http://", adapter)
+            self._session.mount("https://", adapter)
+        else:
+            self._session = None
 
     def check_health(self, force: bool = False) -> Dict[str, Any]:
         """Verifica la conectividad con Ollama con caché rápida (15s) y timeout corto (2.5s)."""
@@ -29,7 +39,8 @@ class OllamaClient:
             return self._cached_health
 
         try:
-            resp = requests.get(f"{self.base_url}/api/tags", timeout=2.5)
+            http_client = self._session or requests
+            resp = http_client.get(f"{self.base_url}/api/tags", timeout=2.5)
             if resp.status_code == 200:
                 data = resp.json()
                 models = [m.get("name") for m in data.get("models", [])]
@@ -112,7 +123,8 @@ class OllamaClient:
                     target_model,
                 )
                 start_time = time.time()
-                resp = requests.post(endpoint, json=payload, timeout=timeout)
+                http_client = self._session or requests
+                resp = http_client.post(endpoint, json=payload, timeout=timeout)
                 elapsed = time.time() - start_time
 
                 if resp.status_code == 200:

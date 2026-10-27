@@ -13,6 +13,7 @@ router = APIRouter(prefix="/search", tags=["Búsqueda y Pipeline"])
 
 
 @router.get("/preflight")
+@router.get("/preflight/")
 def preflight_check() -> Dict[str, Any]:
     """
     Comprueba el estado de salud de los componentes críticos antes de permitir una búsqueda:
@@ -72,6 +73,7 @@ def preflight_check() -> Dict[str, Any]:
 
 
 @router.post("/run")
+@router.post("/run/")
 async def trigger_manual_search(background_tasks: BackgroundTasks) -> Dict[str, Any]:
     """
     Inicia una búsqueda manual en segundo plano protegida por el cerrojo asíncrono.
@@ -107,6 +109,7 @@ async def trigger_manual_search(background_tasks: BackgroundTasks) -> Dict[str, 
 
 
 @router.get("/status")
+@router.get("/status/")
 def get_search_status() -> Dict[str, Any]:
     """Consulta el estado en curso, progreso y métricas de la última ejecución."""
     db = get_db()
@@ -126,6 +129,7 @@ def get_search_status() -> Dict[str, Any]:
 
 
 @router.post("/stop")
+@router.post("/stop/")
 def stop_search() -> Dict[str, Any]:
     """Detiene la búsqueda en curso solicitada por el usuario."""
     runner = get_runner()

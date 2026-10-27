@@ -82,6 +82,7 @@ class ConnectorManager:
     def run_discovery(
         self,
         on_job_saved: Optional[Callable[[Dict[str, Any]], None]] = None,
+        should_stop: Optional[Callable[[], bool]] = None,
     ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
         """
         Ejecuta la búsqueda en todas las fuentes configuradas, deduplica y guarda las nuevas ofertas.
@@ -176,6 +177,9 @@ class ConnectorManager:
         active_cv_name = cv_meta.get("filename") if cv_meta.get("has_cv") else None
 
         for connector in self.connectors:
+            if should_stop and should_stop():
+                logger.info("Detención de búsqueda solicitada en ConnectorManager. Abortando escaneo.")
+                break
             try:
                 logger.info("Iniciando escaneo con conector '%s'...", connector.name)
                 offers = connector.search(
@@ -190,6 +194,9 @@ class ConnectorManager:
                 # Guardar inmediatamente las ofertas de este conector para que la evaluación
                 # concurrente en paralelo pueda consumirlas de inmediato sin esperar al resto de portales
                 for offer in offers:
+                    if should_stop and should_stop():
+                        logger.info("Detención de búsqueda solicitada durante procesamiento de ofertas.")
+                        break
                     offer_dict = offer.to_dict()
                     if active_cv_name:
                         offer_dict["cv_filename"] = active_cv_name

@@ -158,6 +158,7 @@ def get_settings() -> Dict[str, Any]:
 
 
 @router.put("/channels")
+@router.put("/channels/")
 def update_notification_channels(req: NotificationChannelsUpdate) -> Dict[str, Any]:
     """
     Actualiza de forma atómica y persistente las preferencias de canal y claves API:

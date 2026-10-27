@@ -121,7 +121,8 @@ class CVTailorer:
                 prompt=prompt,
                 format_json=False,
                 temperature=0.1,
-                timeout=45,
+                timeout=90,
+                num_predict=150,
             )
             cleaned = adapted.strip().strip('"')
             if len(cleaned) > 50:

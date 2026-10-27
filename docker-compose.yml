@@ -13,6 +13,9 @@ services:
     image: ollama/ollama:latest
     container_name: lazyjob_ollama
     restart: "no"
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     ports:
       - "11434:11434"
     volumes:
@@ -43,6 +46,9 @@ services:
       dockerfile: Dockerfile
     container_name: lazyjob_app
     restart: "no"
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     env_file:
       - .env
     environment:

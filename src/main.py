@@ -163,7 +163,7 @@ async def main() -> None:
         try:
             await app.initialize()
             await app.start()
-            await app.updater.start_polling(drop_pending_updates=True)
+            await app.updater.start_polling(drop_pending_updates=True, bootstrap_retries=-1, poll_interval=1.0)
             logger.info("Bot de Telegram en modo Long-Polling activo.")
             app_started = True
         except Exception as e:

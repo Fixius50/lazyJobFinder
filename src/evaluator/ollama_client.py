@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import threading
 import time
 from typing import Any, Dict, List, Optional
 try:
@@ -16,7 +17,9 @@ logger = logging.getLogger("lazyJobFinder.evaluator.ollama")
 
 
 class OllamaClient:
-    """Cliente para interactuar con la API REST de Ollama en contenedor local con connection pooling."""
+    """Cliente para interactuar con la API REST de Ollama en contenedor local con connection pooling y sincronización segura."""
+
+    _generation_lock = threading.Lock()
 
     def __init__(self, base_url: Optional[str] = None, default_model: Optional[str] = None):
         self.base_url = (base_url or os.getenv("OLLAMA_BASE_URL", "http://ollama:11434")).rstrip("/")
@@ -75,13 +78,15 @@ class OllamaClient:
         format_schema: Optional[Any] = None,
         temperature: float = 0.1,
         timeout: int = 120,
+        num_predict: Optional[int] = None,
     ) -> str:
         """
-        Envía un prompt a Ollama y retorna la respuesta generada.
+        Envía un prompt a Ollama y retorna la respuesta generada de forma sincronizada y thread-safe.
         Soporta formato JSON genérico ('format': 'json') o salidas estructuradas nativas
         restringidas por gramática llama.cpp pasando un JSON Schema ('format': {...}).
         """
         target_model = model or self.default_model
+        num_pred = num_predict or (350 if (format_json or format_schema) else 512)
         payload = {
             "model": target_model,
             "prompt": prompt,
@@ -92,7 +97,7 @@ class OllamaClient:
                 "temperature": temperature,
                 "top_p": 0.9,
                 "num_ctx": 2048,
-                "num_predict": 512,
+                "num_predict": num_pred,
             },
         }
 
@@ -116,31 +121,34 @@ class OllamaClient:
 
         for attempt in range(1, max_retries + 1):
             try:
-                logger.debug(
-                    "Llamando a Ollama (intento %d/%d) con modelo '%s'...",
-                    attempt,
-                    max_retries,
-                    target_model,
-                )
-                start_time = time.time()
-                http_client = self._session or requests
-                resp = http_client.post(endpoint, json=payload, timeout=timeout)
-                elapsed = time.time() - start_time
-
-                if resp.status_code == 200:
-                    data = resp.json()
-                    response_text = data.get("response", "").strip()
-                    logger.debug("Ollama respondió en %.2f segundos (%d chars).", elapsed, len(response_text))
-                    return response_text
-
-                # Si el modelo no está instalado, abortar inmediatamente sin reintentos inútiles
-                if resp.status_code == 404:
-                    err_msg = (
-                        f"Modelo '{target_model}' no encontrado en Ollama (HTTP 404). "
-                        f"Descárgalo con: docker exec -it lazyjob_ollama ollama pull {target_model}"
+                with OllamaClient._generation_lock:
+                    logger.debug(
+                        "Llamando a Ollama (intento %d/%d) con modelo '%s' (timeout=%ss, num_predict=%d)...",
+                        attempt,
+                        max_retries,
+                        target_model,
+                        timeout,
+                        num_pred,
                     )
-                    logger.error(err_msg)
-                    raise FileNotFoundError(err_msg)
+                    start_time = time.time()
+                    http_client = self._session or requests
+                    resp = http_client.post(endpoint, json=payload, timeout=timeout)
+                    elapsed = time.time() - start_time
+
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        response_text = data.get("response", "").strip()
+                        logger.debug("Ollama respondió en %.2f segundos (%d chars).", elapsed, len(response_text))
+                        return response_text
+
+                    # Si el modelo no está instalado, abortar inmediatamente sin reintentos inútiles
+                    if resp.status_code == 404:
+                        err_msg = (
+                            f"Modelo '{target_model}' no encontrado en Ollama (HTTP 404). "
+                            f"Descárgalo con: docker exec -it lazyjob_ollama ollama pull {target_model}"
+                        )
+                        logger.error(err_msg)
+                        raise FileNotFoundError(err_msg)
 
                 logger.warning(
                     "Ollama retornó HTTP %d: %s. Reintentando...",

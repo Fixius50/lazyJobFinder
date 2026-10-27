@@ -8,7 +8,8 @@ import time
 from typing import Any, Callable, Dict, List, Optional
 from telegram import Update
 from telegram.constants import ParseMode
-from telegram.error import TelegramError
+from telegram.error import TelegramError, NetworkError, TimedOut
+from telegram.request import HTTPXRequest
 from telegram.ext import (
     Application,
     ApplicationBuilder,
@@ -20,6 +21,25 @@ from ..database import Database
 from ..evaluator.ollama_client import OllamaClient
 
 logger = logging.getLogger("lazyJobFinder.telegram_bot")
+
+
+class TelegramNetworkFilter(logging.Filter):
+    """Suprime trazas ruidosas de excepciones transitorias de red (DNS/socket) en python-telegram-bot."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.exc_info and len(record.exc_info) >= 2:
+            exc = record.exc_info[1]
+            if exc is not None and any(k in type(exc).__name__ for k in ("NetworkError", "ConnectError", "Timeout", "TimedOut")):
+                record.exc_info = None
+                record.levelno = logging.WARNING
+                record.levelname = "WARNING"
+                record.msg = f"Aviso de conectividad en Telegram: {exc} (reintentando en el próximo ciclo...)"
+        return True
+
+
+# Activar filtro en loggers internos de telegram
+for _log_name in ("telegram.ext._utils.networkloop", "telegram.request._baserequest", "telegram.ext.Updater", "telegram"):
+    logging.getLogger(_log_name).addFilter(TelegramNetworkFilter())
 
 # Constantes de seguridad de Telegram
 MAX_MESSAGE_LENGTH = 4000
@@ -315,7 +335,15 @@ class TelegramJobBot:
             return self.app.bot
         if self.is_configured():
             from telegram import Bot
-            bot = Bot(token=self.token)
+            request = HTTPXRequest(
+                connection_pool_size=8,
+                connect_timeout=20.0,
+                read_timeout=30.0,
+                write_timeout=20.0,
+                pool_timeout=10.0,
+                http_version="1.1",
+            )
+            bot = Bot(token=self.token, request=request)
             try:
                 await bot.initialize()
             except Exception:
@@ -427,14 +455,31 @@ class TelegramJobBot:
                     caption=f"✉️ <b>Carta de Presentación para {company}</b>",
                 )
 
+    async def _on_error(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Manejador centralizado de incidencias de red no capturadas."""
+        err = context.error
+        if isinstance(err, (NetworkError, TimedOut)):
+            logger.warning("Incidencia transitoria de conectividad en Telegram Bot: %s (reintentando...)", err)
+            return
+        logger.error("Error no capturado en Telegram Bot: %s", err, exc_info=err)
+
     def build_application(self) -> Application:
         """Configura y retorna la instancia de Application de python-telegram-bot."""
         if not self.is_configured():
             logger.warning("Credenciales de Telegram no configuradas. El bot no se conectará.")
             return None
 
-        app = ApplicationBuilder().token(self.token).build()
+        request = HTTPXRequest(
+            connection_pool_size=8,
+            connect_timeout=20.0,
+            read_timeout=30.0,
+            write_timeout=20.0,
+            pool_timeout=10.0,
+            http_version="1.1",
+        )
+        app = ApplicationBuilder().token(self.token).request(request).build()
 
+        app.add_error_handler(self._on_error)
         app.add_handler(CommandHandler("start", self._cmd_start))
         app.add_handler(CommandHandler("ayuda", self._cmd_start))
         app.add_handler(CommandHandler("estado", self._cmd_estado))

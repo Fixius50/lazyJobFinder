@@ -17,7 +17,7 @@ class TestTelegramResilience(unittest.TestCase):
         self.settings = {
             "notificaciones": {
                 "telegram": {
-                    "bot_token": "123456789:ABCdefGhIJKlmnoPQRstuvWXyz",
+                    "bot_token": "999999999:AAFakeValidMockTokenForResilienceTestXYZ",
                     "allowed_user_id": 5978474268,
                 }
             }
@@ -58,7 +58,7 @@ class TestTelegramResilience(unittest.TestCase):
 
     def test_build_application_configures_httpx_request(self):
         """Verifica que build_application configure HTTPXRequest con timeouts y pool robustos."""
-        with patch("src.telegram_bot.bot.ApplicationBuilder") as mock_builder_cls:
+        with patch.object(self.bot, "is_configured", return_value=True), patch("src.telegram_bot.bot.ApplicationBuilder") as mock_builder_cls:
             mock_builder = MagicMock()
             mock_builder_cls.return_value = mock_builder
             mock_builder.token.return_value = mock_builder

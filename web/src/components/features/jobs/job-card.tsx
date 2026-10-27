@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useState, useEffect } from "react";
 import {
   Building,
   MapPin,
@@ -9,6 +9,7 @@ import {
   Download,
   Eye,
   RefreshCw,
+  Sparkles,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -24,12 +25,51 @@ interface JobCardProps {
   job: JobListItem;
   onOpenDetail: (id: number) => void;
   onUpdateStatus?: (newStatus: string) => void;
+  onUpdateJob?: (updatedJob: JobListItem) => void;
 }
 
-export function JobCard({ job, onOpenDetail }: JobCardProps) {
+export function JobCard({ job, onOpenDetail, onUpdateJob }: JobCardProps) {
   const sourceMeta = PORTAL_SOURCES[job.source as keyof typeof PORTAL_SOURCES];
   const isEvaluating = job.status === "evaluating";
-  const isGeneratingDocs = job.status === "generating_docs";
+
+  const [hasCv, setHasCv] = useState<boolean>(!!job.has_cv);
+  const [hasLetter, setHasLetter] = useState<boolean>(!!job.has_letter);
+  const [isGenerating, setIsGenerating] = useState<boolean>(job.status === "generating_docs");
+
+  useEffect(() => {
+    setHasCv(!!job.has_cv);
+    setHasLetter(!!job.has_letter);
+    if (job.status === "generating_docs") {
+      setIsGenerating(true);
+    }
+  }, [job.has_cv, job.has_letter, job.status]);
+
+  const handleGenerateDocs = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (isGenerating) return;
+
+    setIsGenerating(true);
+    try {
+      const res = await api.generateJobDocuments(job.id);
+      if (res.success) {
+        setHasCv(true);
+        setHasLetter(true);
+        const updated: JobListItem = {
+          ...job,
+          has_cv: true,
+          has_letter: true,
+          status: "evaluated",
+        };
+        if (onUpdateJob) {
+          onUpdateJob(updated);
+        }
+      }
+    } catch (err: any) {
+      alert(`Error generando CV y carta: ${err.message || err}`);
+    } finally {
+      setIsGenerating(false);
+    }
+  };
 
   return (
     <Card className="group flex flex-col justify-between hover:border-primary/50 hover:shadow-md transition-all duration-200 bg-card/80 backdrop-blur-sm border rounded-xl overflow-hidden h-full">
@@ -84,10 +124,10 @@ export function JobCard({ job, onOpenDetail }: JobCardProps) {
           </div>
         </div>
 
-        {/* Pie de la Tarjeta: Acciones de descarga de documentos y botón de detalles */}
+        {/* Pie de la Tarjeta: Acciones de descarga y botón de generación */}
         <div className="pt-2 border-t border-border/40 flex items-center justify-between gap-1.5">
           <div className="flex items-center gap-1">
-            {job.has_cv ? (
+            {hasCv ? (
               <Button
                 size="sm"
                 variant="ghost"
@@ -98,14 +138,9 @@ export function JobCard({ job, onOpenDetail }: JobCardProps) {
                 <Download className="h-3 w-3" />
                 <span>CV</span>
               </Button>
-            ) : isGeneratingDocs ? (
-              <span className="text-3xs text-amber-500/90 font-medium flex items-center gap-1 animate-pulse px-1">
-                <RefreshCw className="h-2.5 w-2.5 animate-spin" />
-                Adaptando CV...
-              </span>
             ) : null}
 
-            {job.has_letter ? (
+            {hasLetter ? (
               <Button
                 size="sm"
                 variant="ghost"
@@ -116,23 +151,56 @@ export function JobCard({ job, onOpenDetail }: JobCardProps) {
                 <Download className="h-3 w-3" />
                 <span>Carta</span>
               </Button>
-            ) : isGeneratingDocs ? (
-              <span className="text-3xs text-blue-400 font-medium flex items-center gap-1 animate-pulse px-1">
-                <RefreshCw className="h-2.5 w-2.5 animate-spin" />
-                Carta...
-              </span>
             ) : null}
           </div>
 
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={() => onOpenDetail(job.id)}
-            className="h-7 px-2 text-xs flex items-center gap-1 ml-auto font-medium shadow-xs hover:bg-secondary/80"
-          >
-            <Eye className="h-3 w-3" />
-            <span>Detalles</span>
-          </Button>
+          <div className="flex items-center gap-1.5 ml-auto">
+            {/* Botón de Generar CV y Carta bajo demanda (a la izquierda de Vista/Detalles) */}
+            <Button
+              size="sm"
+              variant={hasCv && hasLetter ? "ghost" : "outline"}
+              disabled={isGenerating}
+              onClick={handleGenerateDocs}
+              title={
+                hasCv && hasLetter
+                  ? "Regenerar CV y carta adaptados con IA"
+                  : "Generar CV y carta adaptados a esta oferta en particular"
+              }
+              className={`h-7 px-2 text-2xs flex items-center gap-1 font-medium transition-all ${
+                hasCv && hasLetter
+                  ? "text-muted-foreground hover:text-primary hover:bg-primary/10"
+                  : "bg-primary/10 text-primary border-primary/30 hover:bg-primary/20 hover:border-primary/50 shadow-xs"
+              }`}
+            >
+              {isGenerating ? (
+                <>
+                  <RefreshCw className="h-3 w-3 animate-spin text-primary" />
+                  <span>Generando...</span>
+                </>
+              ) : hasCv && hasLetter ? (
+                <>
+                  <Sparkles className="h-3 w-3 text-amber-400" />
+                  <span className="hidden sm:inline">Regenerar</span>
+                </>
+              ) : (
+                <>
+                  <Sparkles className="h-3 w-3 text-primary animate-pulse" />
+                  <span>Generar</span>
+                </>
+              )}
+            </Button>
+
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => onOpenDetail(job.id)}
+              className="h-7 px-2 text-xs flex items-center gap-1 font-medium shadow-xs hover:bg-secondary/80"
+              title="Ver detalles de la oferta"
+            >
+              <Eye className="h-3 w-3" />
+              <span>Detalles</span>
+            </Button>
+          </div>
         </div>
       </CardContent>
     </Card>

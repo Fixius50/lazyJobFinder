@@ -241,7 +241,7 @@ class JobPipelineRunner:
 
                 # Parámetros de evaluación y generación documental
                 min_score = int(self.settings.get("evaluacion", {}).get("umbral_minimo_puntuacion", 50))
-                generate_docs = self.settings.get("evaluacion", {}).get("generar_documentos", True)
+                generate_docs = self.settings.get("evaluacion", {}).get("generar_documentos", False)
                 concurrency = max(1, int(self.settings.get("evaluacion", {}).get("concurrencia", 1)))
                 qualified_candidates: List[Tuple[Dict[str, Any], Dict[str, Any]]] = []
 

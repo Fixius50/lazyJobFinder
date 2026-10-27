@@ -21,6 +21,11 @@ try:
 except ImportError:
     RAPIDFUZZ_AVAILABLE = False
 
+try:
+    import sqlite_utils
+except ImportError:
+    sqlite_utils = None
+
 logger = logging.getLogger("lazyJobFinder.database")
 
 from .storage import DB_PATH as DEFAULT_DB_PATH
@@ -340,28 +345,45 @@ class Database:
 
     def get_app_state(self, key: str, default: Any = None) -> Any:
         """Recupera un valor de estado o configuración persistente desde SQLite."""
+        if sqlite_utils:
+            try:
+                row = self.get_utils_db()["app_state"].get(key)
+                val = row["value"]
+                try:
+                    return json.loads(val)
+                except Exception:
+                    return val
+            except Exception:
+                return default
         with self._get_connection() as conn:
             cursor = conn.execute("SELECT value FROM app_state WHERE key = ?", (key,))
             row = cursor.fetchone()
             if not row:
                 return default
             try:
-                import json
                 return json.loads(row["value"])
             except Exception:
                 return row["value"]
 
     def set_app_state(self, key: str, value: Any) -> None:
         """Guarda o actualiza un valor de estado persistente en SQLite de manera atómica."""
-        import json
         val_str = json.dumps(value, ensure_ascii=False) if not isinstance(value, str) else value
+        if sqlite_utils:
+            try:
+                self.get_utils_db()["app_state"].upsert(
+                    {"key": key, "value": val_str, "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")},
+                    pk="key",
+                )
+                return
+            except Exception as e:
+                logger.debug("Fallback de set_app_state a SQLite nativo: %s", e)
         with self._get_connection() as conn:
             conn.execute(
                 """
-                INSERT INTO app_state (key, value, updated_at)
+                INSERT INTO app_state (key, value, updated_at) 
                 VALUES (?, ?, datetime('now', 'localtime'))
-                ON CONFLICT(key) DO UPDATE SET
-                    value = excluded.value,
+                ON CONFLICT(key) DO UPDATE SET 
+                    value = excluded.value, 
                     updated_at = datetime('now', 'localtime')
                 """,
                 (key, val_str),
@@ -369,6 +391,12 @@ class Database:
 
     def delete_app_state(self, key: str) -> None:
         """Elimina una clave de estado persistente de SQLite."""
+        if sqlite_utils:
+            try:
+                self.get_utils_db()["app_state"].delete(key)
+                return
+            except Exception:
+                pass
         with self._get_connection() as conn:
             conn.execute("DELETE FROM app_state WHERE key = ?", (key,))
 
@@ -439,6 +467,12 @@ class Database:
 
     def delete_cv_cache(self, filename: str) -> None:
         """Elimina la caché de extracción de un CV específico en SQLite."""
+        if sqlite_utils:
+            try:
+                self.get_utils_db()["cv_cache"].delete(filename)
+                return
+            except Exception:
+                pass
         with self._get_connection() as conn:
             conn.execute("DELETE FROM cv_cache WHERE filename = ?", (filename,))
 
@@ -877,6 +911,12 @@ class Database:
 
     def update_job_status(self, job_id: int, status: str) -> None:
         """Actualiza el estado del ciclo de vida de la oferta."""
+        if sqlite_utils:
+            try:
+                self.get_utils_db()["jobs"].update(job_id, {"status": status, "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
+                return
+            except Exception:
+                pass
         with self._get_connection() as conn:
             conn.execute("UPDATE jobs SET status = ?, updated_at = datetime('now', 'localtime') WHERE id = ?", (status, job_id))
 
@@ -887,6 +927,30 @@ class Database:
         missing = json.dumps(eval_data.get("missing_skills", []), ensure_ascii=False)
         strengths = json.dumps(eval_data.get("strengths", []), ensure_ascii=False)
         gaps = json.dumps(eval_data.get("gaps", []), ensure_ascii=False)
+
+        if sqlite_utils:
+            try:
+                db = self.get_utils_db()
+                if not db["jobs"].get(job_id):
+                    logger.warning("Oferta ID %s ya no existe en tabla jobs. Omitiendo guardado de evaluación.", job_id)
+                    return -1
+                db["evaluations"].upsert(
+                    {
+                        "job_id": job_id,
+                        "score": eval_data.get("score", 0),
+                        "fit_level": eval_data.get("fit_level", "MODERADO"),
+                        "matched_skills": matched,
+                        "missing_skills": missing,
+                        "strengths": strengths,
+                        "gaps": gaps,
+                        "reasoning": eval_data.get("reasoning", ""),
+                        "should_apply": 1 if eval_data.get("should_apply") else 0,
+                    },
+                    pk="job_id",
+                )
+                return job_id
+            except Exception as e:
+                logger.debug("Fallback save_evaluation a SQL: %s", e)
 
         with self._get_connection() as conn:
             job_exists = conn.execute("SELECT 1 FROM jobs WHERE id = ?", (job_id,)).fetchone()
@@ -928,6 +992,27 @@ class Database:
     def save_documents(self, doc_data: Dict[str, Any]) -> int:
         """Registra o actualiza las rutas de los archivos PDF y Markdown generados."""
         job_id = doc_data["job_id"]
+        if sqlite_utils:
+            try:
+                db = self.get_utils_db()
+                if not db["jobs"].get(job_id):
+                    logger.warning("Oferta ID %s ya no existe en tabla jobs. Omitiendo guardado de documentos.", job_id)
+                    return -1
+                db["generated_documents"].upsert(
+                    {
+                        "job_id": job_id,
+                        "cv_pdf_path": doc_data.get("cv_pdf_path"),
+                        "cv_md_path": doc_data.get("cv_md_path"),
+                        "letter_pdf_path": doc_data.get("letter_pdf_path"),
+                        "letter_md_path": doc_data.get("letter_md_path"),
+                        "diff_summary": doc_data.get("diff_summary", ""),
+                    },
+                    pk="job_id",
+                )
+                return job_id
+            except Exception as e:
+                logger.debug("Fallback save_documents a SQL: %s", e)
+
         with self._get_connection() as conn:
             job_exists = conn.execute("SELECT 1 FROM jobs WHERE id = ?", (job_id,)).fetchone()
             if not job_exists:
@@ -961,12 +1046,18 @@ class Database:
 
     def start_pipeline_run(self, trigger_type: str) -> int:
         """Registra el inicio de una ejecución en la tabla persistente pipeline_runs."""
+        if sqlite_utils:
+            try:
+                pk = self.get_utils_db()["pipeline_runs"].insert({"trigger_type": trigger_type, "status": "running"}).last_pk
+                return int(pk) if pk is not None else 0
+            except Exception:
+                pass
         with self._get_connection() as conn:
             cursor = conn.execute(
                 "INSERT INTO pipeline_runs (trigger_type, status) VALUES (?, 'running')",
                 (trigger_type,),
             )
-            return cursor.lastrowid
+            return int(cursor.lastrowid or 0)
 
     def finish_pipeline_run(
         self,
@@ -978,6 +1069,20 @@ class Database:
         error_message: Optional[str] = None,
     ) -> None:
         """Registra la finalización de una ejecución con sus métricas."""
+        data = {
+            "finished_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "status": status,
+            "total_found": total_found,
+            "new_jobs": new_jobs,
+            "relevant_jobs": relevant_jobs,
+            "error_message": error_message,
+        }
+        if sqlite_utils:
+            try:
+                self.get_utils_db()["pipeline_runs"].update(run_id, data)
+                return
+            except Exception:
+                pass
         with self._get_connection() as conn:
             conn.execute(
                 """
@@ -1190,6 +1295,14 @@ class Database:
     def log_event(self, level: str, source: str, message: str, details: Optional[str] = None) -> None:
         """Registra un evento o error del sistema de forma persistente."""
         try:
+            if sqlite_utils:
+                self.get_utils_db()["system_logs"].insert({
+                    "level": level.upper(),
+                    "source": source,
+                    "message": message,
+                    "details": details or "",
+                })
+                return
             with self._get_connection() as conn:
                 conn.execute(
                     "INSERT INTO system_logs (level, source, message, details) VALUES (?, ?, ?, ?)",
@@ -1477,21 +1590,24 @@ class Database:
         ui_saved: Optional[int] = None,
     ) -> None:
         """Actualiza independientemente los estados de canal de una oferta."""
-        updates = []
-        params: List[Any] = []
+        updates: Dict[str, Any] = {}
         if telegram_notified is not None:
-            updates.append("telegram_notified = ?")
-            params.append(telegram_notified)
+            updates["telegram_notified"] = telegram_notified
         if ui_saved is not None:
-            updates.append("ui_saved = ?")
-            params.append(ui_saved)
+            updates["ui_saved"] = ui_saved
 
         if updates:
-            updates.append("updated_at = datetime('now', 'localtime')")
-            params.append(job_id)
-            sql = f"UPDATE jobs SET {', '.join(updates)} WHERE id = ?"
+            updates["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            if sqlite_utils:
+                try:
+                    self.get_utils_db()["jobs"].update(job_id, updates)
+                    return
+                except Exception:
+                    pass
+            sql_parts = [f"{k} = ?" for k in updates.keys()]
+            params = list(updates.values()) + [job_id]
             with self._get_connection() as conn:
-                conn.execute(sql, params)
+                conn.execute(f"UPDATE jobs SET {', '.join(sql_parts)} WHERE id = ?", params)
 
     def prune_old_system_logs(self, max_entries: int = 150, retention_hours: int = 24, force: bool = False) -> int:
         """
@@ -1534,7 +1650,7 @@ class Database:
         try:
             with self._get_connection() as conn:
                 cursor = conn.execute("DELETE FROM system_logs")
-                return cursor.rowcount
+                return int(cursor.rowcount)
         except Exception as e:
             logger.error("Error vaciando system_logs: %s", e)
             return 0
@@ -1586,6 +1702,11 @@ class Database:
 
     def get_recent_pipeline_runs(self, limit: int = 10) -> List[Dict[str, Any]]:
         """Recupera el historial de ejecuciones del pipeline."""
+        if sqlite_utils:
+            try:
+                return list(self.get_utils_db()["pipeline_runs"].rows_where(order_by="id desc", limit=limit))
+            except Exception:
+                pass
         with self._get_connection() as conn:
             cursor = conn.execute(
                 "SELECT * FROM pipeline_runs ORDER BY id DESC LIMIT ?",
@@ -1631,6 +1752,24 @@ class Database:
         Elimina el historial completo de ofertas, evaluaciones y documentos generados.
         Conserva la estructura de tablas y los registros de system_logs para auditoría.
         """
+        if sqlite_utils:
+            try:
+                db = self.get_utils_db()
+                jobs_count = db["jobs"].count
+                evals_count = db["evaluations"].count
+                docs_count = db["generated_documents"].count
+                db["generated_documents"].delete_where()
+                db["evaluations"].delete_where()
+                db["jobs"].delete_where()
+                db["pipeline_runs"].delete_where()
+                return {
+                    "jobs_deleted": jobs_count,
+                    "evaluations_deleted": evals_count,
+                    "documents_deleted": docs_count,
+                }
+            except Exception:
+                pass
+
         with self._get_connection() as conn:
             jobs_count = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
             evals_count = conn.execute("SELECT COUNT(*) FROM evaluations").fetchone()[0]
@@ -1651,9 +1790,10 @@ class Database:
         """Elimina todas las ofertas asociadas a un archivo CV específico."""
         if not cv_filename or cv_filename in ("none", "Ninguno"):
             return 0
+        cleaned = str(cv_filename).strip()
         with self._get_connection() as conn:
-            cursor = conn.execute("DELETE FROM jobs WHERE cv_filename = ?", (str(cv_filename).strip(),))
-            deleted = cursor.rowcount
+            cursor = conn.execute("DELETE FROM jobs WHERE cv_filename = ?", (cleaned,))
+            deleted = int(cursor.rowcount)
             conn.commit()
             logger.info("Eliminadas %d ofertas asociadas al CV '%s'", deleted, cv_filename)
             return deleted

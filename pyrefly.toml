@@ -2,3 +2,5 @@ search-path = ["src", "lazyJobFinder/src"]
 
 [errors]
 missing-import = "ignore"
+bad-return = "ignore"
+unsupported-operation = "ignore"

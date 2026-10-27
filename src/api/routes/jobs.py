@@ -226,3 +226,93 @@ def download_job_document(job_id: int, doc_type: str):
         media_type=media_type,
         filename=filename,
     )
+
+
+@router.post("/{job_id}/generate-documents")
+async def generate_job_documents_endpoint(job_id: int) -> Dict[str, Any]:
+    """Genera bajo demanda el CV adaptado y la carta de presentación para una vacante específica."""
+    import asyncio
+    import yaml
+    from ...tailoring.cv_reader import get_active_profile, get_active_cv_status
+    from ...tailoring.cv_tailorer import CVTailorer
+    from ...tailoring.cover_letter import CoverLetterGenerator
+    from ...tailoring.pdf_renderer import PDFRenderer
+    from ...evaluator.ollama_client import OllamaClient
+
+    db = get_db()
+    detail = db.get_job_detail(job_id)
+    if not detail:
+        raise HTTPException(status_code=404, detail=f"Oferta con ID {job_id} no encontrada.")
+
+    cv_status = get_active_cv_status()
+    if not cv_status.get("has_cv"):
+        raise HTTPException(
+            status_code=400,
+            detail="No hay ningún currículum activo configurado. Sube o selecciona un CV primero.",
+        )
+
+    profile = get_active_profile()
+    if not profile:
+        raise HTTPException(
+            status_code=400,
+            detail="No se pudo extraer el perfil estructurado del CV activo.",
+        )
+
+    eval_dict = {
+        "score": detail.get("score") or 75,
+        "fit_level": detail.get("fit_level") or "BUENO",
+        "should_apply": True,
+        "matched_skills": detail.get("matched_skills") or [],
+        "missing_skills": detail.get("missing_skills") or [],
+        "strengths": detail.get("strengths") or [],
+        "gaps": detail.get("gaps") or [],
+        "reasoning": detail.get("reasoning") or "",
+    }
+
+    db.update_job_status(job_id, "generating_docs")
+    ollama = OllamaClient()
+    tailorer = CVTailorer(profile=profile, ollama_client=ollama)
+    letter_gen = CoverLetterGenerator(profile=profile, ollama_client=ollama)
+    renderer = PDFRenderer()
+
+    try:
+        cv_md, diff_audit = await asyncio.to_thread(tailorer.tailor, detail, eval_dict)
+        letter_md = await asyncio.to_thread(letter_gen.generate, detail, eval_dict)
+
+        doc_paths = await asyncio.to_thread(
+            renderer.render_cv_and_letter,
+            job=detail,
+            cv_md=cv_md,
+            diff_audit=diff_audit,
+            letter_md=letter_md,
+        )
+
+        db.save_documents({
+            "job_id": job_id,
+            "cv_pdf_path": doc_paths["cv_pdf_path"],
+            "cv_md_path": doc_paths["cv_md_path"],
+            "letter_pdf_path": doc_paths["letter_pdf_path"],
+            "letter_md_path": doc_paths["letter_md_path"],
+            "diff_summary": yaml.dump(diff_audit, allow_unicode=True),
+        })
+
+        db.update_job_status(job_id, "evaluated")
+        db.log_event("INFO", "jobs", f"Documentos generados bajo demanda con éxito para oferta ID {job_id}")
+
+        return {
+            "success": True,
+            "job_id": job_id,
+            "has_cv": True,
+            "has_letter": True,
+            "cv_pdf_url": f"/api/jobs/{job_id}/document/cv_pdf",
+            "letter_pdf_url": f"/api/jobs/{job_id}/document/letter_pdf",
+            "message": "CV y carta de presentación generados correctamente.",
+        }
+    except Exception as e:
+        db.update_job_status(job_id, "evaluated")
+        logger.error("Fallo generando documentos bajo demanda para ID %d: %s", job_id, e)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error al generar documentos: {str(e)}",
+        )
+

@@ -295,6 +295,19 @@ export const api = {
     }),
   getDocumentUrl: (jobId: number, docType: "cv_pdf" | "cv_md" | "letter_pdf" | "letter_md") =>
     `${getApiBaseUrl()}/jobs/${jobId}/document/${docType}`,
+  generateJobDocuments: (jobId: number) =>
+    request<{
+      success: boolean;
+      job_id: number;
+      has_cv: boolean;
+      has_letter: boolean;
+      cv_pdf_url: string;
+      letter_pdf_url: string;
+      message: string;
+    }>(`/jobs/${jobId}/generate-documents`, {
+      method: "POST",
+      timeoutMs: 180000,
+    }),
 
   // 4. Configuración
   getSettings: () => request<SettingsResponse>("/settings"),

@@ -13,6 +13,11 @@ except ImportError:
     requests = None
     HTTPAdapter = None
 
+try:
+    import ollama
+except ImportError:
+    ollama = None
+
 logger = logging.getLogger("lazyJobFinder.evaluator.ollama")
 
 
@@ -26,6 +31,8 @@ class OllamaClient:
         self.default_model = default_model or os.getenv("OLLAMA_MODEL", "qwen2.5:3b-instruct")
         self._last_health_check_time: float = 0.0
         self._cached_health: Optional[Dict[str, Any]] = None
+
+        self._ollama_sdk = ollama.Client(host=self.base_url) if ollama else None
 
         if requests and HTTPAdapter:
             self._session = requests.Session()
@@ -42,6 +49,24 @@ class OllamaClient:
             return self._cached_health
 
         try:
+            if self._ollama_sdk:
+                try:
+                    resp = self._ollama_sdk.list()
+                    models = [getattr(m, "model", "") or getattr(m, "name", "") for m in getattr(resp, "models", [])]
+                    res = {
+                        "online": True,
+                        "models": models,
+                        "default_model": self.default_model,
+                        "default_model_installed": any(
+                            self.default_model.split(":")[0] in m for m in models
+                        ),
+                    }
+                    self._cached_health = res
+                    self._last_health_check_time = now
+                    return res
+                except Exception as sdk_err:
+                    logger.debug("Ollama SDK list falló, intentando requests: %s", sdk_err)
+
             http_client = self._session or requests
             resp = http_client.get(f"{self.base_url}/api/tags", timeout=2.5)
             if resp.status_code == 200:
@@ -131,6 +156,32 @@ class OllamaClient:
                         num_pred,
                     )
                     start_time = time.time()
+
+                    if self._ollama_sdk:
+                        try:
+                            options = {
+                                "temperature": temperature,
+                                "top_p": 0.9,
+                                "num_ctx": 2048,
+                                "num_predict": num_pred,
+                            }
+                            gen_resp = self._ollama_sdk.generate(
+                                model=target_model,
+                                prompt=prompt,
+                                system=system_prompt,
+                                stream=False,
+                                keep_alive="24h",
+                                format=payload.get("format"),
+                                options=options,
+                            )
+                            response_text = getattr(gen_resp, "response", "") or ""
+                            response_text = response_text.strip()
+                            elapsed = time.time() - start_time
+                            logger.debug("Ollama SDK respondió en %.2f segundos (%d chars).", elapsed, len(response_text))
+                            return response_text
+                        except Exception as sdk_gen_err:
+                            logger.debug("Ollama SDK generate falló (%s), intentando fallback HTTP...", sdk_gen_err)
+
                     http_client = self._session or requests
                     resp = http_client.post(endpoint, json=payload, timeout=timeout)
                     elapsed = time.time() - start_time

@@ -487,6 +487,12 @@ export function ApplicationsView() {
     }
   };
 
+  const handleJobUpdated = (updatedJob: JobListItem) => {
+    setRawJobs((prev) =>
+      prev.map((j) => (j.id === updatedJob.id ? { ...j, ...updatedJob } : j))
+    );
+  };
+
   const handleRefresh = async () => {
     try {
       setLoading(true);
@@ -640,6 +646,7 @@ export function ApplicationsView() {
                     key={job.id}
                     job={job}
                     onOpenDetail={handleOpenDetail}
+                    onUpdateJob={handleJobUpdated}
                   />
                 ))}
               </div>

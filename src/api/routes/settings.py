@@ -22,6 +22,35 @@ from ...storage import (
 )
 
 
+def _update_env_file(key: str, value: str) -> None:
+    """Actualiza o añade una variable de entorno en el archivo .env de forma segura."""
+    try:
+        env_path = os.path.join(BASE_DIR, ".env")
+        lines = []
+        if os.path.exists(env_path):
+            with open(env_path, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+
+        found = False
+        new_lines = []
+        for line in lines:
+            if line.strip().startswith(f"{key}="):
+                if value:
+                    new_lines.append(f"{key}={value}\n")
+                found = True
+            else:
+                new_lines.append(line)
+
+        if not found and value:
+            new_lines.append(f"{key}={value}\n")
+
+        with open(env_path, "w", encoding="utf-8") as f:
+            f.writelines(new_lines)
+    except Exception as e:
+        logger.warning("No se pudo actualizar variable %s en .env: %s", key, e)
+
+
+
 
 class NotificationChannelsUpdate(BaseModel):
     guardar_en_interfaz: Optional[bool] = Field(True, description="Conservar y consultar en la interfaz web local (obligatorio)")

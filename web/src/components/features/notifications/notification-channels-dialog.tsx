@@ -17,6 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { SettingsResponse, api } from "@/lib/api";
+import { toast } from "sonner";
 
 interface NotificationChannelsDialogProps {
   open: boolean;
@@ -137,13 +138,14 @@ export function NotificationChannelsDialog({
         infojobs_client_id: infojobsClientId.trim() || undefined,
         infojobs_client_secret: infojobsClientSecret.trim() || undefined,
       });
+      toast.success("Preferencias y credenciales guardadas con éxito.");
       setSaveStatus("Preferencias y claves guardadas correctamente");
       setTimeout(() => {
         setSaveStatus(null);
         onOpenChange(false);
-      }, 1500);
+      }, 1000);
     } catch (err: any) {
-      alert(`Error guardando preferencias: ${err.message}`);
+      toast.error(`Error guardando preferencias: ${err.message || err}`);
     } finally {
       setSaving(false);
     }

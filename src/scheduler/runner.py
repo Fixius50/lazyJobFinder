@@ -117,6 +117,7 @@ class JobPipelineRunner:
         # 4. Planificador con control explícito de concurrencia y reinicios
         self.scheduler = AsyncIOScheduler()
         self._async_lock: Optional[asyncio.Lock] = None
+        self._stop_requested: bool = False
 
     def _load_yaml(self, path: str) -> Dict[str, Any]:
         try:
@@ -160,6 +161,7 @@ class JobPipelineRunner:
             return
 
         async with self._async_lock:
+            self._stop_requested = False
             start_time = time.time()
             trigger_type = trigger_label or ("manual" if is_manual else "scheduled")
             run_id = self.db.start_pipeline_run(trigger_type)
@@ -209,17 +211,8 @@ class JobPipelineRunner:
                 self.db.reset_evaluating_jobs()
                 active_cv_name = cv_status.get("filename") if cv_status.get("has_cv") else None
 
-                # Recuperar vacantes pendientes de evaluación previas en SQLite
+                # Recuperar vacantes pendientes de evaluación previas en SQLite (orden natural de registro)
                 pending_jobs = await asyncio.to_thread(self.db.get_unevaluated_jobs, 500, active_cv_name)
-                try:
-                    cv_keywords = _extract_cv_scoring_keywords(self.profile, self.settings)
-                    if cv_keywords:
-                        pending_jobs.sort(
-                            key=lambda j: _calculate_job_evaluation_priority(j, cv_keywords),
-                            reverse=True,
-                        )
-                except Exception as sort_err:
-                    logger.debug("Error ordenando vacantes por prioridad aparente: %s", sort_err)
 
                 eval_queue: asyncio.Queue[Optional[Dict[str, Any]]] = asyncio.Queue()
                 seen_job_ids = set()
@@ -234,6 +227,8 @@ class JobPipelineRunner:
 
                 def _on_job_saved(job_dict: Dict[str, Any]) -> None:
                     """Callback emitido en tiempo real por cada conector en cuanto guarda una nueva oferta."""
+                    if self._stop_requested:
+                        return
                     j_id = job_dict.get("id")
                     if j_id and j_id not in seen_job_ids:
                         seen_job_ids.add(j_id)
@@ -352,7 +347,11 @@ class JobPipelineRunner:
                 async def _run_discovery_task():
                     try:
                         self.db.log_event("INFO", "pipeline", "Iniciando rastreo de ofertas en portales y evaluación simultánea...")
-                        res = await asyncio.to_thread(self.connectors_mgr.run_discovery, _on_job_saved)
+                        res = await asyncio.to_thread(
+                            self.connectors_mgr.run_discovery,
+                            _on_job_saved,
+                            lambda: self._stop_requested,
+                        )
                         self.db.log_event("INFO", "pipeline", f"Descubrimiento completado: {res[1]['total_encontradas']} ofertas encontradas ({res[1]['nuevas_guardadas']} nuevas registradas).")
                         return res
                     finally:
@@ -363,8 +362,14 @@ class JobPipelineRunner:
                 # Tarea Consumidora: Evaluación con IA en paralelo conforme van llegando o existían pendientes
                 async def _eval_worker():
                     while True:
+                        if self._stop_requested:
+                            eval_queue.task_done()
+                            break
                         job = await eval_queue.get()
                         if job is None:
+                            eval_queue.task_done()
+                            break
+                        if self._stop_requested:
                             eval_queue.task_done()
                             break
                         try:
@@ -514,6 +519,15 @@ class JobPipelineRunner:
     def is_running(self) -> bool:
         """Indica si el pipeline se encuentra actualmente en ejecución activa."""
         return self._async_lock is not None and self._async_lock.locked()
+
+    def request_stop(self) -> bool:
+        """Solicita la detención inmediata del ciclo de búsqueda en ejecución."""
+        if not self.is_running():
+            return False
+        self._stop_requested = True
+        logger.info("Detención de búsqueda solicitada por el usuario.")
+        self.db.log_event("WARNING", "pipeline", "Detención de búsqueda solicitada por el usuario desde la interfaz web.")
+        return True
 
     def reload_settings(self) -> None:
         """Recarga la configuración desde SQLite y propaga los cambios a los componentes."""

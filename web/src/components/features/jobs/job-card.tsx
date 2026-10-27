@@ -19,6 +19,8 @@ import { formatDateTime } from "@/lib/utils";
 import { APPLICATION_STATUSES, PORTAL_SOURCES, ApplicationStatusKey } from "@/lib/constants";
 import { api } from "@/lib/api";
 
+import { toast } from "sonner";
+
 import { JobScoreBadge, JobStatusBadge, JobModalityBadge } from "./job-badges";
 
 interface JobCardProps {
@@ -49,26 +51,27 @@ export function JobCard({ job, onOpenDetail, onUpdateJob }: JobCardProps) {
     if (isGenerating) return;
 
     setIsGenerating(true);
-    try {
-      const res = await api.generateJobDocuments(job.id);
-      if (res.success) {
+    toast.promise(api.generateJobDocuments(job.id), {
+      loading: `Generando CV y carta con IA para "${job.title.slice(0, 32)}..."`,
+      success: (res) => {
         setHasCv(true);
         setHasLetter(true);
-        const updated: JobListItem = {
-          ...job,
-          has_cv: true,
-          has_letter: true,
-          status: "evaluated",
-        };
         if (onUpdateJob) {
-          onUpdateJob(updated);
+          onUpdateJob({
+            ...job,
+            has_cv: true,
+            has_letter: true,
+            status: "evaluated",
+          });
         }
-      }
-    } catch (err: any) {
-      alert(`Error generando CV y carta: ${err.message || err}`);
-    } finally {
-      setIsGenerating(false);
-    }
+        setIsGenerating(false);
+        return "CV adaptado y carta listos para descargar.";
+      },
+      error: (err) => {
+        setIsGenerating(false);
+        return `Error generando documentos: ${err.message || err}`;
+      },
+    });
   };
 
   return (

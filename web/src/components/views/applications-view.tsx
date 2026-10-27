@@ -12,7 +12,9 @@ import {
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import { InfoTooltip } from "@/components/ui/info-tooltip";
+import { toast } from "sonner";
 import { CvManager } from "@/components/features/cv/cv-manager";
 import { JobCard } from "@/components/features/jobs/job-card";
 import { getJobModality } from "@/components/features/jobs/job-badges";
@@ -266,31 +268,10 @@ export function ApplicationsView() {
   };
 
   // Filtrado 100% reactivo en cliente sobre las ofertas traídas sin llamadas de red redundantes.
-  // Prioriza estrictamente el CV y carta antes, ordenados por mayor puntuación.
+  // Ordenación cronológica natural por fecha de publicación/descubrimiento más reciente
   const filteredJobs = useMemo(() => {
     const list = rawJobs.filter((job) => filterJobLocally(job, filters));
     return list.sort((a, b) => {
-      // 1. Priorizar antes las ofertas que ya tienen CV o carta generados
-      const aDocs = (a.has_cv ? 2 : 0) + (a.has_letter ? 1 : 0);
-      const bDocs = (b.has_cv ? 2 : 0) + (b.has_letter ? 1 : 0);
-
-      if ((aDocs > 0) !== (bDocs > 0)) {
-        return (bDocs > 0 ? 1 : 0) - (aDocs > 0 ? 1 : 0);
-      }
-
-      // 2. Ordenar estrictamente por mayor puntuación (score descendente)
-      const aScore = a.score ?? -1;
-      const bScore = b.score ?? -1;
-      if (aScore !== bScore) {
-        return bScore - aScore;
-      }
-
-      // Si hay empate de puntuación, priorizar la que tenga más documentos (CV + Carta)
-      if (aDocs !== bDocs) {
-        return bDocs - aDocs;
-      }
-
-      // Desempate por fecha de creación más reciente
       const aTime = a.created_at ? new Date(a.created_at).getTime() : 0;
       const bTime = b.created_at ? new Date(b.created_at).getTime() : 0;
       return bTime - aTime;
@@ -313,6 +294,7 @@ export function ApplicationsView() {
 
   const [hasActiveCv, setHasActiveCv] = useState<boolean>(false);
   const [searching, setSearching] = useState<boolean>(false);
+  const [toggleLoading, setToggleLoading] = useState<boolean>(false);
 
   const loadFacets = async () => {
     try {
@@ -337,15 +319,30 @@ export function ApplicationsView() {
     return false;
   };
 
-  const handleTriggerSearch = async () => {
+  const handleToggleSearch = async (enable: boolean) => {
+    if (toggleLoading) return;
+    setToggleLoading(true);
     try {
-      setSearching(true);
-      const res = await api.triggerSearch();
-      alert(res.message || "Búsqueda de empleo iniciada en los portales con los términos del CV activo.");
-      setTimeout(() => pollSearchStatus(), 800);
+      if (!enable) {
+        // Desactivar / Cancelar búsqueda en curso
+        await api.stopSearch();
+        setSearching(false);
+        toast.info("Búsqueda con IA en portales pausada.");
+      } else {
+        // Activar búsqueda
+        if (!hasActiveCv) {
+          toast.warning("Debes tener un CV activo seleccionado para iniciar la búsqueda.");
+          return;
+        }
+        await api.triggerSearch();
+        setSearching(true);
+        toast.success("Buscador con IA activado. Rastreando portales de empleo...");
+        setTimeout(() => pollSearchStatus(), 600);
+      }
     } catch (e: any) {
-      alert(`Error al iniciar búsqueda: ${e.message}`);
-      setSearching(false);
+      toast.error(`Error con el buscador de IA: ${e.message || e}`);
+    } finally {
+      setToggleLoading(false);
     }
   };
 
@@ -530,36 +527,47 @@ export function ApplicationsView() {
           />
         </div>
 
-        {/* Indicador minimalista en el hueco superior: entre el CV y las acciones (Actualizar, etc.) */}
-        {searching && (
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-full border border-primary/30 bg-primary/10 text-primary text-xs shadow-xs animate-in fade-in duration-200">
-            <Sparkles className="h-3.5 w-3.5 animate-spin text-primary shrink-0" />
-            <span className="font-medium whitespace-nowrap">
-              Buscando ofertas con IA...
-            </span>
-            <span className="h-3 w-px bg-primary/30 hidden sm:inline-block" />
-            <span className="text-2xs text-muted-foreground whitespace-nowrap hidden sm:inline-block">
-              {rawJobs.length > 0
-                ? `${rawJobs.length} encontradas hasta el momento`
-                : "Rastreando Indeed, LinkedIn y Glassdoor..."}
-            </span>
+        {/* Bloque Cuadrado de Búsqueda con IA y Switch de Control */}
+        <div className="flex items-center gap-2.5 px-3 py-1.5 rounded-lg border border-border/80 bg-card/80 backdrop-blur-xs shadow-xs">
+          <div className="flex items-center gap-2">
+            <Sparkles className={`h-3.5 w-3.5 shrink-0 transition-colors ${
+              searching ? "animate-spin text-primary" : "text-muted-foreground"
+            }`} />
+            <div className="flex flex-col">
+              <span className="text-xs font-semibold leading-tight text-foreground whitespace-nowrap">
+                {searching ? "Buscando ofertas con IA..." : "Buscador con IA"}
+              </span>
+              <span className="text-3xs text-muted-foreground whitespace-nowrap hidden sm:inline-block">
+                {searching
+                  ? rawJobs.length > 0
+                    ? `${rawJobs.length} encontradas hasta el momento`
+                    : "Rastreando portales..."
+                  : "En pausa (apaga o enciende)"}
+              </span>
+            </div>
           </div>
-        )}
+
+          <div className="h-4 w-px bg-border/60 mx-0.5" />
+
+          {/* Switch interactivo para Activar o Desactivar la búsqueda en tiempo real */}
+          <div className="flex items-center gap-1.5">
+            <Switch
+              checked={searching}
+              onCheckedChange={handleToggleSearch}
+              disabled={toggleLoading || (!searching && !hasActiveCv)}
+              id="ai-search-toggle"
+              className="scale-90 shrink-0"
+            />
+            <label
+              htmlFor="ai-search-toggle"
+              className="text-3xs font-medium text-muted-foreground cursor-pointer select-none hidden lg:inline-block"
+            >
+              {searching ? "Activo" : "Pausado"}
+            </label>
+          </div>
+        </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {/* Botón Buscar Ofertas Ahora (visible solo si hay CV activo y NO se está buscando ofertas) */}
-          {hasActiveCv && !searching && (
-            <Button
-              size="sm"
-              onClick={handleTriggerSearch}
-              className="flex items-center gap-1.5 h-8 text-xs bg-primary text-primary-foreground hover:bg-primary/90 font-medium shadow-sm transition-all"
-              title="Buscar nuevas ofertas en portales globales con los términos de tu CV activo"
-            >
-              <Sparkles className="h-3.5 w-3.5 text-primary-foreground" />
-              <span>Buscar Ofertas Ahora</span>
-            </Button>
-          )}
-
           {/* Botón Actualizar */}
           <Button
             size="sm"

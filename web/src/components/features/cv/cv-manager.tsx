@@ -16,6 +16,7 @@ import { Dialog } from "@/components/ui/dialog";
 import { InfoTooltip } from "@/components/ui/info-tooltip";
 import { CvProgressBar } from "@/components/features/cv/cv-progress-bar";
 import { ActiveCVInfo, api, hasValidCv } from "@/lib/api";
+import { toast } from "sonner";
 
 interface CvManagerProps {
   onCvChanged?: (activeCv: ActiveCVInfo | null) => void;
@@ -150,14 +151,11 @@ export function CvManager({ onCvChanged, className = "" }: CvManagerProps) {
     try {
       const res = await api.selectActiveCV(filename);
       const countMsg = res.re_evaluated_jobs !== undefined ? ` • ${res.re_evaluated_jobs} ofertas adaptadas` : "";
-      setUploadMessage({
-        text: `CV activo: "${filename}"${countMsg}.`,
-        error: false,
-      });
+      toast.success(`CV activo establecido: "${filename}"${countMsg}`);
       await loadData(true);
     } catch (err: any) {
       console.error("[CvManager] Error seleccionando CV:", err);
-      alert(`Error seleccionando CV: ${err.message}`);
+      toast.error(`Error seleccionando CV: ${err.message || err}`);
       await loadData(true);
     } finally {
       setIsSelecting(false);
@@ -171,7 +169,7 @@ export function CvManager({ onCvChanged, className = "" }: CvManagerProps) {
       const data = await api.previewActiveCV(filename);
       setCvPreviewData(data);
     } catch (err: any) {
-      alert(`Error extrayendo texto: ${err.message}`);
+      toast.error(`Error extrayendo texto del CV: ${err.message || err}`);
       setCvPreviewOpen(false);
     } finally {
       setCvPreviewLoading(false);
@@ -187,13 +185,10 @@ export function CvManager({ onCvChanged, className = "" }: CvManagerProps) {
     setDeletingFile(filename);
     try {
       const res = await api.deleteCV(filename);
-      setUploadMessage({
-        text: res.message || `CV "${filename}" eliminado correctamente.`,
-        error: false,
-      });
+      toast.success(res.message || `CV "${filename}" eliminado correctamente.`);
       await loadData(true);
     } catch (err: any) {
-      alert(`Error al eliminar CV: ${err.message}`);
+      toast.error(`Error al eliminar CV: ${err.message || err}`);
     } finally {
       setDeletingFile(null);
     }

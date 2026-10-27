@@ -199,6 +199,7 @@ export const api = {
     }>("/cv/cache/clear", { method: "POST" }),
   getPreflight: () => request<PreflightResponse>("/search/preflight"),
   triggerSearch: () => request<{ success: boolean; message: string }>("/search/run", { method: "POST" }),
+  stopSearch: () => request<{ success: boolean; stopped: boolean; message: string }>("/search/stop", { method: "POST" }),
   getSearchStatus: () => request<any>("/search/status"),
 
   // 3. Candidaturas

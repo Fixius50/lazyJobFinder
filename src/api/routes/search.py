@@ -123,3 +123,20 @@ def get_search_status() -> Dict[str, Any]:
         "recent_runs": recent_runs,
         "statistics": stats,
     }
+
+
+@router.post("/stop")
+def stop_search() -> Dict[str, Any]:
+    """Detiene la búsqueda en curso solicitada por el usuario."""
+    runner = get_runner()
+    stopped = runner.request_stop()
+    return {
+        "success": True,
+        "stopped": stopped,
+        "message": (
+            "Solicitud de parada enviada. El proceso se detendrá de inmediato."
+            if stopped
+            else "No hay ninguna búsqueda en ejecución activa."
+        ),
+    }
+

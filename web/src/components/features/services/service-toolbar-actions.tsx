@@ -1,28 +1,23 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
+import useSWR from "swr";
 import { Play, Square, RotateCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ServicesStatusResponse, api } from "@/lib/api";
+import { toast } from "sonner";
 
 export function ServiceToolbarActions() {
-  const [data, setData] = useState<ServicesStatusResponse | null>(null);
   const [actionLoading, setActionLoading] = useState<"start" | "stop" | null>(null);
 
-  const fetchStatus = async () => {
-    try {
-      const res = await api.getServicesStatus();
-      setData(res);
-    } catch (err: any) {
-      console.warn("[ServiceToolbar] Error consultando servicios:", err);
+  const { data, mutate } = useSWR<ServicesStatusResponse>(
+    "/system/status",
+    api.getServicesStatus,
+    {
+      refreshInterval: 4000,
+      revalidateOnFocus: true,
     }
-  };
-
-  useEffect(() => {
-    fetchStatus();
-    const interval = setInterval(fetchStatus, 4000);
-    return () => clearInterval(interval);
-  }, []);
+  );
 
   const ollama = data?.services?.ollama;
   const appService = data?.services?.lazyjobfinder;
@@ -44,9 +39,10 @@ export function ServiceToolbarActions() {
     setActionLoading(action);
     try {
       await api.sendServiceAction("all", action);
-      await fetchStatus();
+      await mutate();
+      toast.success(action === "stop" ? "Servicios detenidos correctamente." : "Servicios iniciados.");
     } catch (err: any) {
-      alert(`Error al ${action === "stop" ? "detener" : "iniciar"} servicios: ${err.message}`);
+      toast.error(`Error al ${action === "stop" ? "detener" : "iniciar"} servicios: ${err.message}`);
     } finally {
       setActionLoading(null);
     }

@@ -1293,11 +1293,11 @@ class Database:
             mod_subclauses = []
             for m in active_modalities:
                 if m in ("remoto", "teletrabajo"):
-                    mod_subclauses.append("(j.is_remote = 1 OR LOWER(j.location) LIKE '%remoto%' OR LOWER(j.location) LIKE '%teletrabajo%' OR LOWER(j.title) LIKE '%remoto%' OR LOWER(j.title) LIKE '%teletrabajo%')")
+                    mod_subclauses.append("((j.is_remote = 1 OR LOWER(j.location) LIKE '%remot%' OR LOWER(j.location) LIKE '%teletrabaj%' OR LOWER(j.title) LIKE '%remot%' OR LOWER(j.title) LIKE '%teletrabaj%') AND LOWER(j.location) NOT LIKE '%hibrid%' AND LOWER(j.location) NOT LIKE '%hybrid%' AND LOWER(j.title) NOT LIKE '%hibrid%' AND LOWER(j.title) NOT LIKE '%hybrid%')")
                 elif m == "hibrido":
-                    mod_subclauses.append("(LOWER(j.location) LIKE '%hibrid%' OR LOWER(j.location) LIKE '%híbrid%' OR LOWER(j.title) LIKE '%hibrid%' OR LOWER(j.title) LIKE '%híbrid%' OR LOWER(j.description) LIKE '%híbrido%' OR LOWER(j.description) LIKE '%hibrido%')")
+                    mod_subclauses.append("(LOWER(j.location) LIKE '%hibrid%' OR LOWER(j.location) LIKE '%hybrid%' OR LOWER(j.location) LIKE '%híbrid%' OR LOWER(j.title) LIKE '%hibrid%' OR LOWER(j.title) LIKE '%hybrid%' OR LOWER(j.title) LIKE '%híbrid%' OR LOWER(j.description) LIKE '%hibrid%' OR LOWER(j.description) LIKE '%hybrid%' OR LOWER(j.description) LIKE '%híbrid%')")
                 elif m == "presencial":
-                    mod_subclauses.append("(j.is_remote = 0 AND LOWER(j.location) NOT LIKE '%remoto%' AND LOWER(j.location) NOT LIKE '%teletrabajo%' AND LOWER(j.title) NOT LIKE '%remoto%' AND LOWER(j.title) NOT LIKE '%teletrabajo%' AND LOWER(j.location) NOT LIKE '%hibrid%' AND LOWER(j.location) NOT LIKE '%híbrid%')")
+                    mod_subclauses.append("(j.is_remote = 0 AND LOWER(j.location) NOT LIKE '%remot%' AND LOWER(j.location) NOT LIKE '%teletrabaj%' AND LOWER(j.title) NOT LIKE '%remot%' AND LOWER(j.title) NOT LIKE '%teletrabaj%' AND LOWER(j.location) NOT LIKE '%hibrid%' AND LOWER(j.location) NOT LIKE '%hybrid%' AND LOWER(j.location) NOT LIKE '%híbrid%' AND LOWER(j.title) NOT LIKE '%hibrid%' AND LOWER(j.title) NOT LIKE '%hybrid%' AND LOWER(j.title) NOT LIKE '%híbrid%' AND LOWER(j.description) NOT LIKE '%hibrid%' AND LOWER(j.description) NOT LIKE '%hybrid%')")
             if mod_subclauses:
                 where_clauses.append(f"({' OR '.join(mod_subclauses)})")
         elif is_remote is not None:
@@ -1667,139 +1667,176 @@ class Database:
             else:
                 base_where += " AND 1=0"
 
-            constants = _load_shared_constants()
-            portal_sources = constants.get("portal_sources", {})
-            # 1. Portales / Fuentes encontradas en las ofertas visibles
+            # 1. Portales / Fuentes reales registradas en las ofertas
             source_rows = conn.execute(
                 f"SELECT j.source, COUNT(*) as c FROM {base_from} WHERE {base_where} GROUP BY j.source ORDER BY c DESC"
             ).fetchall()
             sources = [
                 {
                     "id": r["source"],
-                    "label": portal_sources.get(r["source"].lower(), {}).get("label") or r["source"].capitalize(),
+                    "label": r["source"].capitalize(),
                     "count": r["c"],
                 }
                 for r in source_rows
             ]
 
-            # 2. Modalidades encontradas en las ofertas visibles
-            remote_count = conn.execute(
-                f"""SELECT COUNT(*) FROM {base_from} WHERE {base_where} AND (
-                    j.is_remote = 1 OR LOWER(j.location) LIKE '%remot%' OR LOWER(j.title) LIKE '%remot%' 
-                    OR LOWER(j.description) LIKE '%remot%' OR LOWER(j.description) LIKE '%teletrabaj%'
-                )"""
-            ).fetchone()[0]
-
-            hybrid_count = conn.execute(
-                f"""SELECT COUNT(*) FROM {base_from} WHERE {base_where} AND (
-                    LOWER(j.location) LIKE '%hibrid%' OR LOWER(j.location) LIKE '%hybrid%' 
-                    OR LOWER(j.title) LIKE '%hibrid%' OR LOWER(j.description) LIKE '%hibrid%' 
-                    OR LOWER(j.description) LIKE '%hybrid%'
-                )"""
-            ).fetchone()[0]
-
-            onsite_count = conn.execute(
-                f"""SELECT COUNT(*) FROM {base_from} WHERE {base_where} AND j.is_remote = 0 AND NOT (
-                    LOWER(j.location) LIKE '%remot%' OR LOWER(j.location) LIKE '%hibrid%' 
-                    OR LOWER(j.location) LIKE '%hybrid%'
-                )"""
-            ).fetchone()[0]
-
-            modalities = []
-            if remote_count > 0:
-                modalities.append({"id": "teletrabajo", "label": "Remote / Teletrabajo", "count": remote_count})
-            if hybrid_count > 0:
-                modalities.append({"id": "hibrido", "label": "Hybrid / Híbrido", "count": hybrid_count})
-            if onsite_count > 0:
-                modalities.append({"id": "presencial", "label": "On-site / Presencial", "count": onsite_count})
-
-            # 3. Categorías y competencias profesionales extraídas directamente de las ofertas visibles
-            skill_counter: collections.Counter = collections.Counter()
-            offer_rows = conn.execute(
-                f"SELECT j.title, j.description, {'e.matched_skills' if has_evals else 'NULL as matched_skills'} FROM {base_from} WHERE {base_where}"
+            # 2. Modalidades de trabajo reales (alineadas exactamente con getJobModality de las tarjetas)
+            offer_modality_rows = conn.execute(
+                f"SELECT j.is_remote, j.location, j.title, j.description FROM {base_from} WHERE {base_where}"
             ).fetchall()
 
-            geo_stop_words = {"spain", "españa", "espana", "remoto", "remote", "hibrido", "hybrid", "madrid", "barcelona", "sevilla", "valencia", "málaga", "malaga", "bilbao", "zaragoza", "coruña"}
-            for off in offer_rows:
-                raw_skills = off["matched_skills"]
-                if raw_skills:
-                    try:
-                        skills = json.loads(raw_skills) if isinstance(raw_skills, str) else raw_skills
-                        if isinstance(skills, list):
-                            for s in skills:
-                                clean_s = str(s).strip()
-                                if clean_s and len(clean_s) > 1 and clean_s.lower() not in geo_stop_words:
-                                    skill_counter[clean_s] += 1
-                    except Exception:
-                        pass
-            if not skill_counter and offer_rows:
-                title_stop_words = {
-                    "para", "con", "del", "las", "los", "por", "una", "uno", "unos", "unas", "sobre",
-                    "entre", "hacia", "hasta", "desde", "según", "sin", "tras", "durante", "mediante",
-                    "oferta", "puesto", "vacante", "trabajo", "empleo", "sector", "perfil", "urgente",
-                    "incorporación", "inmediata", "experiencia", "contrato", "jornada", "completa",
-                    "junior", "senior", "spain", "españa", "espana", "remoto", "madrid", "barcelona"
-                }
-                title_counter: collections.Counter = collections.Counter()
-                for off in offer_rows:
-                    t = str(off["title"] or "")
-                    tokens = [re.sub(r"[^\wáéíóúñÁÉÍÓÚÑ]", "", w) for w in t.split()]
-                    for tok in tokens:
-                        if len(tok) >= 4 and tok.lower() not in title_stop_words and not tok.isdigit():
-                            title_counter[tok.capitalize()] += 1
-                for name, count in title_counter.most_common(15):
-                    if count >= 2:
-                        skill_counter[name] = count
+            hybrid_count = 0
+            remote_count = 0
+            onsite_count = 0
+            for r in offer_modality_rows:
+                loc = (r["location"] or "").lower()
+                tit = (r["title"] or "").lower()
+                desc = (r["description"] or "").lower()
+                combined = f"{loc} {tit} {desc}"
+                if "hibrid" in combined or "hybrid" in combined or "híbrid" in combined:
+                    hybrid_count += 1
+                elif r["is_remote"] == 1 or any(k in f"{loc} {tit}" for k in ("remot", "teletrabaj", "work from home")):
+                    remote_count += 1
+                else:
+                    onsite_count += 1
+
+            modalities = []
+            if hybrid_count > 0:
+                modalities.append({"id": "hibrido", "label": "Híbrido", "count": hybrid_count})
+            if remote_count > 0:
+                modalities.append({"id": "teletrabajo", "label": "Remoto / Teletrabajo", "count": remote_count})
+            if onsite_count > 0:
+                modalities.append({"id": "presencial", "label": "Presencial", "count": onsite_count})
+
+            # 3. Niveles de ajuste / afinidad evaluados directamente por la IA en SQLite
+            fit_rows = conn.execute(
+                f"SELECT e.fit_level, COUNT(*) as c FROM {base_from} WHERE {base_where} AND e.fit_level IS NOT NULL GROUP BY e.fit_level ORDER BY c DESC"
+            ).fetchall()
+            fit_levels = [{"id": r["fit_level"], "label": r["fit_level"].capitalize(), "count": r["c"]} for r in fit_rows]
+
+            # 4. Habilidades y carencias evaluadas por la IA en las ofertas
+            skill_counter: collections.Counter = collections.Counter()
+            missing_counter: collections.Counter = collections.Counter()
+            strength_counter: collections.Counter = collections.Counter()
+            gap_counter: collections.Counter = collections.Counter()
+
+            if has_evals:
+                eval_rows = conn.execute(
+                    f"SELECT e.matched_skills, e.missing_skills, e.strengths, e.gaps FROM {base_from} WHERE {base_where}"
+                ).fetchall()
+                for er in eval_rows:
+                    for field_key, counter in [
+                        ("matched_skills", skill_counter),
+                        ("missing_skills", missing_counter),
+                        ("strengths", strength_counter),
+                        ("gaps", gap_counter),
+                    ]:
+                        raw = er[field_key]
+                        if raw:
+                            try:
+                                parsed = json.loads(raw) if isinstance(raw, str) else raw
+                                if isinstance(parsed, list):
+                                    for item in parsed:
+                                        c_item = str(item).strip()
+                                        if c_item:
+                                            counter[c_item] += 1
+                            except Exception:
+                                pass
 
             categories = [
-                {"id": name.lower(), "label": name, "count": count}
-                for name, count in skill_counter.most_common(25)
+                {"id": name, "label": name, "count": count}
+                for name, count in skill_counter.most_common(30)
+            ]
+            missing_skills = [
+                {"id": name, "label": name, "count": count}
+                for name, count in missing_counter.most_common(20)
+            ]
+            strengths = [
+                {"id": name, "label": name, "count": count}
+                for name, count in strength_counter.most_common(20)
+            ]
+            gaps = [
+                {"id": name, "label": name, "count": count}
+                for name, count in gap_counter.most_common(20)
             ]
 
-            # 4. Formaciones mínimas extraídas directamente de las ofertas registradas
+            # 5. Formaciones mínimas encontradas en las ofertas
             edu_rows = conn.execute(
                 f"SELECT j.education_level, COUNT(*) as c FROM {base_from} WHERE {base_where} AND j.education_level IS NOT NULL AND j.education_level != '' GROUP BY j.education_level ORDER BY c DESC"
             ).fetchall()
-            educations = [{"id": r["education_level"].lower(), "label": r["education_level"], "count": r["c"]} for r in edu_rows]
+            educations = [{"id": r["education_level"], "label": r["education_level"], "count": r["c"]} for r in edu_rows]
 
-            # 5. Jornada laboral extraída directamente de las ofertas registradas
+            # 6. Jornadas laborales encontradas en las ofertas
             sch_rows = conn.execute(
                 f"SELECT j.schedule, COUNT(*) as c FROM {base_from} WHERE {base_where} AND j.schedule IS NOT NULL AND j.schedule != '' GROUP BY j.schedule ORDER BY c DESC"
             ).fetchall()
-            schedules = [{"id": r["schedule"].lower(), "label": r["schedule"], "count": r["c"]} for r in sch_rows]
+            schedules = [{"id": r["schedule"], "label": r["schedule"], "count": r["c"]} for r in sch_rows]
 
-            # 6. Tipos de contrato extraídos directamente de las ofertas registradas
+            # 7. Tipos de contrato encontrados en las ofertas
             ct_rows = conn.execute(
                 f"SELECT j.contract_type, COUNT(*) as c FROM {base_from} WHERE {base_where} AND j.contract_type IS NOT NULL AND j.contract_type != '' GROUP BY j.contract_type ORDER BY c DESC"
             ).fetchall()
-            contract_types = [{"id": r["contract_type"].lower(), "label": r["contract_type"], "count": r["c"]} for r in ct_rows]
+            contract_types = [{"id": r["contract_type"], "label": r["contract_type"], "count": r["c"]} for r in ct_rows]
 
-            # 7. Estadísticas salariales reales de ofertas visibles
-            sal_row = conn.execute(
-                f"SELECT MIN(j.salary_min) as min_sal, MAX(j.salary_max) as max_sal, j.salary_currency FROM {base_from} WHERE {base_where} AND j.salary_min > 0"
-            ).fetchone()
+            # 8. Estadísticas salariales reales encontradas en las ofertas de SQLite
+            sal_rows = conn.execute(
+                f"SELECT j.salary_min, j.salary_max, j.salary_currency FROM {base_from} WHERE {base_where} AND (j.salary_min > 0 OR j.salary_max > 0)"
+            ).fetchall()
+
+            def _annualize(val: Optional[float]) -> float:
+                if not val or val <= 0:
+                    return 0.0
+                if val <= 100:
+                    return round(val * 1800, 2)
+                if val < 6000:
+                    return round(val * 12, 2)
+                return round(val, 2)
+
+            annual_salaries = [
+                (_annualize(r["salary_min"]), _annualize(r["salary_max"]))
+                for r in sal_rows
+            ]
+            valid_annuals = [max(smin, smax) for smin, smax in annual_salaries if max(smin, smax) > 0]
+            curr = sal_rows[0]["salary_currency"] if sal_rows and sal_rows[0]["salary_currency"] else "EUR"
+
             salary_stats = {
-                "min": sal_row["min_sal"] if sal_row and sal_row["min_sal"] else 15000,
-                "max": sal_row["max_sal"] if sal_row and sal_row["max_sal"] else 80000,
-                "currency": sal_row["salary_currency"] if sal_row and sal_row["salary_currency"] else "EUR",
+                "min": min(valid_annuals) if valid_annuals else 0.0,
+                "max": max(valid_annuals) if valid_annuals else 0.0,
+                "currency": curr,
+                "total_with_salary": len(valid_annuals),
             }
 
-            # 8. Top ubicaciones reales encontradas en ofertas visibles
+            # 9. Top ubicaciones reales encontradas en las ofertas
             loc_rows = conn.execute(
-                f"SELECT j.location, COUNT(*) as c FROM {base_from} WHERE {base_where} AND j.location IS NOT NULL AND j.location != '' GROUP BY j.location ORDER BY c DESC LIMIT 15"
+                f"SELECT j.location, COUNT(*) as c FROM {base_from} WHERE {base_where} AND j.location IS NOT NULL AND j.location != '' GROUP BY j.location ORDER BY c DESC LIMIT 20"
             ).fetchall()
             top_locations = [{"name": r["location"], "count": r["c"]} for r in loc_rows]
+
+            # 10. Estadísticas de puntuación de la IA
+            score_row = conn.execute(
+                f"SELECT MIN(e.score) as min_score, MAX(e.score) as max_score, AVG(e.score) as avg_score FROM {base_from} WHERE {base_where} AND e.score IS NOT NULL AND e.score > 0"
+            ).fetchone()
+            score_stats = {
+                "min": score_row["min_score"] if score_row and score_row["min_score"] is not None else 0,
+                "max": score_row["max_score"] if score_row and score_row["max_score"] is not None else 0,
+                "avg": round(score_row["avg_score"], 1) if score_row and score_row["avg_score"] is not None else 0.0,
+            }
 
             total_visible = conn.execute(f"SELECT COUNT(*) FROM {base_from} WHERE {base_where}").fetchone()[0]
 
             return {
                 "sources": sources,
                 "modalities": modalities,
+                "fit_levels": fit_levels,
                 "categories": categories,
+                "missing_skills": missing_skills,
+                "strengths": strengths,
+                "gaps": gaps,
                 "educations": educations,
                 "schedules": schedules,
                 "contract_types": contract_types,
                 "salary_stats": salary_stats,
+                "score_stats": score_stats,
                 "top_locations": top_locations,
                 "total_jobs": total_visible,
             }

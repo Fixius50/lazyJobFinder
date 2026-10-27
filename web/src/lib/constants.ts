@@ -42,7 +42,7 @@ export const CV_UPLOAD_LIMITS = {
 };
 
 export const SCORING = {
-  default_threshold: 65,
+  default_threshold: 50,
   high_fit_threshold: 80,
-  moderate_fit_threshold: 65,
+  moderate_fit_threshold: 50,
 };

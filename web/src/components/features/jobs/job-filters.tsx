@@ -49,36 +49,6 @@ export const SALARY_STEPS = [
   { step: 8, value: 80000, label: "≥ 80.000+ / año" },
 ];
 
-export const DEFAULT_MODALITIES: FacetItem[] = [
-  { id: "presencial", label: "On-site / Presencial", count: 0 },
-  { id: "teletrabajo", label: "Remote / Teletrabajo", count: 0 },
-  { id: "hibrido", label: "Híbrido", count: 0 },
-];
-
-export const DEFAULT_CATEGORIES: FacetItem[] = [];
-
-export const DEFAULT_EDUCATIONS: FacetItem[] = [
-  { id: "sin estudios requeridos", label: "Sin estudios específicos", count: 0 },
-  { id: "educación secundaria obligatoria / eso", label: "Educación Secundaria (ESO)", count: 0 },
-  { id: "bachillerato", label: "Bachillerato", count: 0 },
-  { id: "fp / ciclo formativo", label: "FP / Ciclo Formativo", count: 0 },
-  { id: "grado / universidad", label: "Grado / Universidad", count: 0 },
-];
-
-export const DEFAULT_SCHEDULES: FacetItem[] = [
-  { id: "jornada completa", label: "Jornada Completa", count: 0 },
-  { id: "media jornada", label: "Media Jornada", count: 0 },
-  { id: "horario flexible", label: "Horario Flexible", count: 0 },
-  { id: "turnos", label: "Turnos rotativos", count: 0 },
-];
-
-export const DEFAULT_CONTRACTS: FacetItem[] = [
-  { id: "indefinido", label: "Indefinido", count: 0 },
-  { id: "contrato temporal", label: "Contrato Temporal", count: 0 },
-  { id: "prácticas / beca", label: "Prácticas / Formación", count: 0 },
-  { id: "autónomo / freelance", label: "Autónomo / Freelance", count: 0 },
-];
-
 export interface JobFiltersProps {
   facets?: FilterFacetsResponse | null;
   filters: FilterState;
@@ -333,7 +303,13 @@ export function JobFilters({
     minScore > 0;
 
   const currentExpLabel = EXPERIENCE_STEPS[minExperienceStep]?.label || "Sin especificar";
-  const currentSalaryLabel = SALARY_STEPS[minSalaryStep]?.label || "Sin especificar";
+  const salaryCurrency = facets?.salary_stats?.currency || "€";
+  const currentSalaryLabel = useMemo(() => {
+    if (minSalaryStep === 0) return "Sin especificar";
+    const step = SALARY_STEPS[minSalaryStep];
+    if (!step) return "Sin especificar";
+    return `≥ ${step.value.toLocaleString("es-ES")} ${salaryCurrency}/año`;
+  }, [minSalaryStep, salaryCurrency]);
 
   return (
     <Card className="border bg-card/80 backdrop-blur-sm shadow-sm overflow-hidden">
@@ -579,6 +555,12 @@ export function JobFilters({
                 {currentSalaryLabel}
               </span>
             </div>
+            {Boolean(facets?.salary_stats && facets.salary_stats.max > 0) && (
+              <div className="flex items-center justify-between text-3xs text-muted-foreground/80 font-mono px-0.5">
+                <span>Min: {facets!.salary_stats.min.toLocaleString("es-ES")} {salaryCurrency}</span>
+                <span>Max: {facets!.salary_stats.max.toLocaleString("es-ES")} {salaryCurrency}</span>
+              </div>
+            )}
             <input
               type="range"
               min="0"
@@ -702,12 +684,35 @@ export function JobFilters({
                   </Select>
                 </div>
 
+                {/* Distribución por Afinidad evaluada por la IA */}
+                {Boolean(facets?.fit_levels && facets.fit_levels.length > 0) && (
+                  <div className="space-y-1">
+                    <label className="text-2xs font-medium text-muted-foreground">Evaluación IA:</label>
+                    <div className="flex flex-wrap gap-1">
+                      {facets!.fit_levels!.map((lvl) => (
+                        <span
+                          key={lvl.id}
+                          className="text-3xs font-mono font-medium px-1.5 py-0.5 rounded bg-secondary/80 border border-border/50 text-foreground flex items-center gap-1"
+                        >
+                          <span>{lvl.label}</span>
+                          <span className="text-primary font-bold">({lvl.count})</span>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {/* Score Mínimo ATS */}
                 <div className="space-y-1">
                   <div className="flex justify-between text-2xs font-medium text-muted-foreground">
                     <span>Afinidad ATS mínima:</span>
                     <span className="font-mono text-primary font-semibold">{minScore > 0 ? `≥ ${minScore}%` : "Cualquiera"}</span>
                   </div>
+                  {Boolean(facets?.score_stats && facets.score_stats.max > 0) && (
+                    <div className="text-3xs text-muted-foreground font-mono">
+                      IA: mín {facets!.score_stats?.min}% · media {facets!.score_stats?.avg}% · máx {facets!.score_stats?.max}%
+                    </div>
+                  )}
                   <input
                     type="range"
                     min="0"

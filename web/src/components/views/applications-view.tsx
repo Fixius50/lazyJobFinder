@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { InfoTooltip } from "@/components/ui/info-tooltip";
 import { CvManager } from "@/components/features/cv/cv-manager";
 import { JobCard } from "@/components/features/jobs/job-card";
+import { getJobModality } from "@/components/features/jobs/job-badges";
 import { JobFilters, EXPERIENCE_STEPS, SALARY_STEPS } from "@/components/features/jobs/job-filters";
 import { JobDetailDialog } from "@/components/features/jobs/job-detail-dialog";
 import { PurgeHistoryButton } from "@/components/features/maintenance/purge-history-card";
@@ -134,15 +135,12 @@ function filterJobLocally(job: JobListItem, filters: FilterState): boolean {
 
   // 7. Modalidades (Checkboxes)
   if (filters.selectedModalities && filters.selectedModalities.length > 0) {
-    const isRemote = job.is_remote === 1 || location.includes("remot") || location.includes("teletrabaj") || title.includes("remot") || title.includes("teletrabaj");
-    const isHybrid = /h[ií]brid/i.test(`${location} ${title} ${description}`);
-    const isPresencial = !isRemote && !isHybrid;
-
+    const jobMod = getJobModality(job);
     const matchesMod = filters.selectedModalities.some((mod) => {
       const m = mod.toLowerCase();
-      if (m === "teletrabajo" || m === "remoto") return isRemote;
-      if (m === "hibrido") return isHybrid;
-      if (m === "presencial") return isPresencial;
+      if ((m === "teletrabajo" || m === "remoto") && jobMod === "Remoto") return true;
+      if ((m === "hibrido" || m === "híbrido") && jobMod === "Híbrido") return true;
+      if (m === "presencial" && jobMod === "Presencial") return true;
       return false;
     });
     if (!matchesMod) return false;
@@ -190,12 +188,18 @@ function filterJobLocally(job: JobListItem, filters: FilterState): boolean {
     }
   }
 
-  // 11. Salario mínimo
+  // 11. Salario mínimo (anualizando sueldos mensuales u horarios reales)
   if (filters.minSalaryStep > 0) {
     const minVal = SALARY_STEPS[filters.minSalaryStep]?.value || 0;
     if (minVal > 0) {
-      const maxSal = job.salary_max ?? 0;
-      const minSal = job.salary_min ?? 0;
+      const toAnnual = (val?: number | null) => {
+        if (!val || val <= 0) return 0;
+        if (val <= 100) return val * 1800; // Tarifa horaria
+        if (val < 6000) return val * 12;   // Salario mensual
+        return val;                        // Salario anual
+      };
+      const maxSal = toAnnual(job.salary_max);
+      const minSal = toAnnual(job.salary_min);
       if (maxSal < minVal && minSal < minVal) {
         return false;
       }
@@ -383,6 +387,22 @@ export function ApplicationsView() {
       .then((cv) => setHasActiveCv(hasValidCv(cv)))
       .catch(() => setHasActiveCv(false));
 
+    // Precarga de criterios y exclusiones almacenados en SQLite
+    api.getSettings()
+      .then((settings) => {
+        if (settings?.busqueda) {
+          const b = settings.busqueda;
+          setFilters((prev) => ({
+            ...prev,
+            exclusionTerm: prev.exclusionTerm || (b.filtros_exclusion && b.filtros_exclusion.length > 0 ? b.filtros_exclusion.join(", ") : ""),
+            searchTerm: prev.searchTerm || (b.terminos && b.terminos.length > 0 ? b.terminos.join(", ") : ""),
+            locationName: prev.locationName || (b.ubicaciones && b.ubicaciones.length > 0 ? b.ubicaciones[0] : ""),
+            isAllLocations: prev.locationName ? prev.isAllLocations : (!b.ubicaciones || b.ubicaciones.length === 0 || b.ubicaciones.includes("Spain")),
+          }));
+        }
+      })
+      .catch(() => {});
+
     pollSearchStatus();
     let wasSearching = false;
     let pollCount = 0;
@@ -421,12 +441,17 @@ export function ApplicationsView() {
       const terminos = filters.searchTerm.split(",").map((t) => t.trim()).filter(Boolean);
       const exclusiones = filters.exclusionTerm.split(",").map((e) => e.trim()).filter(Boolean);
 
+      // Preservar la configuración actual de SQLite (antiguedad, límites)
+      const currentSettings = await api.getSettings().catch(() => null);
+      const antiguedad_horas = currentSettings?.busqueda?.antiguedad_horas ?? 48;
+      const limite_por_fuente = currentSettings?.busqueda?.limite_por_fuente ?? 15;
+
       await api.updateSearchConfig({
         terminos: terminos,
-        ubicaciones: !filters.isAllLocations ? [filters.locationName] : ["Spain", "Remoto"],
+        ubicaciones: !filters.isAllLocations && filters.locationName ? [filters.locationName] : ["Spain", "Remoto"],
         filtros_exclusion: exclusiones,
-        antiguedad_horas: 48,
-        limite_por_fuente: 15,
+        antiguedad_horas,
+        limite_por_fuente,
       });
       alert("Criterios de búsqueda y exclusiones guardados en la configuración de los conectores.");
     } catch (e: any) {

@@ -13,7 +13,17 @@ from fastapi import APIRouter, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from ...shared_constants import SERVICES as ALLOWED_SERVICES, SERVICE_ACTIONS as ALLOWED_ACTIONS
+from ...shared_constants import (
+    APPLICATION_STATUSES,
+    CONFIRMATION_PHRASES,
+    CV_LIMITS,
+    DEFAULT_SETTINGS,
+    DOCUMENT_TYPES,
+    PORTAL_SOURCES,
+    SCORING_THRESHOLDS,
+    SERVICE_ACTIONS as ALLOWED_ACTIONS,
+    SERVICES as ALLOWED_SERVICES,
+)
 from ..deps import get_db, get_runner
 
 logger = logging.getLogger("lazyJobFinder.api.system")
@@ -212,6 +222,44 @@ def _find_compose_container(client, service_name: str, project_name: Optional[st
     except Exception as e:
         logger.debug("Error buscando contenedor para servicio '%s': %s", service_name, e)
     return None
+
+
+@router.get("/constants")
+def get_system_constants() -> Dict[str, Any]:
+    """
+    Expone las constantes canónicas y metadatos del sistema para evitar que el frontend
+    tenga valores o configuraciones hardcodeadas y duplicadas.
+    """
+    db = get_db()
+    app_settings = db.get_app_state("settings", {})
+    eval_settings = app_settings.get("evaluacion", {}) if isinstance(app_settings, dict) else {}
+    persisted_threshold = eval_settings.get("umbral_minimo_puntuacion", SCORING_THRESHOLDS.get("default_threshold", 50))
+
+    thresholds = dict(SCORING_THRESHOLDS)
+    thresholds["default_threshold"] = persisted_threshold
+    thresholds["moderate_fit_threshold"] = persisted_threshold
+
+    status_meta = {
+        "discovered": {"label": "Descubierta", "badge": "secondary", "description": "Oferta descubierta en portal"},
+        "evaluating": {"label": "Evaluando...", "badge": "warning", "description": "En análisis por IA local"},
+        "generating_docs": {"label": "Generando documentos...", "badge": "warning", "description": "Generando CV y carta adaptados"},
+        "evaluated": {"label": "Evaluada", "badge": "outline", "description": "Puntuada y lista para postulación"},
+        "interview": {"label": "Entrevista", "badge": "success", "description": "Convocatoria a entrevista"},
+        "discarded": {"label": "Descartada", "badge": "destructive", "description": "Descartada por el usuario"},
+        "rejected": {"label": "Rechazada", "badge": "destructive", "description": "Rechazada por la empresa"},
+    }
+
+    return {
+        "application_statuses": status_meta,
+        "portal_sources": PORTAL_SOURCES,
+        "document_types": DOCUMENT_TYPES,
+        "services": list(ALLOWED_SERVICES),
+        "service_actions": list(ALLOWED_ACTIONS),
+        "confirmation_phrases": CONFIRMATION_PHRASES,
+        "cv_upload_limits": CV_LIMITS,
+        "scoring_thresholds": thresholds,
+        "default_settings": DEFAULT_SETTINGS,
+    }
 
 
 @router.get("/status")

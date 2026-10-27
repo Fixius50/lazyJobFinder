@@ -205,44 +205,96 @@ class JobPipelineRunner:
                 except Exception as p_err:
                     logger.debug("Error recargando perfil activo en runner: %s", p_err)
 
-                # 1. Descubrimiento de ofertas y deduplicación (en worker thread)
-                self.db.log_event("INFO", "pipeline", "Iniciando rastreo de ofertas en portales...")
-                new_jobs, metrics = await asyncio.to_thread(self.connectors_mgr.run_discovery)
-                total_found = metrics["total_encontradas"]
-                new_count = metrics["nuevas_guardadas"]
-                self.db.log_event("INFO", "pipeline", f"Descubrimiento completado: {total_found} ofertas encontradas ({new_count} nuevas registradas).")
-
-                # Recuperar ofertas pendientes de evaluación previas (en orden cronológico)
-                # y garantizar que cualquier vacante que hubiera quedado en 'evaluating' se reinicie a 'discovered'
+                # 1. Preparar cola concurrente de evaluación para ejecutar descubrimiento y evaluación en paralelo
                 self.db.reset_evaluating_jobs()
-
                 active_cv_name = cv_status.get("filename") if cv_status.get("has_cv") else None
+
+                # Recuperar vacantes pendientes de evaluación previas en SQLite
                 pending_jobs = await asyncio.to_thread(self.db.get_unevaluated_jobs, 500, active_cv_name)
-                job_dict = {}
-                # Priorizar vacantes pendientes de evaluación en orden cronológico (las que llevan más tiempo esperando)
-                for j in pending_jobs:
-                    j_id = j.get("id") if isinstance(j, dict) else j["id"]
-                    if j_id:
-                        job_dict[j_id] = dict(j)
-                for j in new_jobs:
-                    j_id = j.get("id") if isinstance(j, dict) else j["id"]
-                    if j_id:
-                        job_dict[j_id] = dict(j)
-                jobs_to_evaluate = list(job_dict.values())
-                
-                # Ordenar por afinidad aparente con el CV activo para evaluar primero las más prometedoras.
-                # NO descarta ninguna oferta: todas se evalúan por la IA, pero el usuario recibe los mejores puestos primero.
                 try:
                     cv_keywords = _extract_cv_scoring_keywords(self.profile, self.settings)
                     if cv_keywords:
-                        jobs_to_evaluate.sort(
+                        pending_jobs.sort(
                             key=lambda j: _calculate_job_evaluation_priority(j, cv_keywords),
                             reverse=True,
                         )
                 except Exception as sort_err:
                     logger.debug("Error ordenando vacantes por prioridad aparente: %s", sort_err)
 
-                if not jobs_to_evaluate:
+                eval_queue: asyncio.Queue[Optional[Dict[str, Any]]] = asyncio.Queue()
+                seen_job_ids = set()
+
+                for j in pending_jobs:
+                    j_id = j.get("id") if isinstance(j, dict) else j["id"]
+                    if j_id and j_id not in seen_job_ids:
+                        seen_job_ids.add(j_id)
+                        eval_queue.put_nowait(dict(j))
+
+                loop = asyncio.get_running_loop()
+
+                def _on_job_saved(job_dict: Dict[str, Any]) -> None:
+                    """Callback emitido en tiempo real por cada conector en cuanto guarda una nueva oferta."""
+                    j_id = job_dict.get("id")
+                    if j_id and j_id not in seen_job_ids:
+                        seen_job_ids.add(j_id)
+                        loop.call_soon_threadsafe(eval_queue.put_nowait, job_dict)
+
+                # Parámetros de evaluación
+                min_score = int(self.settings.get("evaluacion", {}).get("umbral_minimo_puntuacion", 50))
+                generate_docs = self.settings.get("evaluacion", {}).get("generar_documentos", True)
+                concurrency = max(1, int(self.settings.get("evaluacion", {}).get("concurrencia", 1)))
+                qualified_candidates: List[Tuple[Dict[str, Any], Dict[str, Any]]] = []
+
+                # Tarea Productora: Rastreo en portales con guardado incremental en tiempo real
+                async def _run_discovery_task():
+                    try:
+                        self.db.log_event("INFO", "pipeline", "Iniciando rastreo de ofertas en portales y evaluación simultánea...")
+                        res = await asyncio.to_thread(self.connectors_mgr.run_discovery, _on_job_saved)
+                        self.db.log_event("INFO", "pipeline", f"Descubrimiento completado: {res[1]['total_encontradas']} ofertas encontradas ({res[1]['nuevas_guardadas']} nuevas registradas).")
+                        return res
+                    finally:
+                        # Indicar a todos los workers de evaluación que la fase de descubrimiento ha concluido
+                        for _ in range(concurrency):
+                            loop.call_soon_threadsafe(eval_queue.put_nowait, None)
+
+                # Tarea Consumidora: Evaluación con IA en paralelo conforme van llegando o existían pendientes
+                async def _eval_worker():
+                    while True:
+                        job = await eval_queue.get()
+                        if job is None:
+                            eval_queue.task_done()
+                            break
+                        try:
+                            self.db.update_job_status(job["id"], "evaluating")
+                            eval_res = await asyncio.to_thread(self.scoring_engine.evaluate, job)
+                            if not eval_res or eval_res.get("score") is None:
+                                self.db.update_job_status(job["id"], "discovered")
+                            else:
+                                score = eval_res.get("score", 0)
+                                if score >= min_score and eval_res.get("should_apply"):
+                                    self.db.update_job_status(job["id"], "evaluated")
+                                    logger.info("Oferta ID %d ('%s') puntuada: %d/100 -> APTO.", job["id"], job.get("title", "")[:30], score)
+                                    qualified_candidates.append((job, eval_res))
+                                else:
+                                    self.db.update_job_status(job["id"], "discarded")
+                                    logger.info("Oferta ID %d ('%s') puntuada: %d/100 -> Descartada (< %d).", job["id"], job.get("title", "")[:30], score, min_score)
+                        except Exception as eval_err:
+                            logger.error("Error evaluando oferta ID %d: %s", job.get("id"), eval_err)
+                            self.db.update_job_status(job.get("id"), "discovered")
+                        finally:
+                            eval_queue.task_done()
+
+                # Ejecutar descubrimiento y evaluación de ofertas concurrentemente
+                discovery_task = asyncio.create_task(_run_discovery_task())
+                eval_tasks = [asyncio.create_task(_eval_worker()) for _ in range(concurrency)]
+
+                discovery_result, *_ = await asyncio.gather(discovery_task, *eval_tasks)
+                new_jobs, metrics = discovery_result
+                total_found = metrics["total_encontradas"]
+                new_count = metrics["nuevas_guardadas"]
+
+                # Si no hubo ofertas evaluadas ni pendientes ni nuevas, finalizar run
+                if not seen_job_ids and not new_jobs:
                     logger.info("No hay vacantes nuevas ni pendientes de evaluación en este ciclo.")
                     self.db.log_event("INFO", "pipeline", "No hay vacantes nuevas ni pendientes de evaluación en este ciclo.")
                     self.db.finish_pipeline_run(
@@ -254,51 +306,10 @@ class JobPipelineRunner:
                     )
                     return
 
-                # 2. Evaluación paralela y delimitada con Ollama (Fase 1: Scoring puro rápido)
-                min_score = int(self.settings.get("evaluacion", {}).get("umbral_minimo_puntuacion", 50))
-                generate_docs = self.settings.get("evaluacion", {}).get("generar_documentos", True)
-                concurrency = int(self.settings.get("evaluacion", {}).get("concurrencia", 1))
-                semaphore = asyncio.Semaphore(concurrency)
-                self.db.log_event("INFO", "pipeline", f"Iniciando evaluación de {len(jobs_to_evaluate)} vacantes ({len(pending_jobs)} pendientes en BD + {len(new_jobs)} nuevas) con IA (umbral: {min_score}%)...")
-
-                async def _evaluate_job(job: Dict[str, Any]) -> Optional[Tuple[Dict[str, Any], Dict[str, Any]]]:
-                    async with semaphore:
-                        await asyncio.sleep(0.02)
-                        try:
-                            self.db.update_job_status(job["id"], "evaluating")
-                            eval_res = await asyncio.to_thread(self.scoring_engine.evaluate, job)
-                            if not eval_res or eval_res.get("score") is None:
-                                self.db.update_job_status(job["id"], "discovered")
-                                return None
-
-                            score = eval_res.get("score", 0)
-
-                            if score >= min_score and eval_res.get("should_apply"):
-                                self.db.update_job_status(job["id"], "evaluated")
-                                logger.info("Oferta ID %d ('%s') puntuada: %d/100 -> APTO.", job["id"], job.get("title", "")[:30], score)
-                                return (job, eval_res)
-                            else:
-                                self.db.update_job_status(job["id"], "discarded")
-                                logger.info("Oferta ID %d ('%s') puntuada: %d/100 -> Descartada (< %d).", job["id"], job.get("title", "")[:30], score, min_score)
-                                return None
-
-                        except Exception as eval_err:
-                            logger.error("Error evaluando oferta ID %d: %s", job.get("id"), eval_err)
-                            self.db.update_job_status(job.get("id"), "discovered")
-                            return None
-
-                eval_tasks = [_evaluate_job(job) for job in jobs_to_evaluate]
-                eval_results = await asyncio.gather(*eval_tasks, return_exceptions=True)
-                
-                # Filtrar y ordenar los candidatos aptos por puntuación descendente
-                qualified_candidates: List[Tuple[Dict[str, Any], Dict[str, Any]]] = []
-                for res in eval_results:
-                    if isinstance(res, tuple) and len(res) == 2:
-                        qualified_candidates.append(res)
-                
+                # Ordenar los candidatos evaluados aptos por puntuación descendente
                 qualified_candidates.sort(key=lambda x: x[1].get("score", 0), reverse=True)
 
-                # 3. Fase 2: Adaptación documental (CV y Cartas)
+                # 2. Fase 2: Adaptación documental (CV y Cartas)
                 # Priorizar estrictamente por mayor puntuación
                 from ..tailoring.cv_reader import get_active_cv_status
                 cv_status = get_active_cv_status()

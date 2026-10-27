@@ -36,7 +36,7 @@ export function NotificationChannelsDialog({
   const [enviarTelegram, setEnviarTelegram] = useState<boolean>(true);
   const [telegramBotToken, setTelegramBotToken] = useState<string>("");
   const [telegramUserId, setTelegramUserId] = useState<string>("");
-  const [umbralMinimo, setUmbralMinimo] = useState<number>(65);
+  const [umbralMinimo, setUmbralMinimo] = useState<number>(50);
   const [testingTelegram, setTestingTelegram] = useState<boolean>(false);
   const [linkingTelegram, setLinkingTelegram] = useState<boolean>(false);
   const [showAdvancedTelegram, setShowAdvancedTelegram] = useState<boolean>(false);
@@ -58,7 +58,7 @@ export function NotificationChannelsDialog({
           ""
       );
       setTelegramBotToken("");
-      setUmbralMinimo(res.evaluacion?.umbral_minimo_puntuacion ?? 65);
+      setUmbralMinimo(res.evaluacion?.umbral_minimo_puntuacion ?? 50);
       setInfojobsClientId(res.secrets_status?.infojobs_client_id || "");
       setInfojobsClientSecret("");
     } catch (e: any) {

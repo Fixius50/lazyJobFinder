@@ -139,7 +139,11 @@ export interface FacetItem {
 export interface FilterFacetsResponse {
   sources: FacetItem[];
   modalities: FacetItem[];
+  fit_levels?: FacetItem[];
   categories: FacetItem[];
+  missing_skills?: FacetItem[];
+  strengths?: FacetItem[];
+  gaps?: FacetItem[];
   educations: FacetItem[];
   schedules: FacetItem[];
   contract_types: FacetItem[];
@@ -147,6 +151,12 @@ export interface FilterFacetsResponse {
     min: number;
     max: number;
     currency: string;
+    total_with_salary?: number;
+  };
+  score_stats?: {
+    min: number;
+    max: number;
+    avg: number;
   };
   top_locations: { name: string; count: number }[];
   total_jobs: number;

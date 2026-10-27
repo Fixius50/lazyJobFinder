@@ -1,7 +1,7 @@
 """Gestor y orquestador central de todos los conectores de empleo con reporte de salud."""
 
 import logging
-from typing import Any, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from ..database import Database
 from .base import JobOffer
 from .infojobs_connector import InfoJobsConnector
@@ -79,9 +79,14 @@ class ConnectorManager:
                 summary[name] = f"🟡 {status}"
         return summary
 
-    def run_discovery(self) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    def run_discovery(
+        self,
+        on_job_saved: Optional[Callable[[Dict[str, Any]], None]] = None,
+    ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
         """
         Ejecuta la búsqueda en todas las fuentes configuradas, deduplica y guarda las nuevas ofertas.
+        Emite cada oferta nueva a través de on_job_saved en cuanto se inserta en SQLite para permitir
+        la evaluación concurrente en paralelo con el rastreo.
         Retorna la lista de ofertas nuevas insertadas en base de datos y un resumen de métricas.
         """
         # 1. Obtener CV activo y términos de búsqueda dinámicos adaptados (operación ultraligera O(1))
@@ -143,9 +148,14 @@ class ConnectorManager:
 
         all_discovered: List[JobOffer] = []
         source_counts: Dict[str, int] = {}
+        newly_inserted_jobs: List[Dict[str, Any]] = []
+        duplicates_count = 0
+        cross_portal_count = 0
+        updated_count = 0
+
+        active_cv_name = cv_meta.get("filename") if cv_meta.get("has_cv") else None
 
         for connector in self.connectors:
-
             try:
                 logger.info("Iniciando escaneo con conector '%s'...", connector.name)
                 offers = connector.search(
@@ -156,6 +166,30 @@ class ConnectorManager:
                 )
                 source_counts[connector.name] = len(offers)
                 all_discovered.extend(offers)
+
+                # Guardar inmediatamente las ofertas de este conector para que la evaluación
+                # concurrente en paralelo pueda consumirlas de inmediato sin esperar al resto de portales
+                for offer in offers:
+                    offer_dict = offer.to_dict()
+                    if active_cv_name:
+                        offer_dict["cv_filename"] = active_cv_name
+                    job_id, status_code = self.db.save_job(offer_dict)
+
+                    if status_code == "inserted" and job_id:
+                        offer_dict["id"] = job_id
+                        newly_inserted_jobs.append(offer_dict)
+                        if on_job_saved:
+                            try:
+                                on_job_saved(offer_dict)
+                            except Exception as cb_err:
+                                logger.debug("Error en callback on_job_saved: %s", cb_err)
+                    elif status_code == "cross_portal_duplicate":
+                        cross_portal_count += 1
+                        duplicates_count += 1
+                    elif status_code == "description_updated":
+                        updated_count += 1
+                    else:
+                        duplicates_count += 1
 
                 if connector.name == "jobspy" and isinstance(connector, JobSpyConnector):
                     for site, site_stat in connector.site_status.items():
@@ -193,31 +227,6 @@ class ConnectorManager:
                     source=connector.name,
                     message=f"Fallo durante la búsqueda: {str(e)}",
                 )
-
-        # Proceso de deduplicación e inserción en base de datos
-        newly_inserted_jobs: List[Dict[str, Any]] = []
-        duplicates_count = 0
-        cross_portal_count = 0
-        updated_count = 0
-
-        active_cv_name = cv_meta.get("filename") if cv_meta.get("has_cv") else None
-
-        for offer in all_discovered:
-            offer_dict = offer.to_dict()
-            if active_cv_name:
-                offer_dict["cv_filename"] = active_cv_name
-            job_id, status_code = self.db.save_job(offer_dict)
-
-            if status_code == "inserted" and job_id:
-                offer_dict["id"] = job_id
-                newly_inserted_jobs.append(offer_dict)
-            elif status_code == "cross_portal_duplicate":
-                cross_portal_count += 1
-                duplicates_count += 1
-            elif status_code == "description_updated":
-                updated_count += 1
-            else:
-                duplicates_count += 1
 
         logger.info(
             "Descubrimiento: %d encontradas | %d nuevas | %d duplicadas (%d entre portales) | %d actualizadas.",

@@ -18,7 +18,7 @@ import { formatDateTime } from "@/lib/utils";
 import { APPLICATION_STATUSES, PORTAL_SOURCES, ApplicationStatusKey } from "@/lib/constants";
 import { api } from "@/lib/api";
 
-import { JobScoreBadge, JobStatusBadge } from "./job-badges";
+import { JobScoreBadge, JobStatusBadge, JobModalityBadge } from "./job-badges";
 
 interface JobCardProps {
   job: JobListItem;
@@ -45,11 +45,7 @@ export function JobCard({ job, onOpenDetail }: JobCardProps) {
               <span className="text-3xs font-medium px-1.5 py-0.5 rounded bg-muted/90 text-muted-foreground shrink-0">
                 {sourceMeta ? sourceMeta.label : job.source}
               </span>
-              {job.is_remote ? (
-                <span className="text-3xs font-semibold px-1 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20 shrink-0">
-                  Remoto
-                </span>
-              ) : null}
+              <JobModalityBadge job={job} size="sm" />
             </div>
           </div>
 

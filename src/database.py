@@ -330,6 +330,14 @@ class Database:
 
         logger.info("Base de datos inicializada correctamente en %s", self.db_path)
 
+    def get_utils_db(self):
+        """Devuelve una instancia optimizada de sqlite_utils.Database para operaciones rápidas y FTS."""
+        try:
+            import sqlite_utils
+            return sqlite_utils.Database(self.db_path)
+        except ImportError:
+            return None
+
     def get_app_state(self, key: str, default: Any = None) -> Any:
         """Recupera un valor de estado o configuración persistente desde SQLite."""
         with self._get_connection() as conn:

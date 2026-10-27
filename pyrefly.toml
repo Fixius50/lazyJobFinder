@@ -1,0 +1,4 @@
+search-path = ["src", "lazyJobFinder/src"]
+
+[errors]
+missing-import = "ignore"

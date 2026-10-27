@@ -42,6 +42,26 @@ UPLOAD_DIR = os.getenv("UPLOAD_DIR", os.path.join(DATA_DIR, "uploaded_cvs"))
 # Base de datos unificada SQLite
 DB_PATH = os.getenv("DATABASE_PATH", os.path.join(DATA_DIR, "lazyjobfinder.db"))
 
+try:
+    from pydantic_settings import BaseSettings, SettingsConfigDict
+    from pydantic import Field
+
+    class AppSettings(BaseSettings):
+        """Configuración y rutas fuertemente tipadas del entorno mediante pydantic-settings."""
+        model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+        project_root: str = Field(default_factory=lambda: PROJECT_ROOT)
+        data_dir: str = Field(default_factory=lambda: DATA_DIR)
+        documents_dir: str = Field(default_factory=lambda: DOCUMENTS_DIR)
+        upload_dir: str = Field(default_factory=lambda: UPLOAD_DIR)
+        database_path: str = Field(default_factory=lambda: DB_PATH)
+        ollama_base_url: str = Field(default_factory=lambda: os.getenv("OLLAMA_BASE_URL", "http://ollama:11434"))
+        ollama_model: str = Field(default_factory=lambda: os.getenv("OLLAMA_MODEL", "qwen2.5:3b-instruct"))
+        telegram_bot_token: str = Field(default="")
+        telegram_allowed_user_id: int = Field(default=0)
+except ImportError:
+    AppSettings = None
+
 
 # =============================================================================
 # 2. CENTRALIZACIÓN DE BYTECODE PYTHON (__pycache__)

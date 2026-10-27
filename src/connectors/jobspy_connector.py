@@ -118,6 +118,21 @@ class JobSpyConnector(BaseConnector):
                                 elif is_monthly:
                                     salary_min = round(salary_min * 12, 2) if salary_min else None
                                     salary_max = round(salary_max * 12, 2) if salary_max else None
+                                if salary_min is None and salary_max is None and desc:
+                                    try:
+                                        from price_parser import parse_price
+                                        import re
+                                        for snippet in re.findall(r"(?:salario|sueldo|remuneraci[oó]n)?\s*[:\s]?\s*([0-9.,kK\s]+(?:\s*€|\s*EUR|\s*euros)[\w\s/]*)", desc[:800], re.IGNORECASE):
+                                            p = parse_price(snippet)
+                                            if p.amount_float and 500 < p.amount_float < 200000:
+                                                val = float(p.amount_float)
+                                                if "mes" in snippet.lower() or val < 5000:
+                                                    salary_min = round(val * 12, 2)
+                                                else:
+                                                    salary_min = round(val, 2)
+                                                break
+                                    except Exception:
+                                        pass
                             except Exception:
                                 pass
 

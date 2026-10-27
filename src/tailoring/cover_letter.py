@@ -155,16 +155,39 @@ class CoverLetterGenerator:
         fecha: str,
         body: str,
     ) -> str:
-        meta_lines = []
-        if nombre:
-            meta_lines.append(f"**De:** {nombre}")
-        contact_parts = [p for p in [ciudad, email, telefono] if p]
-        if contact_parts:
-            meta_lines.append(f"**Contacto:** {' | '.join(contact_parts)}")
-        meta_lines.append(f"**Para:** Departamento de Selección / {empresa}")
-        meta_lines.append(f"**Referencia:** Candidatura para {puesto}")
-        if fecha:
-            meta_lines.append(f"**Fecha:** {fecha}")
+        contact_parts = " | ".join([p for p in [ciudad, email, telefono] if p])
+        template_str = """# Carta de Presentación
 
-        header_block = "  \n".join(meta_lines)
-        return f"# Carta de Presentación\n\n{header_block}\n\n---\n\n{body.strip()}\n"
+                        {% if nombre %}**De:** {{ nombre }}  
+                        {% endif %}{% if contact_parts %}**Contacto:** {{ contact_parts }}  
+                        {% endif %}**Para:** Departamento de Selección / {{ empresa }}  
+                        **Referencia:** Candidatura para {{ puesto }}  
+                        {% if fecha %}**Fecha:** {{ fecha }}{% endif %}
+
+                        ---
+
+                        {{ body }}
+                        """
+        try:
+            from jinja2 import Template
+            tmpl = Template(template_str)
+            return tmpl.render(
+                nombre=nombre,
+                contact_parts=contact_parts,
+                empresa=empresa,
+                puesto=puesto,
+                fecha=fecha,
+                body=body.strip(),
+            )
+        except Exception:
+            meta_lines = []
+            if nombre:
+                meta_lines.append(f"**De:** {nombre}")
+            if contact_parts:
+                meta_lines.append(f"**Contacto:** {contact_parts}")
+            meta_lines.append(f"**Para:** Departamento de Selección / {empresa}")
+            meta_lines.append(f"**Referencia:** Candidatura para {puesto}")
+            if fecha:
+                meta_lines.append(f"**Fecha:** {fecha}")
+            header_block = "  \n".join(meta_lines)
+            return f"# Carta de Presentación\n\n{header_block}\n\n---\n\n{body.strip()}\n"

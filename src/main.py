@@ -49,44 +49,17 @@ async def _code_reload_watcher(stop_event: asyncio.Event) -> None:
     if os.getenv("ENABLE_HOT_RELOAD", "false").lower() not in ("true", "1"):
         return
 
-    def _get_mtimes() -> dict:
-        mtimes = {}
-        try:
-            for root, _, files in os.walk(SRC_DIR):
-                for f in files:
-                    if f.endswith(".py"):
-                        p = os.path.join(root, f)
-                        try:
-                            mtimes[p] = os.path.getmtime(p)
-                        except OSError:
-                            pass
-        except Exception:
-            pass
-        return mtimes
-
-    initial_mtimes = _get_mtimes()
-    await asyncio.sleep(2.0)
-
-    while not stop_event.is_set():
-        await asyncio.sleep(1.5)
-        current_mtimes = _get_mtimes()
-        changed = False
-        changed_name = ""
-        for path, mtime in current_mtimes.items():
-            if path in initial_mtimes and mtime > initial_mtimes[path] + 0.1:
-                changed = True
-                changed_name = os.path.basename(path)
-                break
-            elif path not in initial_mtimes:
-                changed = True
-                changed_name = os.path.basename(path)
-                break
-
-        if changed:
+    try:
+        from watchfiles import awatch, PythonFilter
+        async for changes in awatch(SRC_DIR, watch_filter=PythonFilter(), stop_event=stop_event):
+            first_change = next(iter(changes), None)
+            changed_name = os.path.basename(first_change[1]) if first_change else "código"
             logger.info("⚡ Cambio detectado en el código fuente (%s). Reiniciando servidor automáticamente...", changed_name)
             _RELOAD_REQUESTED = True
             stop_event.set()
             break
+    except Exception as e:
+        logger.debug("Observador watchfiles no disponible o finalizado: %s", e)
 
 
 async def main() -> None:

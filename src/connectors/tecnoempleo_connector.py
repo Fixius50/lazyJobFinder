@@ -16,9 +16,16 @@ logger = logging.getLogger("lazyJobFinder.connectors.tecnoempleo")
 
 
 def clean_html(raw_html: str) -> str:
-    """Elimina etiquetas HTML y entidades para obtener texto plano limpio."""
+    """Extrae texto plano limpio de contenidos HTML utilizando trafilatura con fallback robusto."""
     if not raw_html:
         return ""
+    try:
+        import trafilatura
+        extracted = trafilatura.extract(raw_html, include_links=False, include_comments=False)
+        if extracted and len(extracted.strip()) > 20:
+            return extracted.strip()
+    except Exception:
+        pass
     clean_text = re.sub(r"<[^>]+>", " ", raw_html)
     clean_text = html.unescape(clean_text)
     clean_text = re.sub(r"\s+", " ", clean_text)

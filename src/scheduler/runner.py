@@ -118,6 +118,7 @@ class JobPipelineRunner:
         self.scheduler = AsyncIOScheduler()
         self._async_lock: Optional[asyncio.Lock] = None
         self._stop_requested: bool = False
+        self._active_tasks: List[asyncio.Task] = []
 
     def _load_yaml(self, path: str) -> Dict[str, Any]:
         try:
@@ -242,40 +243,13 @@ class JobPipelineRunner:
 
                 from ..tailoring.cv_reader import get_active_cv_status
                 cv_status = get_active_cv_status()
-                can_generate_docs = generate_docs and (cv_status.get("has_cv") or bool(self.profile))
+                # Por política del sistema y diseño solicitado, la generación documental se ejecuta bajo demanda
+                # cuando el usuario pulsa 'Generar' en la interfaz, evitando sobrecarga masiva de GPU/CPU en Ollama.
+                can_generate_docs = False
 
                 # Cola concurrente de generación de documentos en tiempo real
                 docs_queue: asyncio.Queue[Optional[Tuple[Dict[str, Any], Dict[str, Any]]]] = asyncio.Queue()
                 queued_doc_job_ids = set()
-
-                # Precargar ofertas ya evaluadas en la BD que aún necesiten documentos
-                if can_generate_docs:
-                    try:
-                        pending_docs_db = await asyncio.to_thread(
-                            self.db.get_evaluated_jobs_needing_docs,
-                            50,
-                            active_cv_name,
-                            50,
-                        )
-                        for item in pending_docs_db:
-                            j_id = item["id"]
-                            if j_id not in queued_doc_job_ids:
-                                queued_doc_job_ids.add(j_id)
-                                eval_dict = {
-                                    "score": item.get("score", 0),
-                                    "fit_level": item.get("fit_level", "BUENO"),
-                                    "should_apply": bool(item.get("should_apply", True)),
-                                    "matched_skills": item.get("matched_skills", []),
-                                    "missing_skills": item.get("missing_skills", []),
-                                    "strengths": item.get("strengths", []),
-                                    "gaps": item.get("gaps", []),
-                                    "reasoning": item.get("reasoning", ""),
-                                }
-                                docs_queue.put_nowait((item, eval_dict))
-                        if pending_docs_db:
-                            logger.info("Precargadas %d ofertas evaluadas pendientes de documentos en la cola en tiempo real.", len(pending_docs_db))
-                    except Exception as pend_err:
-                        logger.debug("Error precargando vacantes pendientes de docs: %s", pend_err)
 
                 # Generador y guardador individual de documentos en tiempo real
                 async def _generate_docs_for_item(job: Dict[str, Any], eval_res: Dict[str, Any]) -> None:
@@ -334,8 +308,13 @@ class JobPipelineRunner:
                 # Tarea Consumidora Documental en vivo
                 async def _docs_worker():
                     while True:
-                        item = await docs_queue.get()
-                        if item is None:
+                        if self._stop_requested:
+                            break
+                        try:
+                            item = await docs_queue.get()
+                        except asyncio.CancelledError:
+                            break
+                        if item is None or self._stop_requested:
                             docs_queue.task_done()
                             break
                         j, er = item
@@ -354,6 +333,9 @@ class JobPipelineRunner:
                         )
                         self.db.log_event("INFO", "pipeline", f"Descubrimiento completado: {res[1]['total_encontradas']} ofertas encontradas ({res[1]['nuevas_guardadas']} nuevas registradas).")
                         return res
+                    except asyncio.CancelledError:
+                        logger.info("Rastreo en portales cancelado por detención de usuario.")
+                        return [], {"total_encontradas": 0, "nuevas_guardadas": 0, "fuentes": {}}
                     finally:
                         # Indicar a todos los workers de evaluación que la fase de descubrimiento ha concluido
                         for _ in range(concurrency):
@@ -363,18 +345,20 @@ class JobPipelineRunner:
                 async def _eval_worker():
                     while True:
                         if self._stop_requested:
-                            eval_queue.task_done()
                             break
-                        job = await eval_queue.get()
-                        if job is None:
-                            eval_queue.task_done()
+                        try:
+                            job = await eval_queue.get()
+                        except asyncio.CancelledError:
                             break
-                        if self._stop_requested:
+                        if job is None or self._stop_requested:
                             eval_queue.task_done()
                             break
                         try:
                             self.db.update_job_status(job["id"], "evaluating")
                             eval_res = await asyncio.to_thread(self.scoring_engine.evaluate, job)
+                            if self._stop_requested:
+                                self.db.update_job_status(job["id"], "discovered")
+                                break
                             if not eval_res or eval_res.get("score") is None:
                                 self.db.update_job_status(job["id"], "discovered")
                             else:
@@ -383,13 +367,15 @@ class JobPipelineRunner:
                                     self.db.update_job_status(job["id"], "evaluated")
                                     logger.info("Oferta ID %d ('%s') puntuada: %d/100 -> APTO.", job["id"], job.get("title", "")[:30], score)
                                     qualified_candidates.append((job, eval_res))
-                                    # Encolar para generación de CV y carta mientras se siguen buscando ofertas
                                     if can_generate_docs and job["id"] not in queued_doc_job_ids:
                                         queued_doc_job_ids.add(job["id"])
                                         docs_queue.put_nowait((job, eval_res))
                                 else:
                                     self.db.update_job_status(job["id"], "discarded")
                                     logger.info("Oferta ID %d ('%s') puntuada: %d/100 -> Descartada (< %d).", job["id"], job.get("title", "")[:30], score, min_score)
+                        except asyncio.CancelledError:
+                            self.db.update_job_status(job.get("id"), "discovered")
+                            break
                         except Exception as eval_err:
                             logger.error("Error evaluando oferta ID %d: %s", job.get("id"), eval_err)
                             self.db.update_job_status(job.get("id"), "discovered")
@@ -400,15 +386,27 @@ class JobPipelineRunner:
                 discovery_task = asyncio.create_task(_run_discovery_task())
                 eval_tasks = [asyncio.create_task(_eval_worker()) for _ in range(concurrency)]
                 docs_task = asyncio.create_task(_docs_worker())
+                self._active_tasks = [discovery_task, *eval_tasks, docs_task]
 
-                discovery_result, *_ = await asyncio.gather(discovery_task, *eval_tasks)
-                new_jobs, metrics = discovery_result
-                total_found = metrics["total_encontradas"]
-                new_count = metrics["nuevas_guardadas"]
+                try:
+                    gather_results = await asyncio.gather(discovery_task, *eval_tasks, return_exceptions=True)
+                    discovery_res = gather_results[0]
+                    if isinstance(discovery_res, tuple) and len(discovery_res) == 2:
+                        new_jobs, metrics = discovery_res
+                        total_found = metrics.get("total_encontradas", 0)
+                        new_count = metrics.get("nuevas_guardadas", 0)
+                    else:
+                        new_jobs, total_found, new_count = [], 0, 0
+                finally:
+                    self._active_tasks = []
 
                 # Indicar a la tarea de documentos que ya no entrarán más ofertas nuevas y esperar a que vacíe la cola
                 await docs_queue.put(None)
-                await docs_task
+                try:
+                    await asyncio.wait_for(docs_task, timeout=2.0)
+                except (asyncio.TimeoutError, asyncio.CancelledError):
+                    if not docs_task.done():
+                        docs_task.cancel()
 
                 # Si no hubo ofertas evaluadas ni pendientes ni nuevas, finalizar run
                 if not seen_job_ids and not new_jobs and not relevant_matches:
@@ -525,7 +523,11 @@ class JobPipelineRunner:
         if not self.is_running():
             return False
         self._stop_requested = True
-        logger.info("Detención de búsqueda solicitada por el usuario.")
+        tasks_to_cancel = list(getattr(self, "_active_tasks", []))
+        for t in tasks_to_cancel:
+            if not t.done():
+                t.cancel()
+        logger.info("Detención de búsqueda solicitada por el usuario. %d tareas activas canceladas.", len(tasks_to_cancel))
         self.db.log_event("WARNING", "pipeline", "Detención de búsqueda solicitada por el usuario desde la interfaz web.")
         return True
 

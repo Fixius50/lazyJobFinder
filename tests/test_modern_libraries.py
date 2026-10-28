@@ -74,6 +74,11 @@ class TestModernLibraries(unittest.TestCase):
             read_back = db.get_app_state("test_modern_key")
             self.assertEqual(read_back, "modern_value")
 
+            # Liberar conexión en Windows para permitir el borrado del directorio temporal
+            utils_db.conn.close()
+            import gc
+            gc.collect()
+
     def test_jinja2_letter_templating(self):
         """Verifica el renderizado de cartas de presentación mediante Jinja2."""
         from src.tailoring.cover_letter import CoverLetterGenerator

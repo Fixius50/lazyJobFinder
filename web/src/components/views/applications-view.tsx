@@ -295,6 +295,7 @@ export function ApplicationsView() {
   const [hasActiveCv, setHasActiveCv] = useState<boolean>(false);
   const [searching, setSearching] = useState<boolean>(false);
   const [toggleLoading, setToggleLoading] = useState<boolean>(false);
+  const userPausedRef = useRef<boolean>(false);
 
   const loadFacets = async () => {
     try {
@@ -310,6 +311,13 @@ export function ApplicationsView() {
       const status = await api.getSearchStatus();
       if (status && status.is_running !== undefined) {
         const running = Boolean(status.is_running);
+        if (userPausedRef.current) {
+          if (!running) {
+            userPausedRef.current = false;
+            setSearching(false);
+          }
+          return false;
+        }
         setSearching(running);
         return running;
       }
@@ -325,11 +333,13 @@ export function ApplicationsView() {
     try {
       if (!enable) {
         // Desactivar / Cancelar búsqueda en curso
-        await api.stopSearch();
+        userPausedRef.current = true;
         setSearching(false);
+        await api.stopSearch();
         toast.info("Búsqueda con IA en portales pausada.");
       } else {
         // Activar búsqueda
+        userPausedRef.current = false;
         if (!hasActiveCv) {
           toast.warning("Debes tener un CV activo seleccionado para iniciar la búsqueda.");
           return;
@@ -337,7 +347,7 @@ export function ApplicationsView() {
         await api.triggerSearch();
         setSearching(true);
         toast.success("Buscador con IA activado. Rastreando portales de empleo...");
-        setTimeout(() => pollSearchStatus(), 600);
+        setTimeout(() => pollSearchStatus(), 800);
       }
     } catch (e: any) {
       toast.error(`Error con el buscador de IA: ${e.message || e}`);

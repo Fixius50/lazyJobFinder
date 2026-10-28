@@ -1,0 +1,23 @@
+cff-version: 1.2.0
+title: "lazyJobFinder"
+message: "If you use this software, please cite it as follows."
+type: software
+authors:
+  - given-names: "Roberto"
+    family-names: "Monedero Alonso"
+abstract: "Sistema local, autónomo y gratuito (0 €/mes) de búsqueda de empleo, filtrado multicriterio, evaluación de afinidad ATS mediante IA local (Ollama) y redacción automatizada de CVs y cartas de presentación adaptadas para cualquier sector profesional."
+license: "MPL-2.0"
+version: "1.0.0"
+date-released: "2026-10-28"
+keywords:
+  - job-search
+  - local-ai
+  - ollama
+  - ats-friendly
+  - fastapi
+  - sqlite
+  - nextjs
+  - tailwindcss
+  - automated-resume
+  - employment
+

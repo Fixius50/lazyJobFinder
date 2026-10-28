@@ -4,6 +4,13 @@
 
 **lazyJobFinder** se ejecuta de forma autónoma en tu propio equipo mediante contenedores Docker. Escanea múltiples portales de empleo en España (LinkedIn, Indeed, Glassdoor, Google Jobs, InfoJobs y Tecnoempleo), deduplica vacantes repetidas, evalúa su afinidad mediante un modelo de lenguaje local (Ollama) sin enviar jamás tus datos personales a servicios cloud de pago, redacta cartas de presentación a medida y centraliza todo en un panel web moderno con notificaciones opcionales por Telegram.
 
+
+## 🛡️ Privacidad y Seguridad
+
+1. **100% Local:** Tus currículums, datos personales y notas jamás se envían a servidores externos ni a modelos de IA en la nube.
+2. **Puertos enlazados a 127.0.0.1:** La API y los servicios se vinculan estrictamente a localhost para evitar exposición en redes locales o públicas.
+3. **Cero Telemetría:** Sin recopilación de métricas, cookies de seguimiento ni rastreo de terceros.
+
 ---
 
 ## ✨ Características Principales
@@ -173,10 +180,4 @@ lazyJobFinder/
 ```
 
 ---
-
-## 🛡️ Privacidad y Seguridad
-
-1. **100% Local:** Tus currículums, datos personales y notas jamás se envían a servidores externos ni a modelos de IA en la nube.
-2. **Puertos enlazados a 127.0.0.1:** La API y los servicios se vinculan estrictamente a localhost para evitar exposición en redes locales o públicas.
-3. **Cero Telemetría:** Sin recopilación de métricas, cookies de seguimiento ni rastreo de terceros.
 

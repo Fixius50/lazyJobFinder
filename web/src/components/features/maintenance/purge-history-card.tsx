@@ -11,13 +11,14 @@ import { CONFIRMATION_PHRASES } from "@/lib/constants";
 interface PurgeHistoryProps {
   onHistoryCleared?: () => void;
   className?: string;
+  iconOnly?: boolean;
 }
 
 /**
  * Botón y modal centralizado de vaciado de historial de candidaturas.
  * Protegido mediante frase de confirmación exacta para evitar pérdidas involuntarias.
  */
-export function PurgeHistoryButton({ onHistoryCleared, className = "" }: PurgeHistoryProps) {
+export function PurgeHistoryButton({ onHistoryCleared, className = "", iconOnly = false }: PurgeHistoryProps) {
   const [modalOpen, setModalOpen] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(false);
 
@@ -42,11 +43,15 @@ export function PurgeHistoryButton({ onHistoryCleared, className = "" }: PurgeHi
         size="sm"
         variant="destructive"
         onClick={() => setModalOpen(true)}
-        className={`flex items-center gap-1.5 h-8 text-xs font-medium shadow-xs ${className}`}
-        title="Vacía todas las ofertas registradas en SQLite y elimina PDFs generados"
+        className={
+          iconOnly
+            ? `h-8 w-8 p-0 shrink-0 shadow-xs ${className}`
+            : `flex items-center gap-1.5 h-8 text-xs font-medium shadow-xs ${className}`
+        }
+        title="Vaciar Historial (elimina ofertas en SQLite y PDFs generados)"
       >
         <Trash2 className="h-3.5 w-3.5" />
-        Vaciar Historial
+        {!iconOnly && <span>Vaciar Historial</span>}
       </Button>
 
       <Dialog

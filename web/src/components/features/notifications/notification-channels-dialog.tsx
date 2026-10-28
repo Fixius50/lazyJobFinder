@@ -156,7 +156,7 @@ export function NotificationChannelsDialog({
       open={open}
       onOpenChange={onOpenChange}
       title="Preferencias de Notificación y Conexiones API"
-      description="Gestiona las alertas automáticas de Telegram, tu umbral de afinidad IA y tus credenciales de la API oficial de InfoJobs."
+      description="Gestiona las alertas automáticas de Telegram y tus credenciales de la API oficial de InfoJobs."
       maxWidth="lg"
     >
       {loading ? (
@@ -434,28 +434,6 @@ export function NotificationChannelsDialog({
                   className="text-xs h-8 font-mono bg-background"
                 />
               </div>
-            </div>
-          </div>
-
-          {/* Sección 3: Puntuación mínima de afinidad */}
-          <div className="p-3.5 rounded-xl border bg-card/60 space-y-2">
-            <div className="flex items-center justify-between text-xs">
-              <span className="font-semibold text-foreground">Puntuación mínima de afinidad para postular:</span>
-              <span className="font-bold text-primary font-mono text-sm">{umbralMinimo} / 100</span>
-            </div>
-            <input
-              type="range"
-              min="40"
-              max="90"
-              step="5"
-              value={umbralMinimo}
-              onChange={(e) => setUmbralMinimo(parseInt(e.target.value, 10))}
-              className="w-full h-1.5 bg-muted rounded-lg appearance-none cursor-pointer accent-primary"
-            />
-            <div className="flex justify-between text-3xs text-muted-foreground font-medium">
-              <span>Flexible (40)</span>
-              <span>Recomendado (65)</span>
-              <span>Estricto (90)</span>
             </div>
           </div>
 

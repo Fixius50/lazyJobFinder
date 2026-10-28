@@ -7,9 +7,13 @@ import {
   Calendar,
   ExternalLink,
   Download,
+  FileText,
+  Mail,
   Eye,
   RefreshCw,
   Sparkles,
+  X,
+  RotateCcw,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -26,17 +30,31 @@ import { JobScoreBadge, JobStatusBadge, JobModalityBadge } from "./job-badges";
 interface JobCardProps {
   job: JobListItem;
   onOpenDetail: (id: number) => void;
-  onUpdateStatus?: (newStatus: string) => void;
+  onUpdateStatus?: (id: number, newStatus: string) => void;
   onUpdateJob?: (updatedJob: JobListItem) => void;
 }
 
-export function JobCard({ job, onOpenDetail, onUpdateJob }: JobCardProps) {
+export function JobCard({ job, onOpenDetail, onUpdateStatus, onUpdateJob }: JobCardProps) {
   const sourceMeta = PORTAL_SOURCES[job.source as keyof typeof PORTAL_SOURCES];
   const isEvaluating = job.status === "evaluating";
+  const isDiscarded = job.status === "discarded";
 
   const [hasCv, setHasCv] = useState<boolean>(!!job.has_cv);
   const [hasLetter, setHasLetter] = useState<boolean>(!!job.has_letter);
   const [isGenerating, setIsGenerating] = useState<boolean>(job.status === "generating_docs");
+
+  const isEvaluated = Boolean(
+    (job.score !== null && job.score !== undefined && job.status !== "discovered" && job.status !== "evaluating") ||
+    hasCv ||
+    hasLetter
+  );
+
+  const handleToggleDiscard = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!onUpdateStatus) return;
+    const newStatus = isDiscarded ? "evaluated" : "discarded";
+    onUpdateStatus(job.id, newStatus);
+  };
 
   useEffect(() => {
     setHasCv(!!job.has_cv);
@@ -75,7 +93,11 @@ export function JobCard({ job, onOpenDetail, onUpdateJob }: JobCardProps) {
   };
 
   return (
-    <Card className="group flex flex-col justify-between hover:border-primary/50 hover:shadow-md transition-all duration-200 bg-card/80 backdrop-blur-sm border rounded-xl overflow-hidden h-full">
+    <Card
+      className={`group flex flex-col justify-between hover:border-primary/50 hover:shadow-md transition-all duration-200 bg-card/80 backdrop-blur-sm border rounded-xl overflow-hidden h-full ${
+        isDiscarded ? "opacity-75 hover:opacity-100 border-dashed border-border/80" : ""
+      }`}
+    >
       <CardContent className="p-3 sm:p-3.5 flex flex-col h-full justify-between space-y-3">
         {/* Cabecera de la Tarjeta: Badges de afinidad, estado y fuente */}
         <div className="space-y-2.5">
@@ -89,6 +111,15 @@ export function JobCard({ job, onOpenDetail, onUpdateJob }: JobCardProps) {
                 {sourceMeta ? sourceMeta.label : job.source}
               </span>
               <JobModalityBadge job={job} size="sm" />
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => onOpenDetail(job.id)}
+                className="h-6 w-6 p-0 rounded-md shrink-0 text-muted-foreground/60 hover:text-foreground hover:bg-muted/80 transition-colors"
+                title="Ver detalles de la oferta"
+              >
+                <Eye className="h-3.5 w-3.5" />
+              </Button>
             </div>
           </div>
 
@@ -127,7 +158,7 @@ export function JobCard({ job, onOpenDetail, onUpdateJob }: JobCardProps) {
           </div>
         </div>
 
-        {/* Pie de la Tarjeta: Acciones de descarga y botón de generación */}
+        {/* Pie de la Tarjeta: Acciones de descarga, botón de generación y descarte */}
         <div className="pt-2 border-t border-border/40 flex items-center justify-between gap-1.5">
           <div className="flex items-center gap-1">
             {hasCv ? (
@@ -136,10 +167,9 @@ export function JobCard({ job, onOpenDetail, onUpdateJob }: JobCardProps) {
                 variant="ghost"
                 onClick={() => window.open(api.getDocumentUrl(job.id, "cv_pdf"), "_blank")}
                 title="Descargar CV adaptado en PDF"
-                className="h-7 px-1.5 text-3xs flex items-center gap-1 text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10"
+                className="h-7 w-7 p-0 flex items-center justify-center shrink-0 text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10"
               >
-                <Download className="h-3 w-3" />
-                <span>CV</span>
+                <FileText className="h-3.5 w-3.5" />
               </Button>
             ) : null}
 
@@ -148,61 +178,59 @@ export function JobCard({ job, onOpenDetail, onUpdateJob }: JobCardProps) {
                 size="sm"
                 variant="ghost"
                 onClick={() => window.open(api.getDocumentUrl(job.id, "letter_pdf"), "_blank")}
-                title="Descargar Carta en PDF"
-                className="h-7 px-1.5 text-3xs flex items-center gap-1 text-blue-400 hover:text-blue-300 hover:bg-blue-500/10"
+                title="Descargar Carta adaptada en PDF"
+                className="h-7 w-7 p-0 flex items-center justify-center shrink-0 text-blue-400 hover:text-blue-300 hover:bg-blue-500/10"
               >
-                <Download className="h-3 w-3" />
-                <span>Carta</span>
+                <Mail className="h-3.5 w-3.5" />
               </Button>
             ) : null}
           </div>
 
           <div className="flex items-center gap-1.5 ml-auto">
-            {/* Botón de Generar CV y Carta bajo demanda (a la izquierda de Vista/Detalles) */}
-            <Button
-              size="sm"
-              variant={hasCv && hasLetter ? "ghost" : "outline"}
-              disabled={isGenerating}
-              onClick={handleGenerateDocs}
-              title={
-                hasCv && hasLetter
-                  ? "Regenerar CV y carta adaptados con IA"
-                  : "Generar CV y carta adaptados a esta oferta en particular"
-              }
-              className={`h-7 px-2 text-2xs flex items-center gap-1 font-medium transition-all ${
-                hasCv && hasLetter
-                  ? "text-muted-foreground hover:text-primary hover:bg-primary/10"
-                  : "bg-primary/10 text-primary border-primary/30 hover:bg-primary/20 hover:border-primary/50 shadow-xs"
-              }`}
-            >
-              {isGenerating ? (
-                <>
-                  <RefreshCw className="h-3 w-3 animate-spin text-primary" />
-                  <span>Generando...</span>
-                </>
-              ) : hasCv && hasLetter ? (
-                <>
-                  <Sparkles className="h-3 w-3 text-amber-400" />
-                  <span className="hidden sm:inline">Regenerar</span>
-                </>
-              ) : (
-                <>
-                  <Sparkles className="h-3 w-3 text-primary animate-pulse" />
-                  <span>Generar</span>
-                </>
-              )}
-            </Button>
+            {/* Botón de Generar CV y Carta bajo demanda (solo icono) */}
+            {(isEvaluated || isGenerating) && (
+              <Button
+                size="sm"
+                variant={hasCv && hasLetter ? "ghost" : "outline"}
+                disabled={isGenerating}
+                onClick={handleGenerateDocs}
+                title={
+                  hasCv && hasLetter
+                    ? "Regenerar CV y carta adaptados con IA"
+                    : "Generar CV y carta adaptados a esta oferta en particular"
+                }
+                className={`h-7 w-7 p-0 flex items-center justify-center shrink-0 transition-all ${
+                  hasCv && hasLetter
+                    ? "text-muted-foreground hover:text-primary hover:bg-primary/10"
+                    : "bg-primary/10 text-primary border-primary/30 hover:bg-primary/20 hover:border-primary/50 shadow-xs"
+                }`}
+              >
+                {isGenerating ? (
+                  <RefreshCw className="h-3.5 w-3.5 animate-spin text-primary" />
+                ) : hasCv && hasLetter ? (
+                  <Sparkles className="h-3.5 w-3.5 text-amber-400" />
+                ) : (
+                  <Sparkles className="h-3.5 w-3.5 text-primary animate-pulse" />
+                )}
+              </Button>
+            )}
 
-            <Button
-              size="sm"
-              variant="secondary"
-              onClick={() => onOpenDetail(job.id)}
-              className="h-7 px-2 text-xs flex items-center gap-1 font-medium shadow-xs hover:bg-secondary/80"
-              title="Ver detalles de la oferta"
-            >
-              <Eye className="h-3 w-3" />
-              <span>Detalles</span>
-            </Button>
+            {/* Botón de Descartar / Recuperar oferta (intercambiado al pie, solo icono) */}
+            {onUpdateStatus && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={handleToggleDiscard}
+                className={`h-7 w-7 p-0 rounded-md shrink-0 transition-colors flex items-center justify-center ${
+                  isDiscarded
+                    ? "text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/15"
+                    : "text-muted-foreground/60 hover:text-rose-400 hover:bg-rose-500/15"
+                }`}
+                title={isDiscarded ? "Recuperar a ofertas activas" : "Descartar oferta"}
+              >
+                {isDiscarded ? <RotateCcw className="h-3.5 w-3.5" /> : <X className="h-3.5 w-3.5" />}
+              </Button>
+            )}
           </div>
         </div>
       </CardContent>

@@ -5,8 +5,8 @@ import { cn } from "@/lib/utils";
 export interface DialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  title: string;
-  description?: string;
+  title: React.ReactNode;
+  description?: React.ReactNode;
   children: React.ReactNode;
   footer?: React.ReactNode;
   maxWidth?: "sm" | "md" | "lg" | "xl" | "2xl" | "4xl" | "5xl" | "6xl";
@@ -59,14 +59,14 @@ export function Dialog({
           maxWidthStyles[maxWidth]
         )}
       >
-        <div className="flex items-start justify-between pb-3 border-b">
-          <div>
-            <h2 className="text-base font-semibold leading-none tracking-tight">{title}</h2>
+        <div className="flex items-start justify-between pb-3 border-b gap-2">
+          <div className="min-w-0 flex-1 pr-2">
+            <h2 className="text-base font-semibold leading-snug tracking-tight">{title}</h2>
             {description && <p className="text-xs text-muted-foreground mt-1.5">{description}</p>}
           </div>
           <button
             onClick={() => onOpenChange(false)}
-            className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+            className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors shrink-0"
           >
             <X className="h-4 w-4" />
           </button>

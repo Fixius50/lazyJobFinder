@@ -7,6 +7,7 @@ import {
   ChevronLeft,
   ChevronRight,
   FileCheck,
+  Filter,
   Sparkles,
   AlertTriangle,
 } from "lucide-react";
@@ -63,7 +64,18 @@ const INITIAL_FILTERS: FilterState = {
  * Filtra una vacante de empleo en memoria del navegador de forma instantánea
  * sin realizar llamadas redundantes a la API de FastAPI.
  */
-function filterJobLocally(job: JobListItem, filters: FilterState): boolean {
+function filterJobLocally(
+  job: JobListItem,
+  filters: FilterState,
+  viewTab: "active" | "discarded" = "active"
+): boolean {
+  // 0. Pestaña de visualización: Activas vs Descartadas
+  if (viewTab === "active") {
+    if (job.status === "discarded") return false;
+  } else if (viewTab === "discarded") {
+    if (job.status !== "discarded") return false;
+  }
+
   // 1. Puntuación mínima de afinidad IA
   if (filters.minScore > 0 && (job.score ?? 0) < filters.minScore) {
     return false;
@@ -253,6 +265,22 @@ export function ApplicationsView() {
   const [showCvPanel, setShowCvPanel] = useState<boolean>(true);
   const [facets, setFacets] = useState<FilterFacetsResponse | null>(null);
 
+  // Pestaña de visualización: Activas vs Descartadas
+  const [viewTab, setViewTab] = useState<"active" | "discarded">("active");
+
+  const counts = useMemo(() => {
+    let active = 0;
+    let discarded = 0;
+    for (const job of rawJobs) {
+      if (job.status === "discarded") {
+        discarded++;
+      } else {
+        active++;
+      }
+    }
+    return { active, discarded };
+  }, [rawJobs]);
+
   // Filtros unificados en un único estado atómico
   const [filters, setFilters] = useState<FilterState>(INITIAL_FILTERS);
   const [currentPage, setCurrentPage] = useState<number>(1);
@@ -270,13 +298,13 @@ export function ApplicationsView() {
   // Filtrado 100% reactivo en cliente sobre las ofertas traídas sin llamadas de red redundantes.
   // Ordenación cronológica natural por fecha de publicación/descubrimiento más reciente
   const filteredJobs = useMemo(() => {
-    const list = rawJobs.filter((job) => filterJobLocally(job, filters));
+    const list = rawJobs.filter((job) => filterJobLocally(job, filters, viewTab));
     return list.sort((a, b) => {
       const aTime = a.created_at ? new Date(a.created_at).getTime() : 0;
       const bTime = b.created_at ? new Date(b.created_at).getTime() : 0;
       return bTime - aTime;
     });
-  }, [rawJobs, filters]);
+  }, [rawJobs, filters, viewTab]);
 
   const PAGE_SIZE = 20;
   const totalPages = Math.max(1, Math.ceil(filteredJobs.length / PAGE_SIZE));
@@ -482,6 +510,9 @@ export function ApplicationsView() {
 
   const handleUpdateStatus = async (jobId: number, newStatus: string) => {
     try {
+      const prevJob = rawJobs.find((j) => j.id === jobId);
+      const prevStatus = prevJob?.status || "evaluated";
+
       await api.updateJobStatus(jobId, newStatus);
       if (selectedJobDetail && selectedJobDetail.id === jobId) {
         setSelectedJobDetail({ ...selectedJobDetail, status: newStatus });
@@ -489,8 +520,20 @@ export function ApplicationsView() {
       setRawJobs((prev) =>
         prev.map((j) => (j.id === jobId ? { ...j, status: newStatus } : j))
       );
+
+      if (newStatus === "discarded") {
+        toast.info("Oferta descartada", {
+          description: prevJob?.title ? `"${prevJob.title.slice(0, 36)}..."` : undefined,
+          action: {
+            label: "Deshacer",
+            onClick: () => handleUpdateStatus(jobId, prevStatus),
+          },
+        });
+      } else {
+        toast.success("Oferta restaurada a activas");
+      }
     } catch (err: any) {
-      alert(`Error al actualizar estado: ${err.message}`);
+      toast.error(`Error al actualizar estado: ${err.message || err}`);
     }
   };
 
@@ -517,28 +560,112 @@ export function ApplicationsView() {
 
   return (
     <div className="space-y-4 sm:space-y-6 w-full">
-      {/* Encabezado fluido con Título + CV | Indicador IA minimalista en el centro | Acciones globales */}
-      <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3 pb-3 border-b border-border/50">
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="flex items-center gap-1.5 shrink-0">
+      {/* Encabezado fluido con Título + CV | Paginación y contador | Indicador IA | Acciones globales */}
+      <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-border/50 w-full">
+        {/* Título y Selector de CV */}
+        <div className="flex flex-wrap items-center gap-3 w-auto">
+          <div className="flex items-center gap-1.5 shrink-0 w-auto">
             <h2 className="text-lg sm:text-xl font-bold tracking-tight">Candidaturas y Ofertas</h2>
             <InfoTooltip content="Registro consolidado en SQLite con puntuaciones de afinidad IA y documentos ATS generados." />
           </div>
 
-          <div className="h-5 w-px bg-border/60 mx-1 hidden sm:block" />
+          <div className="h-5 w-px bg-border/60 mx-1 hidden sm:block shrink-0" />
 
           {/* Bloque en una sola línea del CV Activo: Currículum Activo, ?, Desplegable, Ojo, Subir, Borrar */}
-          <CvManager
-            onCvChanged={(activeInfo) => {
-              setHasActiveCv(hasValidCv(activeInfo));
-              loadFacets();
-              fetchJobs();
-            }}
-          />
+          <div className="flex items-center w-auto shrink-0">
+            <CvManager
+              onCvChanged={(activeInfo) => {
+                setHasActiveCv(hasValidCv(activeInfo));
+                loadFacets();
+                fetchJobs();
+              }}
+            />
+          </div>
+        </div>
+
+        {/* Info del footer de cantidad mostrándose de ofertas, selector Activas/Descartadas y paginación */}
+        <div className="flex items-center gap-2 px-2.5 py-1 rounded-lg border border-border/80 bg-card/80 backdrop-blur-xs text-xs shadow-xs text-muted-foreground whitespace-nowrap w-auto shrink-0">
+          {/* Alternador Activas vs Descartadas */}
+          <div className="flex items-center bg-muted/60 p-0.5 rounded-md border border-border/60 text-3xs font-medium">
+            <button
+              type="button"
+              onClick={() => {
+                setViewTab("active");
+                setCurrentPage(1);
+              }}
+              className={`px-2 py-0.5 rounded transition-all flex items-center gap-1 ${
+                viewTab === "active"
+                  ? "bg-background text-foreground shadow-xs font-semibold"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+              title="Mostrar ofertas activas"
+            >
+              <span>Activas</span>
+              <span className="font-mono text-3xs px-1 rounded-full bg-primary/20 text-primary font-bold">
+                {counts.active}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setViewTab("discarded");
+                setCurrentPage(1);
+              }}
+              className={`px-2 py-0.5 rounded transition-all flex items-center gap-1 ${
+                viewTab === "discarded"
+                  ? "bg-background text-rose-400 shadow-xs font-semibold"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+              title="Mostrar ofertas descartadas"
+            >
+              <span>Descartadas</span>
+              <span className="font-mono text-3xs px-1 rounded-full bg-rose-500/20 text-rose-400 font-bold">
+                {counts.discarded}
+              </span>
+            </button>
+          </div>
+
+          <div className="h-4 w-px bg-border/60 mx-0.5" />
+
+          <div className="flex items-center gap-1 text-2xs text-muted-foreground">
+            <span>
+              <strong className="text-foreground font-semibold">{paginatedItems.length}</strong> de{" "}
+              <strong className="text-foreground font-semibold">{filteredJobs.length}</strong>
+            </span>
+          </div>
+
+          <div className="h-4 w-px bg-border/60 mx-0.5" />
+
+          <div className="flex items-center gap-0.5">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => handlePageChange(Math.max(1, safeCurrentPage - 1))}
+              disabled={safeCurrentPage <= 1 || loading}
+              className="h-7 w-7 p-0 shrink-0"
+              title="Página anterior"
+            >
+              <ChevronLeft className="h-3.5 w-3.5" />
+            </Button>
+            <span className="text-2xs font-mono font-medium px-1 text-foreground">
+              {safeCurrentPage} / {Math.max(1, totalPages)}
+            </span>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => handlePageChange(Math.min(totalPages, safeCurrentPage + 1))}
+              disabled={safeCurrentPage >= totalPages || loading}
+              className="h-7 w-7 p-0 shrink-0"
+              title="Página siguiente"
+            >
+              <ChevronRight className="h-3.5 w-3.5" />
+            </Button>
+          </div>
         </div>
 
         {/* Bloque Cuadrado de Búsqueda con IA y Switch de Control */}
-        <div className="flex items-center gap-2.5 px-3 py-1.5 rounded-lg border border-border/80 bg-card/80 backdrop-blur-xs shadow-xs">
+        <div className="flex items-center gap-2.5 px-3 py-1.5 rounded-lg border border-border/80 bg-card/80 backdrop-blur-xs shadow-xs w-auto shrink-0">
           <div className="flex items-center gap-2">
             <Sparkles className={`h-3.5 w-3.5 shrink-0 transition-colors ${
               searching ? "animate-spin text-primary" : "text-muted-foreground"
@@ -577,37 +704,39 @@ export function ApplicationsView() {
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Botón Actualizar */}
+        {/* Acciones globales (solo iconos para dar a entender lo que hacen) */}
+        <div className="flex items-center gap-2 w-auto shrink-0">
+          {/* Botón Actualizar (solo icono) */}
           <Button
             size="sm"
             variant="outline"
             onClick={handleRefresh}
             disabled={loading}
-            className="flex items-center gap-1.5 h-8 text-xs"
+            className="h-8 w-8 p-0 shrink-0"
+            title="Actualizar candidaturas y ofertas"
           >
-            <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
-            Actualizar
+            <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin text-primary" : ""}`} />
           </Button>
 
-          {/* Botón de Purga / Vaciar Historial sin la tarjeta */}
+          {/* Botón de Purga / Vaciar Historial (solo icono) */}
           <PurgeHistoryButton
+            iconOnly={true}
             onHistoryCleared={() => {
               fetchJobs();
               loadFacets();
             }}
           />
 
-          {/* Botón Ocultar / Mostrar Filtros (solo visible cuando hay un CV activo) */}
+          {/* Botón Ocultar / Mostrar Filtros (solo visible cuando hay un CV activo, solo icono) */}
           {hasActiveCv && (
             <Button
               size="sm"
               variant="outline"
               onClick={() => setShowCvPanel(!showCvPanel)}
-              className="flex items-center gap-1.5 h-8 text-xs"
+              className="h-8 w-8 p-0 shrink-0"
+              title={showCvPanel ? "Ocultar Filtros" : "Mostrar Filtros"}
             >
-              <FileCheck className="h-3.5 w-3.5 text-primary" />
-              {showCvPanel ? "Ocultar Filtros" : "Mostrar Filtros"}
+              <Filter className={`h-3.5 w-3.5 ${showCvPanel ? "text-primary" : "text-muted-foreground"}`} />
             </Button>
           )}
         </div>
@@ -664,6 +793,7 @@ export function ApplicationsView() {
                     key={job.id}
                     job={job}
                     onOpenDetail={handleOpenDetail}
+                    onUpdateStatus={handleUpdateStatus}
                     onUpdateJob={handleJobUpdated}
                   />
                 ))}
@@ -712,52 +842,19 @@ export function ApplicationsView() {
                   <p className="text-sm font-semibold text-foreground">
                     {!hasActiveCv
                       ? "Sin currículum activo seleccionado"
+                      : viewTab === "discarded"
+                      ? "No tienes ofertas descartadas"
                       : "No se encontraron candidaturas"}
                   </p>
                   <p className="text-xs max-w-md text-muted-foreground">
                     {!hasActiveCv
                       ? "Sube o selecciona un currículum en la barra superior para activar los filtros y la búsqueda personalizada de ofertas."
+                      : viewTab === "discarded"
+                      ? "Las ofertas que descartes pulsando el icono '✕' en su tarjeta aparecerán aquí para que puedas revisarlas o recuperarlas en cualquier momento."
                       : "No hay ofertas que coincidan con los filtros aplicados o aún no has lanzado una búsqueda."}
                   </p>
                 </CardContent>
               </Card>
-            )}
-
-            {/* Paginación fluida en cliente */}
-            {totalPages > 1 && (
-              <div className="flex items-center justify-between pt-4 border-t text-xs text-muted-foreground">
-                <div>
-                  Mostrando {paginatedItems.length} de {filteredJobs.length} ofertas
-                  {filteredJobs.length !== rawJobs.length && (
-                    <span className="text-muted-foreground/75">
-                      {" "}(filtradas de {rawJobs.length} cargadas)
-                    </span>
-                  )}
-                </div>
-                <div className="flex items-center gap-1">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => handlePageChange(Math.max(1, safeCurrentPage - 1))}
-                    disabled={safeCurrentPage <= 1 || loading}
-                    className="h-8 px-2"
-                  >
-                    <ChevronLeft className="h-4 w-4" />
-                  </Button>
-                  <span className="px-2 font-medium text-foreground">
-                    Página {safeCurrentPage} de {totalPages}
-                  </span>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => handlePageChange(Math.min(totalPages, safeCurrentPage + 1))}
-                    disabled={safeCurrentPage >= totalPages || loading}
-                    className="h-8 px-2"
-                  >
-                    <ChevronRight className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
             )}
           </div>
         </section>

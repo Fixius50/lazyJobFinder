@@ -35,30 +35,61 @@
 
 ---
 
-## 📦 Dónde Descargar los Instaladores y Cómo Generarlos
+## 📦 Instalación y Uso para Usuarios Finales (Sin Programar)
 
-Los instaladores finales compilados pesan varios cientos de megabytes (incluyendo imágenes Docker y el modelo de IA local) y **están excluidos de Git en `.gitignore`** para mantener el repositorio limpio y ágil.
+Si no eres programador o solo quieres probar la aplicación en tu equipo, **no necesitas instalar Python, Node.js ni configurar dependencias**.
 
-* 🌐 **Descarga de Releases Oficiales:**  
-  Puedes descargar directamente los ejecutables listos para usar desde la sección oficial de [GitHub Releases](https://github.com/Fixius50/lazyJobFinder/releases):
-  - **Windows:** Instalador asistido `.exe` (Inno Setup) y paquete portable `.zip`.
-  - **GNU/Linux:** Instalador autoextraíble `.run` y tarball `.tar.gz`.
+### 1. Requisito Único
+- **Docker Desktop** (en Windows/macOS) o **Docker Engine + Docker Compose v2** (en Linux) instalado y abierto.  
+  *(Si no lo tienes, descárgalo gratis desde [docker.com](https://www.docker.com/products/docker-desktop/)).*
 
-* 🛠️ **Cómo generar los instaladores tú mismo:**  
-  Todo el código y las herramientas para compilar tus propios paquetes están disponibles en el directorio [`packaging/`](./packaging):
-  - [`packaging/build_release.py`](./packaging/build_release.py): Orquestador maestro que audita el código contra fugas de datos personales, valida las capas Docker y genera los paquetes finales.
-  - [`packaging/windows/`](./packaging/windows): Scripts de Windows (`installer.iss`, `install.bat`, `launch.bat`, `stop.bat`).
-  - [`packaging/linux/`](./packaging/linux): Scripts de GNU/Linux (`installer.sh`, `launch.sh`, `stop.sh`).
+---
 
-  Para compilar los instaladores localmente:
-  ```cmd
-  # Desde Windows usando el menú de start.bat (Opción [2]):
-  .\start.bat --package
+### 2. Pasos para Probar en Windows
+1. Descarga el paquete **lazyJobFinder-1.0.0-windows-x64.zip** desde [GitHub Releases](https://github.com/Fixius50/lazyJobFinder/releases).
+2. Descomprímelo en cualquier carpeta de tu ordenador (por ejemplo, en tu Escritorio o Documentos).
+3. Haz doble clic en **launch.bat** (o ejecuta install.bat la primera vez).
+4. **El script se encarga de todo de forma automática:**
+   - Detecta si Docker Desktop está abierto (si no, te avisa claramente con instrucciones).
+   - Prepara el entorno seguro y aislado.
+   - Descarga los contenedores oficiales y el modelo de IA local (qwen2.5:3b-instruct) la primera vez.
+   - En cuanto todo esté listo, **abrirá tu navegador automáticamente en http://localhost:8000**.
+5. Para detener el sistema al terminar, haz doble clic en **stop.bat** o cierra la terminal.
 
-  # O invocando directamente el orquestador Python:
-  python packaging/build_release.py --platform all --skip-model
-  ```
-  *(Al compilar, los ejecutables e instaladores resultantes se depositan automáticamente en la carpeta local `dist/` junto con sus hashes `SHA256SUMS.txt`).*
+---
+
+### 3. Pasos para Probar en GNU/Linux
+1. Descarga **lazyJobFinder-1.0.0-linux-x64.tar.gz** (o el instalador autoextraíble .run) desde [GitHub Releases](https://github.com/Fixius50/lazyJobFinder/releases).
+2. Descomprime y accede a la carpeta:
+`ash
+tar -xzf lazyJobFinder-1.0.0-linux-x64.tar.gz
+cd lazyJobFinder-1.0.0-linux-x64
+`
+3. Ejecuta el script de inicio:
+`ash
+chmod +x launch.sh stop.sh installer.sh
+./launch.sh
+`
+4. El script configurará los servicios y abrirá tu navegador en http://localhost:8000. Para apagarlo, ejecuta ./stop.sh.
+
+---
+
+## 🛠️ Cómo Compilar los Paquetes Tú Mismo (Desarrolladores)
+
+Todo el código para compilar tus propios paquetes está en [packaging/](./packaging):
+- [packaging/build_release.py](./packaging/build_release.py): Orquestador maestro que audita el código, valida las capas y genera los paquetes finales.
+- [packaging/windows/](./packaging/windows): Scripts de Windows (installer.iss, install.bat, launch.bat, stop.bat).
+- [packaging/linux/](./packaging/linux): Scripts de GNU/Linux (installer.sh, launch.sh, stop.sh).
+
+Para compilar los instaladores localmente:
+`cmd
+# Desde Windows usando el menú de start.bat (Opción [2]):
+.\start.bat 2
+
+# O invocando directamente el orquestador Python:
+python packaging/build_release.py --skip-docker --skip-model
+`
+*(Los paquetes generados se depositan automáticamente en la carpeta local dist/ junto con sus hashes SHA256SUMS.txt).*
 
 ---
 

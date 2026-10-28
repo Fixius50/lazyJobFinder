@@ -278,16 +278,7 @@ echo =====================================================================
 echo   Generando Distribucion e Instaladores (Windows y Linux)
 echo =====================================================================
 echo.
-call :CHECK_PREREQS
-if %ERRORLEVEL% neq 0 (
-    echo.
-    echo   [ERROR] No se puede empaquetar sin Docker operativo.
-    if "%CLI_INVOKED%"=="1" goto :EXIT
-    pause
-    goto :MENU
-)
-
-python packaging\build_release.py %*
+python packaging\build_release.py --skip-docker --skip-model
 echo.
 if "%CLI_INVOKED%"=="1" goto :EXIT
 pause
@@ -302,4 +293,6 @@ echo.
 echo --^> Deteniendo servicios Docker ordenadamente...
 docker compose stop >nul 2>&1
 echo   [OK] Servicios detenidos. Datos y configuracion conservados intactos.
-exit 0
+
+:EXIT
+exit /b 0

@@ -57,7 +57,6 @@ echo -e "${GREEN}[i] Directorio de destino: $INSTALL_DIR${NC}"
 mkdir -p "$INSTALL_DIR"
 mkdir -p "$INSTALL_DIR/data/uploaded_cvs"
 mkdir -p "$INSTALL_DIR/data/documents"
-mkdir -p "$INSTALL_DIR/config"
 mkdir -p "$BIN_DIR"
 mkdir -p "$APP_DIR"
 
@@ -97,17 +96,6 @@ else
     fi
     echo -e "${BLUE}[i] Archivo .env previo detectado en el destino. Conservando credenciales e identificador de proyecto.${NC}"
 fi
-
-# Copiar plantillas sin sobreescribir configuraciones existentes
-for f in settings.yaml profile.yaml shared_constants.json; do
-    if [ ! -f "$INSTALL_DIR/config/$f" ]; then
-        if [ -f "$SCRIPT_DIR/config-templates/$f" ]; then
-            cp -f "$SCRIPT_DIR/config-templates/$f" "$INSTALL_DIR/config/$f"
-        elif [ -f "$SCRIPT_DIR/config/$f" ]; then
-            cp -f "$SCRIPT_DIR/config/$f" "$INSTALL_DIR/config/$f"
-        fi
-    fi
-done
 
 # 6. Comprobación de componentes de distribución completa
 IS_LIGHT=0

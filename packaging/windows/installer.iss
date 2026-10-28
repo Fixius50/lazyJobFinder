@@ -43,9 +43,6 @@ Source: "..\staging\launch.bat"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\staging\stop.bat"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\staging\install.bat"; DestDir: "{app}"; Flags: ignoreversion
 
-; Plantillas de configuración (solo si no existen, para no sobreescribir datos del usuario)
-Source: "..\staging\config\*"; DestDir: "{app}\config"; Flags: onlyifdoesntexist recursesubdirs createallsubdirs
-
 ; Directorios de datos del usuario
 Source: "..\staging\data\*"; DestDir: "{app}\data"; Flags: onlyifdoesntexist recursesubdirs createallsubdirs
 
@@ -68,7 +65,6 @@ Source: "..\staging\ollama_model.tar.gz"; DestDir: "{app}"; Flags: ignoreversion
 Name: "{app}\data"; Permissions: users-full
 Name: "{app}\data\uploaded_cvs"; Permissions: users-full
 Name: "{app}\data\documents"; Permissions: users-full
-Name: "{app}\config"; Permissions: users-full
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; Comment: "Iniciar lazyJobFinder"

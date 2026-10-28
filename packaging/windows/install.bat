@@ -24,7 +24,6 @@ if %ERRORLEVEL% neq 0 (
 if not exist "data" mkdir "data"
 if not exist "data\uploaded_cvs" mkdir "data\uploaded_cvs"
 if not exist "data\documents" mkdir "data\documents"
-if not exist "config" mkdir "config"
 
 :: 3. Copiar plantillas si no existen y asignar identificador de proyecto único
 if not exist ".env" (
@@ -67,43 +66,6 @@ if not defined CURRENT_CPN (
     echo # Identificador unico de instalacion para aislamiento Docker Compose>>".env"
     echo COMPOSE_PROJECT_NAME=lazyjob_!RAND_SUFFIX!>>".env"
     echo [i] Identificador COMPOSE_PROJECT_NAME unico añadido a .env (lazyjob_!RAND_SUFFIX!).
-)
-
-:: Copiar plantillas de configuracion
-if not exist "config\settings.yaml" (
-    if exist "config-templates\settings.yaml" (
-        copy "config-templates\settings.yaml" "config\settings.yaml" >nul
-        if %ERRORLEVEL% neq 0 (
-            echo [ERROR] Fallo al copiar plantilla settings.yaml.
-            pause
-            exit /b 1
-        )
-        echo [OK] Plantilla config\settings.yaml copiada.
-    )
-)
-
-if not exist "config\profile.yaml" (
-    if exist "config-templates\profile.yaml" (
-        copy "config-templates\profile.yaml" "config\profile.yaml" >nul
-        if %ERRORLEVEL% neq 0 (
-            echo [ERROR] Fallo al copiar plantilla profile.yaml.
-            pause
-            exit /b 1
-        )
-        echo [OK] Plantilla config\profile.yaml copiada.
-    )
-)
-
-if not exist "config\shared_constants.json" (
-    if exist "config-templates\shared_constants.json" (
-        copy "config-templates\shared_constants.json" "config\shared_constants.json" >nul
-        if %ERRORLEVEL% neq 0 (
-            echo [ERROR] Fallo al copiar plantilla shared_constants.json.
-            pause
-            exit /b 1
-        )
-        echo [OK] Plantilla config\shared_constants.json copiada.
-    )
 )
 
 :: 4. Comprobacion de componentes de distribucion completa

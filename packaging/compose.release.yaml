@@ -50,8 +50,6 @@ services:
     volumes:
       # Datos persistentes del usuario (SQLite, CVs subidos, logs y documentos)
       - ./data:/app/data
-      # Configuración del usuario (filtros de búsqueda, horarios y perfil)
-      - ./config:/app/config
     depends_on:
       ollama:
         condition: service_healthy

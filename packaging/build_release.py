@@ -28,7 +28,6 @@ import zipfile
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PACKAGING_DIR = os.path.join(ROOT_DIR, "packaging")
-CONFIG_TEMPLATES_DIR = os.path.join(PACKAGING_DIR, "config-templates")
 STAGING_DIR = os.path.join(PACKAGING_DIR, "staging")
 DIST_DIR = os.path.join(ROOT_DIR, "dist")
 
@@ -179,19 +178,13 @@ class ReleaseBuilder:
         with open(os.path.join(STAGING_DIR, "docker-compose.yml"), "w", encoding="utf-8") as f:
             f.write(compose_content)
 
-        # 2. Copiar .env.example
+        # 2. Copiar .env.example desde la raíz del proyecto
         shutil.copy2(
-            os.path.join(CONFIG_TEMPLATES_DIR, ".env.example"),
+            os.path.join(ROOT_DIR, ".env.example"),
             os.path.join(STAGING_DIR, ".env.example"),
         )
 
-        # 3. Copiar plantillas limpias a config/ y config-templates/
-        staging_config = os.path.join(STAGING_DIR, "config")
-        staging_templates = os.path.join(STAGING_DIR, "config-templates")
-        shutil.copytree(CONFIG_TEMPLATES_DIR, staging_config)
-        shutil.copytree(CONFIG_TEMPLATES_DIR, staging_templates)
-
-        # 4. Crear estructura de carpetas de datos de usuario con .gitkeep
+        # 3. Crear estructura de carpetas de datos de usuario con .gitkeep
         for subfolder in ["", "uploaded_cvs", "documents"]:
             folder = os.path.join(STAGING_DIR, "data", subfolder)
             os.makedirs(folder, exist_ok=True)
@@ -266,9 +259,6 @@ class ReleaseBuilder:
             os.path.join(isolated_context, "src"),
             ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo"),
         )
-
-        # El directorio config dentro de la imagen contiene ÚNICAMENTE las plantillas limpias
-        shutil.copytree(CONFIG_TEMPLATES_DIR, os.path.join(isolated_context, "config"))
 
         # El frontend compilado
         shutil.copytree(os.path.join(ROOT_DIR, "web", "out"), os.path.join(isolated_context, "web", "out"))
@@ -613,8 +603,8 @@ class ReleaseBuilder:
             re.compile(r"^\.env$", re.IGNORECASE),
             re.compile(r"^active_cv\.json$", re.IGNORECASE),
             re.compile(r"^cv_base\.md$", re.IGNORECASE),
-            re.compile(r"^.*\.pem$", re.IGNORECASE),
-            re.compile(r"^.*\.key$", re.IGNORECASE),
+            re.compile(r"^id_rsa.*$", re.IGNORECASE),
+            re.compile(r"^id_ed25519.*$", re.IGNORECASE),
         ]
         suspicious_patterns = [
             (r"\b[0-9]{8,10}:[a-zA-Z0-9_-]{35}\b", "Token real de bot de Telegram"),
@@ -745,11 +735,12 @@ class ReleaseBuilder:
                 )
 
             # 1. Localizar los manifiestos exactos '3b-instruct' y 'latest'
+            # Acepta tanto rutas con prefijo 'models/' o 'root/.ollama/models/' como sin prefijo
             regex_3b = re.compile(
-                r"^(?:root/\.ollama/models/)?manifests/registry\.ollama\.ai/library/qwen2\.5/(?:3b-instruct|3b)$"
+                r"^(?:(?:root/\.ollama/)?models/)?manifests/registry\.ollama\.ai/library/qwen2\.5/(?:3b-instruct|3b)$"
             )
             regex_latest = re.compile(
-                r"^(?:root/\.ollama/models/)?manifests/registry\.ollama\.ai/library/qwen2\.5/latest$"
+                r"^(?:(?:root/\.ollama/)?models/)?manifests/registry\.ollama\.ai/library/qwen2\.5/latest$"
             )
 
             path_3b = None
@@ -858,6 +849,8 @@ class ReleaseBuilder:
                 exact_candidates = [
                     f"blobs/sha256-{clean_digest}",
                     f"blobs/sha256:{clean_digest}",
+                    f"models/blobs/sha256-{clean_digest}",
+                    f"models/blobs/sha256:{clean_digest}",
                     f"root/.ollama/models/blobs/sha256-{clean_digest}",
                     f"root/.ollama/models/blobs/sha256:{clean_digest}",
                 ]
@@ -1215,19 +1208,16 @@ class ReleaseBuilder:
         print(f"       CONSTRUCCIÓN DE DISTRIBUCIÓN lazyJobFinder v{self.version}")
         print("=" * 70 + "\n")
 
-        # 1. Auditoría inicial de plantillas
-        self.audit_security(CONFIG_TEMPLATES_DIR)
-
-        # 2. Verificación del frontend estático
+        # 1. Verificación del frontend estático
         self.verify_frontend()
 
-        # 3. Preparación del directorio staging y auditoría de staging
+        # 2. Preparación del directorio staging y auditoría de staging
         self.prepare_staging()
 
-        # 4. Construcción y empaquetado de imágenes Docker (en contexto aislado)
+        # 3. Construcción y empaquetado de imágenes Docker (en contexto aislado)
         self.build_docker_images()
 
-        # 5. Exportación del modelo Ollama (independiente de --skip-docker)
+        # 4. Exportación del modelo Ollama (independiente de --skip-docker)
         if not self.skip_model:
             self.export_ollama_model()
         else:

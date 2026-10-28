@@ -158,6 +158,9 @@ lazyJobFinder/
 │   └── linux/                # Scripts e instalador autoextraíble para Linux (.run, .tar.gz)
 ├── dist/                     # Carpeta de salida con los instaladores generados localmente (excluida de git)
 ├── src/                      # Código fuente del backend Python (FastAPI, conectores, IA)
+│   ├── __init__.py           # Único __init__.py centralizado con exportaciones perezosas (PEP 562)
+│   ├── models.py             # Modelos canónicos Pydantic V2 (Fuente Única de Verdad)
+│   ├── database.py           # Gestor SQLite con PRAGMAs en memoria, sqlite-utils y FTS5
 │   ├── api/                  # Endpoints REST (jobs, cv, settings, system)
 │   ├── connectors/           # Conectores multi-portal (LinkedIn, Indeed, InfoJobs, Glassdoor, etc.)
 │   ├── evaluator/            # Scoring universal, anti-alucinación y cliente Ollama

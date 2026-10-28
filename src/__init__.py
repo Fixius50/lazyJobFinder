@@ -2,7 +2,7 @@
 
 Punto de entrada y exportación centralizada de la arquitectura del proyecto.
 Permite importar los componentes centrales directamente desde 'src':
-    from src import Database, JobPipelineRunner, ScoringEngine, ConnectorManager
+    from src import Database, JobPipelineRunner, ScoringEngine, JobModel, EvaluationModel
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from typing import Any, List
 
 __version__ = "1.0.0"
 
-# 1. Centralizar la caché de bytecode de Python en src/__pycache__ desde el arranque
+# 1. Centralizar la caché de bytecode de Python en src/__pycache__ desde el arranque (Regla 13)
 from .storage import setup_pycache_centralization
 
 setup_pycache_centralization()
@@ -20,6 +20,13 @@ setup_pycache_centralization()
 # 2. Mapeo de exportaciones perezosas (PEP 562) para evitar dependencias circulares o sobrecarga en arranque
 _EXPORT_MAP = {
     "Database": ("src.database", "Database"),
+    "JobModel": ("src.models", "JobModel"),
+    "EvaluationModel": ("src.models", "EvaluationModel"),
+    "GeneratedDocumentModel": ("src.models", "GeneratedDocumentModel"),
+    "PipelineRunModel": ("src.models", "PipelineRunModel"),
+    "SystemLogModel": ("src.models", "SystemLogModel"),
+    "AppStateModel": ("src.models", "AppStateModel"),
+    "CVCacheModel": ("src.models", "CVCacheModel"),
     "JobPipelineRunner": ("src.scheduler.runner", "JobPipelineRunner"),
     "ConnectorManager": ("src.connectors.manager", "ConnectorManager"),
     "BaseConnector": ("src.connectors.base", "BaseConnector"),

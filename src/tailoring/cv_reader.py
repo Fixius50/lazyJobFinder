@@ -726,17 +726,19 @@ def get_active_profile(profile_path: Optional[str] = None) -> Dict[str, Any]:
         except Exception:
             pass
 
-        if not extracted:
+        if not extracted or not extracted.get("candidato"):
             extracted = _extract_profile_from_raw_text(cv_text, meta.get("filename"))
+        
+        extracted_cand = extracted.get("candidato", {}) if isinstance(extracted, dict) else {}
         if not profile_data.get("candidato"):
-            profile_data["candidato"] = extracted["candidato"]
+            profile_data["candidato"] = extracted_cand
         else:
-            for k, v in extracted["candidato"].items():
+            for k, v in extracted_cand.items():
                 if not profile_data["candidato"].get(k):
                     profile_data["candidato"][k] = v
 
         for section in ["resumen_base", "formacion", "experiencia_laboral", "competencias_tecnicas", "idiomas", "proyectos"]:
-            if not profile_data.get(section) and extracted.get(section):
+            if not profile_data.get(section) and isinstance(extracted, dict) and extracted.get(section):
                 profile_data[section] = extracted[section]
 
     return profile_data

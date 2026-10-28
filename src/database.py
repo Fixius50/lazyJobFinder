@@ -1,7 +1,8 @@
-"""Módulo de persistencia local en SQLite con modo WAL y deduplicación avanzada para lazyJobFinder."""
+"""Módulo unificado de persistencia local en SQLite con modo WAL/TRUNCATE, sqlite-utils y modelos Pydantic V2."""
 
 import collections
 import contextlib
+from datetime import datetime, timedelta
 import hashlib
 import json
 import logging
@@ -10,10 +11,8 @@ import re
 import sqlite3
 import threading
 import time
-from datetime import datetime, timedelta
-from typing import Any, Dict, Generator, List, Optional, Tuple
+from typing import Any, Dict, Generator, List, Optional, Tuple, Union
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
-
 
 try:
     from rapidfuzz import fuzz
@@ -26,41 +25,18 @@ try:
 except ImportError:
     sqlite_utils = None
 
-logger = logging.getLogger("lazyJobFinder.database")
-
+from .models import (
+    AppStateModel,
+    CVCacheModel,
+    EvaluationModel,
+    GeneratedDocumentModel,
+    JobModel,
+    PipelineRunModel,
+    SystemLogModel,
+)
 from .storage import DB_PATH as DEFAULT_DB_PATH
 
-
-def _load_shared_constants() -> Dict[str, Any]:
-    """Carga las constantes canónicas directamente desde src.shared_constants."""
-    try:
-        from . import shared_constants
-        return {
-            "application_statuses": shared_constants.APPLICATION_STATUSES,
-            "portal_sources": shared_constants.PORTAL_SOURCES,
-            "services": shared_constants.SERVICES,
-            "service_actions": shared_constants.SERVICE_ACTIONS,
-            "document_types": shared_constants.DOCUMENT_TYPES,
-            "confirmation_phrases": shared_constants.CONFIRMATION_PHRASES,
-            "cv_upload_limits": shared_constants.CV_LIMITS,
-        }
-    except Exception as e:
-        logger.debug("Error cargando shared_constants en database.py: %s", e)
-        return {}
-
-
-def _decode_row_json_fields(row_data: Dict[str, Any]) -> Dict[str, Any]:
-    """Decodifica dinámicamente cualquier campo serializado en JSON (listas o diccionarios)."""
-    for key, val in list(row_data.items()):
-        if isinstance(val, str) and len(val) >= 2:
-            first, last = val[0], val[-1]
-            if (first == "[" and last == "]") or (first == "{" and last == "}"):
-                try:
-                    row_data[key] = json.loads(val)
-                except Exception:
-                    pass
-    return row_data
-
+logger = logging.getLogger("lazyJobFinder.database")
 
 
 def canonicalize_url(raw_url: str) -> str:
@@ -70,36 +46,21 @@ def canonicalize_url(raw_url: str) -> str:
     try:
         parsed = urlparse(raw_url.strip())
         tracking_params = {
-            "utm_source",
-            "utm_medium",
-            "utm_campaign",
-            "utm_term",
-            "utm_content",
-            "ref",
-            "refid",
-            "trackingid",
-            "trk",
-            "position",
-            "pagenum",
-            "currentjobid",
-            "fbclid",
-            "gclid",
-            "originalsubdomain",
+            "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
+            "ref", "refid", "trackingid", "trk", "position", "pagenum",
+            "currentjobid", "fbclid", "gclid", "originalsubdomain",
         }
         query_dict = parse_qs(parsed.query)
         cleaned_query = {k: v for k, v in query_dict.items() if k.lower() not in tracking_params}
         new_query = urlencode(cleaned_query, doseq=True)
-        canonical = urlunparse(
-            (
-                parsed.scheme.lower(),
-                parsed.netloc.lower(),
-                parsed.path.rstrip("/"),
-                parsed.params,
-                new_query,
-                "",
-            )
-        )
-        return canonical
+        return urlunparse((
+            parsed.scheme.lower(),
+            parsed.netloc.lower(),
+            parsed.path.rstrip("/"),
+            parsed.params,
+            new_query,
+            "",
+        ))
     except Exception as e:
         logger.debug("Error normalizando URL %s: %s", raw_url, e)
         return raw_url.strip()
@@ -115,20 +76,14 @@ def compute_url_hash(url: str, title: str = "", company: str = "") -> str:
 
 
 def compute_content_fingerprint(title: str, company: str, location: str) -> str:
-    """
-    Calcula una huella semántica normalizada para detectar la misma oferta
-    publicada simultáneamente en diferentes portales (ej. Indeed y LinkedIn).
-    """
-    # Normalizar empresa (quitar s.l., s.a., inc., etc.)
+    """Calcula una huella semántica normalizada para detectar la misma oferta entre portales."""
     comp_clean = re.sub(r"\b(s\.?l\.?|s\.?a\.?|inc\.?|llc|spain|españa)\b", "", company.lower())
     comp_clean = re.sub(r"[^\w\s]", "", comp_clean).strip()
     comp_clean = re.sub(r"\s+", " ", comp_clean)
 
-    # Normalizar título (quitar puntuación y espacios extras)
     title_clean = re.sub(r"[^\w\s]", "", title.lower()).strip()
     title_clean = re.sub(r"\s+", " ", title_clean)
 
-    # Normalizar ubicación
     loc_clean = re.sub(r"[^\w\s]", "", location.lower()).strip()
     loc_clean = re.sub(r"\s+", " ", loc_clean)
 
@@ -142,25 +97,36 @@ def compute_description_hash(description: str) -> str:
     return hashlib.sha256(clean_desc.encode("utf-8")).hexdigest()
 
 
+def _decode_row_json_fields(row_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Decodifica dinámicamente cualquier campo serializado en JSON (listas o diccionarios)."""
+    for key, val in list(row_data.items()):
+        if isinstance(val, str) and len(val) >= 2:
+            first, last = val[0], val[-1]
+            if (first == "[" and last == "]") or (first == "{" and last == "}"):
+                try:
+                    row_data[key] = json.loads(val)
+                except Exception:
+                    pass
+    return row_data
+
+
 class Database:
-    """Gestor de base de datos SQLite con conexión segura y soporte WAL."""
+    """Gestor unificado de base de datos SQLite con conexión segura, PRAGMAs de alto rendimiento y sqlite-utils."""
 
     _initialized_paths: set = set()
     _init_lock = threading.Lock()
 
     def __init__(self, db_path: Optional[str] = None):
-        self.db_path = db_path or os.getenv("DATABASE_PATH", DEFAULT_DB_PATH)
-        self._last_prune_time: float = 0.0
-        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
-        norm_path = os.path.abspath(self.db_path)
-        if norm_path not in Database._initialized_paths or not os.path.exists(norm_path):
+        self.db_path = db_path or os.getenv("DB_PATH", DEFAULT_DB_PATH)
+        if self.db_path not in Database._initialized_paths:
             with Database._init_lock:
-                if norm_path not in Database._initialized_paths or not os.path.exists(norm_path):
+                if self.db_path not in Database._initialized_paths:
                     self.init_db()
-                    Database._initialized_paths.add(norm_path)
+                    Database._initialized_paths.add(self.db_path)
 
     @contextlib.contextmanager
     def _get_connection(self) -> Generator[sqlite3.Connection, None, None]:
+        """Obtiene una conexión sqlite3 segura con PRAGMAs de alto rendimiento y reintentos ante bloqueos."""
         os.makedirs(os.path.dirname(os.path.abspath(self.db_path)), exist_ok=True)
         conn = None
         for attempt in range(5):
@@ -169,6 +135,8 @@ class Database:
                 conn.row_factory = sqlite3.Row
                 conn.execute("PRAGMA busy_timeout = 30000;")
                 conn.execute("PRAGMA foreign_keys = ON;")
+                conn.execute("PRAGMA cache_size = -64000;")  # ~64 MB de caché en RAM
+                conn.execute("PRAGMA temp_store = MEMORY;")   # Tablas temporales en RAM
                 break
             except sqlite3.OperationalError as e:
                 if attempt == 4:
@@ -185,13 +153,25 @@ class Database:
                 except Exception:
                     pass
 
+    def get_utils_db(self):
+        """Devuelve una instancia de sqlite_utils.Database para operaciones rápidas, FTS5 y alter=True."""
+        if sqlite_utils is None:
+            return None
+        os.makedirs(os.path.dirname(os.path.abspath(self.db_path)), exist_ok=True)
+        db = sqlite_utils.Database(self.db_path)
+        try:
+            db.conn.execute("PRAGMA busy_timeout = 30000;")
+            db.conn.execute("PRAGMA foreign_keys = ON;")
+            db.conn.execute("PRAGMA cache_size = -64000;")
+            db.conn.execute("PRAGMA temp_store = MEMORY;")
+        except Exception:
+            pass
+        return db
+
     def init_db(self) -> None:
-        """Crea o actualiza las tablas e índices necesarios."""
+        """Crea o actualiza las tablas e índices necesarios con modo TRUNCATE seguro para Docker."""
         with self._get_connection() as conn:
             try:
-                # TRUNCATE es el modo más robusto para SQLite sobre volúmenes montados (Windows <-> Docker WSL2).
-                # WAL mode requiere un archivo -shm con bloqueo de memoria compartida POSIX que es incompatible
-                # con 9p/drvfs en Windows, generando "unable to open database file" bajo concurrencia.
                 conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
                 conn.execute("PRAGMA journal_mode=TRUNCATE;")
                 conn.execute("PRAGMA synchronous=NORMAL;")
@@ -227,7 +207,8 @@ class Database:
                     ui_saved INTEGER DEFAULT 1,
                     contract_type TEXT,
                     schedule TEXT,
-                    education_level TEXT
+                    education_level TEXT,
+                    cv_filename TEXT
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_jobs_url_hash ON jobs(url_hash);
@@ -237,6 +218,7 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_jobs_duplicate_of ON jobs(duplicate_of_id);
                 CREATE INDEX IF NOT EXISTS idx_jobs_notification_channels ON jobs(telegram_notified, ui_saved);
                 CREATE INDEX IF NOT EXISTS idx_jobs_contract_schedule ON jobs(contract_type, schedule);
+                CREATE INDEX IF NOT EXISTS idx_jobs_cv_filename ON jobs(cv_filename);
 
                 CREATE TABLE IF NOT EXISTS evaluations (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -271,8 +253,8 @@ class Database:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     started_at TEXT DEFAULT (datetime('now', 'localtime')),
                     finished_at TEXT,
-                    trigger_type TEXT NOT NULL, -- 'scheduled', 'manual', 'catch_up'
-                    status TEXT NOT NULL,       -- 'running', 'completed', 'failed'
+                    trigger_type TEXT NOT NULL,
+                    status TEXT NOT NULL,
                     total_found INTEGER DEFAULT 0,
                     new_jobs INTEGER DEFAULT 0,
                     relevant_jobs INTEGER DEFAULT 0,
@@ -308,46 +290,49 @@ class Database:
                     created_at TEXT DEFAULT (datetime('now', 'localtime')),
                     updated_at TEXT DEFAULT (datetime('now', 'localtime'))
                 );
+
+                CREATE INDEX IF NOT EXISTS idx_cv_cache_hash ON cv_cache(file_hash);
                 """
             )
-        # Garantizar que bases de datos SQLite preexistentes cuenten con todas las columnas
-        try:
-            with self._get_connection() as conn:
-                cursor = conn.execute("PRAGMA table_info(jobs);")
-                existing_cols = {row["name"] for row in cursor.fetchall()}
+
+            # Auto-migración idempotente de columnas para esquemas previos
+            try:
+                cols_info = conn.execute("PRAGMA table_info(jobs);").fetchall()
+                existing_cols = {col["name"] for col in cols_info}
                 for col, col_def in [
                     ("contract_type", "TEXT"),
                     ("schedule", "TEXT"),
                     ("education_level", "TEXT"),
-                    ("duplicate_of_id", "INTEGER REFERENCES jobs(id) ON DELETE SET NULL"),
                     ("similarity_score", "REAL"),
                     ("alternate_sources", "TEXT DEFAULT '[]'"),
                     ("telegram_notified", "INTEGER DEFAULT 0"),
                     ("ui_saved", "INTEGER DEFAULT 1"),
+                    ("cv_filename", "TEXT"),
                 ]:
                     if col not in existing_cols:
                         conn.execute(f"ALTER TABLE jobs ADD COLUMN {col} {col_def};")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_contract_schedule ON jobs(contract_type, schedule);")
-        except Exception as e:
-            logger.debug("Comprobación de columnas en jobs completada: %s", e)
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_cv_filename ON jobs(cv_filename);")
+            except Exception as e:
+                logger.debug("Comprobación de columnas en jobs completada: %s", e)
 
-        self.prune_old_system_logs()
-
-        logger.info("Base de datos inicializada correctamente en %s", self.db_path)
-
-    def get_utils_db(self):
-        """Devuelve una instancia optimizada de sqlite_utils.Database para operaciones rápidas y FTS."""
+        # Habilitación FTS5 sin fallos
         try:
-            import sqlite_utils
-            return sqlite_utils.Database(self.db_path)
-        except ImportError:
-            return None
+            udb = self.get_utils_db()
+            if udb and "jobs" in udb.table_names() and "jobs_fts" not in udb.table_names():
+                udb["jobs"].enable_fts(["title", "description", "company"], create_triggers=True, tokenize="porter")
+        except Exception:
+            pass
 
+    # =========================================================================
+    # ESTADO PERSISTENTE (APP STATE)
+    # =========================================================================
     def get_app_state(self, key: str, default: Any = None) -> Any:
-        """Recupera un valor de estado o configuración persistente desde SQLite."""
-        if sqlite_utils:
+        """Recupera un valor de configuración persistente desde SQLite."""
+        udb = self.get_utils_db()
+        if udb:
             try:
-                row = self.get_utils_db()["app_state"].get(key)
+                row = udb["app_state"].get(key)
                 val = row["value"]
                 try:
                     return json.loads(val)
@@ -355,6 +340,7 @@ class Database:
                     return val
             except Exception:
                 return default
+
         with self._get_connection() as conn:
             cursor = conn.execute("SELECT value FROM app_state WHERE key = ?", (key,))
             row = cursor.fetchone()
@@ -366,40 +352,46 @@ class Database:
                 return row["value"]
 
     def set_app_state(self, key: str, value: Any) -> None:
-        """Guarda o actualiza un valor de estado persistente en SQLite de manera atómica."""
+        """Guarda o actualiza un valor de estado persistente de manera atómica."""
         val_str = json.dumps(value, ensure_ascii=False) if not isinstance(value, str) else value
-        if sqlite_utils:
+        udb = self.get_utils_db()
+        if udb:
             try:
-                self.get_utils_db()["app_state"].upsert(
+                udb["app_state"].upsert(
                     {"key": key, "value": val_str, "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")},
                     pk="key",
                 )
                 return
             except Exception as e:
-                logger.debug("Fallback de set_app_state a SQLite nativo: %s", e)
+                logger.debug("Fallback de set_app_state a SQL: %s", e)
+
         with self._get_connection() as conn:
             conn.execute(
                 """
-                INSERT INTO app_state (key, value, updated_at) 
+                INSERT INTO app_state (key, value, updated_at)
                 VALUES (?, ?, datetime('now', 'localtime'))
-                ON CONFLICT(key) DO UPDATE SET 
-                    value = excluded.value, 
+                ON CONFLICT(key) DO UPDATE SET
+                    value = excluded.value,
                     updated_at = datetime('now', 'localtime')
                 """,
                 (key, val_str),
             )
 
     def delete_app_state(self, key: str) -> None:
-        """Elimina una clave de estado persistente de SQLite."""
-        if sqlite_utils:
+        """Elimina una clave de estado persistente."""
+        udb = self.get_utils_db()
+        if udb:
             try:
-                self.get_utils_db()["app_state"].delete(key)
+                udb["app_state"].delete(key)
                 return
             except Exception:
                 pass
         with self._get_connection() as conn:
             conn.execute("DELETE FROM app_state WHERE key = ?", (key,))
 
+    # =========================================================================
+    # CACHÉ DE EXTRACCIÓN Y PERFIL DE CV
+    # =========================================================================
     def get_cv_cache(
         self,
         filename: str,
@@ -407,7 +399,7 @@ class Database:
         file_size: Optional[int] = None,
         file_hash: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
-        """Recupera la extracción y perfil en caché para un CV desde SQLite."""
+        """Recupera la extracción y perfil en caché para un CV."""
         with self._get_connection() as conn:
             cursor = conn.execute("SELECT * FROM cv_cache WHERE filename = ?", (filename,))
             row = cursor.fetchone()
@@ -421,7 +413,7 @@ class Database:
                     return None
             if file_hash is not None and row["file_hash"] != file_hash:
                 return None
-            import json
+
             profile = None
             if row["profile_json"]:
                 try:
@@ -447,7 +439,6 @@ class Database:
         profile_data: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Almacena o actualiza la extracción y perfil de un CV en SQLite."""
-        import json
         prof_json = json.dumps(profile_data, ensure_ascii=False) if profile_data else None
         with self._get_connection() as conn:
             conn.execute(
@@ -466,10 +457,11 @@ class Database:
             )
 
     def delete_cv_cache(self, filename: str) -> None:
-        """Elimina la caché de extracción de un CV específico en SQLite."""
-        if sqlite_utils:
+        """Elimina la caché de extracción de un CV específico."""
+        udb = self.get_utils_db()
+        if udb:
             try:
-                self.get_utils_db()["cv_cache"].delete(filename)
+                udb["cv_cache"].delete(filename)
                 return
             except Exception:
                 pass
@@ -479,13 +471,7 @@ class Database:
     def clean_startup_artifacts(self, upload_dir: Optional[str] = None) -> Dict[str, int]:
         """Limpia estados y archivos residuales de arranques o caídas previas."""
         interrupted_runs = self.recover_interrupted_runs()
-
-        reset_jobs = 0
-        with self._get_connection() as conn:
-            cur = conn.execute(
-                "UPDATE jobs SET status = 'discovered' WHERE status = 'evaluating'"
-            )
-            reset_jobs = cur.rowcount
+        reset_jobs = self.reset_evaluating_jobs()
 
         cleaned_files = 0
         target_dir = upload_dir or os.getenv("UPLOAD_DIR", os.path.join(os.path.dirname(self.db_path), "uploaded_cvs"))
@@ -520,10 +506,7 @@ class Database:
         if interrupted_runs > 0 or reset_jobs > 0 or cleaned_files > 0 or stale_cv_entries > 0:
             logger.info(
                 "Limpieza de arranque completada: %d ejecuciones recuperadas, %d ofertas reajustadas, %d archivos residuales eliminados, %d cachés de CV obsoletas depuradas.",
-                interrupted_runs,
-                reset_jobs,
-                cleaned_files,
-                stale_cv_entries,
+                interrupted_runs, reset_jobs, cleaned_files, stale_cv_entries,
             )
 
         return {
@@ -533,193 +516,76 @@ class Database:
             "stale_cv_entries": stale_cv_entries,
         }
 
+    # =========================================================================
+    # GESTIÓN DE OFERTAS (JOBS)
+    # =========================================================================
     def job_exists(self, url_hash: str) -> bool:
-        """Comprueba si una oferta con este hash de URL ya existe."""
+        """Verifica si ya existe una oferta con este hash de URL."""
         with self._get_connection() as conn:
             cursor = conn.execute("SELECT 1 FROM jobs WHERE url_hash = ? LIMIT 1", (url_hash,))
             return cursor.fetchone() is not None
 
-    def find_cross_portal_duplicate(self, content_fingerprint: str, days_window: int = 14) -> Optional[int]:
-        """
-        Detecta si la misma vacante ya fue registrada a través de otro portal
-        en los últimos `days_window` días. Resuelve siempre la raíz canónica
-        para evitar cadenas de referencias (A -> B -> C).
-        """
+    def find_cross_portal_duplicate(self, content_fingerprint: str) -> Optional[int]:
+        """Busca el ID canónico de una oferta con idéntica huella de contenido."""
         with self._get_connection() as conn:
-            query = """
-                SELECT id, duplicate_of_id FROM jobs 
-                WHERE content_fingerprint = ? 
-                  AND date(created_at) >= date('now', '-' || ? || ' days', 'localtime')
-                ORDER BY id ASC LIMIT 1
-            """
-            cursor = conn.execute(query, (content_fingerprint, days_window))
+            cursor = conn.execute(
+                """
+                SELECT id, duplicate_of_id FROM jobs
+                WHERE content_fingerprint = ?
+                ORDER BY created_at ASC
+                LIMIT 1
+                """,
+                (content_fingerprint,),
+            )
             row = cursor.fetchone()
             if not row:
                 return None
             return row["duplicate_of_id"] if row["duplicate_of_id"] else row["id"]
 
-    def recover_interrupted_runs(self) -> int:
-        """Detecta ejecuciones en estado 'running' tras caídas o reinicios y las marca como 'interrupted'."""
-        with self._get_connection() as conn:
-            cursor = conn.execute(
-                """
-                UPDATE pipeline_runs 
-                SET status = 'interrupted',
-                    finished_at = datetime('now', 'localtime'),
-                    error_message = 'Interrumpido por reinicio o detención del contenedor'
-                WHERE status = 'running'
-                """
-            )
-            count = cursor.rowcount
-            if count > 0:
-                logger.warning("Recuperadas %d ejecuciones interrumpidas en pipeline_runs.", count)
-            return count
-
-    def record_skipped_days(self) -> int:
-        """
-        Inspecciona el histórico de pipeline_runs y registra formalmente como 'skipped'
-        los días en los que el sistema estuvo completamente apagado, garantizando que
-        no se ejecuten búsquedas múltiples atrasadas en ráfaga.
-        """
-        last_run = self.get_last_completed_run()
-        if not last_run or not last_run.get("started_at"):
-            return 0
-
-        last_date_str = str(last_run["started_at"]).split()[0]
-        try:
-            last_date = datetime.strptime(last_date_str, "%Y-%m-%d").date()
-            today = datetime.now().date()
-            delta_days = (today - last_date).days
-        except Exception as e:
-            logger.debug("Error calculando días omitidos: %s", e)
-            return 0
-
-        if delta_days <= 1:
-            return 0
-
-        skipped_count = 0
-        with self._get_connection() as conn:
-            for d in range(1, delta_days):
-                skipped_date = last_date + timedelta(days=d)
-                date_str = skipped_date.strftime("%Y-%m-%d")
-
-                # Comprobar si ya existe algún registro para esa fecha
-                existing = conn.execute(
-                    "SELECT 1 FROM pipeline_runs WHERE date(started_at) = ? LIMIT 1",
-                    (date_str,),
-                ).fetchone()
-
-                if not existing:
-                    conn.execute(
-                        """
-                        INSERT INTO pipeline_runs (
-                            started_at, finished_at, trigger_type, status,
-                            total_found, new_jobs, relevant_jobs, error_message
-                        ) VALUES (?, ?, 'scheduled_skipped', 'skipped', 0, 0, 0, ?)
-                        """,
-                        (
-                            f"{date_str} 08:30:00",
-                            f"{date_str} 08:30:00",
-                            "Día omitido deliberadamente por apagado prolongado del equipo; se previene saturación en ráfaga.",
-                        ),
-                    )
-                    skipped_count += 1
-
-        if skipped_count > 0:
-            logger.info("Registrados formalmente %d días omitidos en pipeline_runs por apagado del equipo.", skipped_count)
-        return skipped_count
-
     def find_fuzzy_duplicate(
         self,
         title: str,
         company: str,
-        location: str = "",
+        location: str,
         description: str = "",
-        days_window: int = 14,
-        min_similarity: float = 0.85,
+        threshold: float = 0.88,
     ) -> Optional[Tuple[int, float]]:
-        """
-        Detecta si existe una oferta similar usando RapidFuzz combinando similitud
-        de empresa, puesto, ubicación y descripción en los últimos `days_window` días.
-        Retorna (canonical_id, similarity_score) o None.
-        Garantiza que el candidato sea una raíz canónica (duplicate_of_id IS NULL).
-        """
-        if not RAPIDFUZZ_AVAILABLE or not title or not company:
+        """Deduplicación difusa contra ofertas de los últimos 30 días."""
+        if not RAPIDFUZZ_AVAILABLE:
             return None
 
-        target_comp = re.sub(r"\b(s\.?l\.?|s\.?a\.?|inc\.?|llc|spain|españa)\b", "", company.lower())
-        target_comp = re.sub(r"[^\w\s]", "", target_comp).strip()
-        target_title = re.sub(r"[^\w\s]", "", title.lower()).strip()
-        target_loc = re.sub(r"[^\w\s]", "", location.lower()).strip()
-        target_desc_sample = re.sub(r"\s+", " ", description[:500].lower()).strip()
-
         with self._get_connection() as conn:
-            # Consultar exclusivamente raíces canónicas para impedir cadenas de referencias
             cursor = conn.execute(
                 """
-                SELECT id, title, company, location, description 
-                FROM jobs 
+                SELECT id, title, company, location, duplicate_of_id
+                FROM jobs
                 WHERE duplicate_of_id IS NULL
-                  AND date(created_at) >= date('now', '-' || ? || ' days', 'localtime')
-                ORDER BY id DESC
-                """,
-                (days_window,),
+                  AND created_at >= datetime('now', '-30 days', 'localtime')
+                ORDER BY created_at DESC
+                LIMIT 500
+                """
             )
             candidates = cursor.fetchall()
 
+        best_id: Optional[int] = None
+        best_score = 0.0
+
         for cand in candidates:
-            cand_id = cand["id"]
-            cand_comp = re.sub(r"\b(s\.?l\.?|s\.?a\.?|inc\.?|llc|spain|españa)\b", "", cand["company"].lower())
-            cand_comp = re.sub(r"[^\w\s]", "", cand_comp).strip()
-            cand_title = re.sub(r"[^\w\s]", "", cand["title"].lower()).strip()
-            cand_loc = re.sub(r"[^\w\s]", "", (cand["location"] or "").lower()).strip()
+            t_score = fuzz.token_sort_ratio(title.lower(), cand["title"].lower()) / 100.0
+            c_score = fuzz.token_set_ratio(company.lower(), cand["company"].lower()) / 100.0
 
-            # Similitud de empresa (token_set_ratio tolera variaciones de razón social)
-            comp_sim = fuzz.token_set_ratio(target_comp, cand_comp) / 100.0
-            if comp_sim < 0.75:
-                continue
+            if t_score >= 0.85 and c_score >= 0.80:
+                combined = (t_score * 0.6) + (c_score * 0.4)
+                if combined > best_score:
+                    best_score = combined
+                    best_id = cand["duplicate_of_id"] if cand["duplicate_of_id"] else cand["id"]
 
-            # Similitud de título
-            title_sim = max(
-                fuzz.token_sort_ratio(target_title, cand_title) / 100.0,
-                fuzz.token_set_ratio(target_title, cand_title) / 100.0,
-            )
-            if title_sim < 0.70:
-                continue
-
-            # Similitud de ubicación y descripción
-            loc_sim = fuzz.token_set_ratio(target_loc, cand_loc) / 100.0 if (target_loc and cand_loc) else 0.85
-            desc_sim = 0.85
-            cand_desc = cand["description"] or ""
-            if len(cand_desc) > 80 and len(description) > 80:
-                cand_desc_sample = re.sub(r"\s+", " ", cand_desc[:500].lower()).strip()
-                desc_sim = fuzz.token_set_ratio(target_desc_sample, cand_desc_sample) / 100.0
-
-            # Puntuación compuesta ponderada (Heurística calibrada)
-            composite = (title_sim * 0.40) + (comp_sim * 0.35) + (desc_sim * 0.15) + (loc_sim * 0.10)
-            if composite >= min_similarity:
-                logger.info(
-                    "RapidFuzz: Oferta '%s' (%s) detectada como duplicado de ID canónico %d ('%s', %s) [Similitud: %.2f]",
-                    title, company, cand_id, cand["title"], cand["company"], composite
-                )
-                return cand_id, round(composite, 3)
-            elif composite >= 0.75:
-                logger.debug(
-                    "RapidFuzz caso borderline (no enlazado para evitar falsos positivos): '%.2f' entre '%s' y candidato ID %d",
-                    composite, title, cand_id
-                )
-
+        if best_id and best_score >= threshold:
+            return best_id, best_score
         return None
 
     def save_job(self, job_data: Dict[str, Any]) -> Tuple[Optional[int], str]:
-        """
-        Inserta o actualiza una oferta aplicando deduplicación por URL, huella SHA-256
-        y similitud difusa (RapidFuzz), conservando trazabilidad e historial completos.
-        
-        Retorna (job_id, status_code):
-        - status_code: 'inserted' (nueva canónica), 'cross_portal_duplicate' (duplicado enlazado),
-          'description_updated' (actualizada), 'already_exists' (idéntica)
-        """
+        """Inserta o actualiza una oferta aplicando deduplicación y auto-migración."""
         raw_url = job_data.get("job_url", "")
         title = job_data.get("title", "")
         company = job_data.get("company", "")
@@ -736,7 +602,6 @@ class Database:
         schedule = job_data.get("schedule")
         education_level = job_data.get("education_level")
 
-        # Fallback de normalización desde el texto del portal si no vino estructurado
         if not contract_type and description:
             dl = description.lower()
             if "indefinid" in dl:
@@ -772,7 +637,6 @@ class Database:
             cv_filename = None
 
         with self._get_connection() as conn:
-            # 1. Comprobar si ya existe por URL exacta
             cursor = conn.execute(
                 "SELECT id, description_hash, alternate_sources, cv_filename FROM jobs WHERE url_hash = ?",
                 (url_hash,),
@@ -783,11 +647,10 @@ class Database:
                 old_desc_hash = existing["description_hash"]
                 if cv_filename and not existing["cv_filename"]:
                     conn.execute("UPDATE jobs SET cv_filename = ? WHERE id = ?", (cv_filename, existing_id))
-                # Si cambió la descripción, actualizar registro y registrar timestamp
                 if old_desc_hash and old_desc_hash != desc_hash:
                     conn.execute(
                         """
-                        UPDATE jobs SET 
+                        UPDATE jobs SET
                             description = ?,
                             description_hash = ?,
                             contract_type = COALESCE(?, contract_type),
@@ -802,24 +665,17 @@ class Database:
                     return existing_id, "description_updated"
                 return None, "already_exists"
 
-            # 2. Comprobar deduplicación exacta entre portales por fingerprint
             cross_dup_id = self.find_cross_portal_duplicate(content_fingerprint)
             fuzzy_sim = 1.0 if cross_dup_id else None
 
-            # 3. Comprobar deduplicación difusa (RapidFuzz) si no hubo match exacto
             if not cross_dup_id:
                 fuzzy_match = self.find_fuzzy_duplicate(
-                    title=title,
-                    company=company,
-                    location=location,
-                    description=description,
+                    title=title, company=company, location=location, description=description
                 )
                 if fuzzy_match:
                     cross_dup_id, fuzzy_sim = fuzzy_match
 
-            # Si es duplicado (exacto o fuzzy), guardar registro enlazado sin descartar historial
             if cross_dup_id:
-                # Blindaje anti-cadenas: asegurar que siempre se enlace a la raíz canónica
                 canon_root = conn.execute(
                     "SELECT id, duplicate_of_id FROM jobs WHERE id = ?", (cross_dup_id,)
                 ).fetchone()
@@ -843,13 +699,11 @@ class Database:
                             source, description, job_data.get("salary_min"),
                             job_data.get("salary_max"), job_data.get("salary_currency", "EUR"),
                             job_data.get("date_posted", ""), cross_dup_id, fuzzy_sim,
-                            contract_type, schedule, education_level,
-                            cv_filename
+                            contract_type, schedule, education_level, cv_filename
                         ),
                     )
                     dup_row_id = cursor.lastrowid
-                    
-                    # Actualizar fuentes alternativas en la oferta canónica
+
                     canon_row = conn.execute("SELECT alternate_sources FROM jobs WHERE id = ?", (cross_dup_id,)).fetchone()
                     alt_sources = []
                     if canon_row and canon_row["alternate_sources"]:
@@ -857,7 +711,7 @@ class Database:
                             alt_sources = json.loads(canon_row["alternate_sources"])
                         except Exception:
                             alt_sources = []
-                    
+
                     alt_entry = {"source": source, "url": canonical_url, "date": job_data.get("date_posted", "")}
                     if not any(s.get("url") == canonical_url for s in alt_sources):
                         alt_sources.append(alt_entry)
@@ -871,7 +725,6 @@ class Database:
                 except sqlite3.IntegrityError:
                     return None, "already_exists"
 
-            # 4. Inserción de oferta canónica completamente nueva
             try:
                 cursor = conn.execute(
                     """
@@ -883,74 +736,331 @@ class Database:
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
-                        url_hash,
-                        content_fingerprint,
-                        desc_hash,
-                        canonical_url,
-                        title,
-                        company,
-                        location,
-                        1 if job_data.get("is_remote") else 0,
-                        source,
-                        description,
-                        job_data.get("salary_min"),
-                        job_data.get("salary_max"),
-                        job_data.get("salary_currency", "EUR"),
-                        job_data.get("date_posted", ""),
-                        job_data.get("status", "discovered"),
-                        contract_type,
-                        schedule,
-                        education_level,
-                        cv_filename,
+                        url_hash, content_fingerprint, desc_hash, canonical_url,
+                        title, company, location, 1 if job_data.get("is_remote") else 0,
+                        source, description, job_data.get("salary_min"),
+                        job_data.get("salary_max"), job_data.get("salary_currency", "EUR"),
+                        job_data.get("date_posted", ""), job_data.get("status", "discovered"),
+                        contract_type, schedule, education_level, cv_filename,
                     ),
                 )
                 return cursor.lastrowid, "inserted"
             except sqlite3.IntegrityError:
                 return None, "already_exists"
 
-
     def update_job_status(self, job_id: int, status: str) -> None:
         """Actualiza el estado del ciclo de vida de la oferta."""
-        if sqlite_utils:
+        udb = self.get_utils_db()
+        if udb:
             try:
-                self.get_utils_db()["jobs"].update(job_id, {"status": status, "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
+                udb["jobs"].update(
+                    job_id,
+                    {"status": status, "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")},
+                    alter=True,
+                )
                 return
-            except Exception:
-                pass
-        with self._get_connection() as conn:
-            conn.execute("UPDATE jobs SET status = ?, updated_at = datetime('now', 'localtime') WHERE id = ?", (status, job_id))
+            except Exception as e:
+                logger.debug("Fallback update_job_status a SQL: %s", e)
 
+        with self._get_connection() as conn:
+            conn.execute(
+                "UPDATE jobs SET status = ?, updated_at = datetime('now', 'localtime') WHERE id = ?",
+                (status, job_id),
+            )
+
+    def update_job_channel_status(
+        self,
+        job_id: int,
+        telegram_notified: Optional[int] = None,
+        ui_saved: Optional[int] = None,
+    ) -> None:
+        """Actualiza el estado de notificación en Telegram o guardado visual en la UI."""
+        updates = []
+        params = []
+        if telegram_notified is not None:
+            updates.append("telegram_notified = ?")
+            params.append(1 if telegram_notified else 0)
+        if ui_saved is not None:
+            updates.append("ui_saved = ?")
+            params.append(1 if ui_saved else 0)
+
+        if not updates:
+            return
+
+        updates.append("updated_at = datetime('now', 'localtime')")
+        params.append(job_id)
+
+        with self._get_connection() as conn:
+            conn.execute(f"UPDATE jobs SET {', '.join(updates)} WHERE id = ?", params)
+
+    def get_job_detail(self, job_id: int) -> Optional[Dict[str, Any]]:
+        """Recupera la ficha integral de una vacante, incluyendo análisis de IA y documentos generados."""
+        with self._get_connection() as conn:
+            query = """
+                SELECT
+                    j.*,
+                    e.score, e.fit_level, e.matched_skills, e.missing_skills,
+                    e.strengths, e.gaps, e.reasoning, e.should_apply,
+                    e.created_at AS evaluated_at,
+                    d.cv_pdf_path, d.cv_md_path, d.letter_pdf_path, d.letter_md_path,
+                    d.diff_summary, d.created_at AS documents_generated_at
+                FROM jobs j
+                LEFT JOIN evaluations e ON j.id = e.job_id
+                LEFT JOIN generated_documents d ON j.id = d.job_id
+                WHERE j.id = ?
+            """
+            cursor = conn.execute(query, (job_id,))
+            row = cursor.fetchone()
+            if not row:
+                return None
+
+            data = _decode_row_json_fields(dict(row))
+            for list_field in ("matched_skills", "missing_skills", "strengths", "gaps", "alternate_sources"):
+                if not data.get(list_field):
+                    data[list_field] = []
+
+            data["has_cv"] = bool(data.get("cv_pdf_path") or data.get("cv_md_path"))
+            data["has_letter"] = bool(data.get("letter_pdf_path") or data.get("letter_md_path"))
+            return data
+
+    def get_jobs_paginated(
+        self,
+        search: Optional[str] = None,
+        exclude: Optional[str] = None,
+        location: Optional[str] = None,
+        source: Optional[str] = None,
+        status: Optional[str] = None,
+        min_score: Optional[int] = None,
+        is_remote: Optional[bool] = None,
+        modality: Optional[str] = None,
+        modalities: Optional[List[str]] = None,
+        categories: Optional[List[str]] = None,
+        educations: Optional[List[str]] = None,
+        min_experience_years: Optional[int] = None,
+        min_salary: Optional[float] = None,
+        schedules: Optional[List[str]] = None,
+        contract_types: Optional[List[str]] = None,
+        geo_lat: Optional[float] = None,
+        geo_lon: Optional[float] = None,
+        geo_radius_km: Optional[float] = None,
+        only_ui_saved: bool = True,
+        cv_filename: Optional[str] = None,
+        time_range: Optional[str] = "all",
+        page: int = 1,
+        page_size: int = 20,
+        sort_by: str = "created_at",
+        sort_order: str = "desc",
+    ) -> Dict[str, Any]:
+        """Recupera ofertas paginadas con soporte de filtros multicriterio."""
+        page = max(1, page)
+        page_size = min(max(5, page_size), 500)
+        offset = (page - 1) * page_size
+
+        allowed_sort_fields = {
+            "created_at": "j.created_at",
+            "score": "e.score",
+            "company": "j.company",
+            "title": "j.title",
+            "date_posted": "j.date_posted",
+        }
+        sort_col = allowed_sort_fields.get(sort_by, "j.created_at")
+        sort_dir = "ASC" if str(sort_order).lower() == "asc" else "DESC"
+
+        where_clauses = ["1=1"]
+        params: List[Any] = []
+
+        from .storage import read_active_cv_pointer
+        target_cv = cv_filename
+        if target_cv is None:
+            pointer = read_active_cv_pointer()
+            if isinstance(pointer, dict):
+                target_cv = pointer.get("selected_filename", "")
+            else:
+                target_cv = str(pointer or "")
+
+        clean_target_cv = str(target_cv or "").strip()
+        if clean_target_cv and clean_target_cv.lower() not in ("none", "ninguno", "all", "todas", "*", ""):
+            where_clauses.append("j.cv_filename = ?")
+            params.append(clean_target_cv)
+        else:
+            where_clauses.append("1=0")
+
+        if only_ui_saved:
+            where_clauses.append("j.ui_saved = 1")
+
+        if search:
+            search_param = f"%{search.strip().lower()}%"
+            where_clauses.append("(LOWER(j.title) LIKE ? OR LOWER(j.company) LIKE ? OR LOWER(j.location) LIKE ?)")
+            params.extend([search_param, search_param, search_param])
+
+        if exclude:
+            exclude_terms = [t.strip().lower() for t in exclude.split(",") if t.strip()]
+            for term in exclude_terms:
+                where_clauses.append("(LOWER(j.title) NOT LIKE ? AND LOWER(j.description) NOT LIKE ?)")
+                params.extend([f"%{term}%", f"%{term}%"])
+
+        if source:
+            src = str(source).strip().lower()
+            if src in ("tecnoempleo", "tecnoempleo_rss"):
+                where_clauses.append("j.source IN ('tecnoempleo', 'tecnoempleo_rss')")
+            elif src in ("infojobs", "infojobs_api"):
+                where_clauses.append("j.source IN ('infojobs', 'infojobs_api')")
+            elif src == "jobspy":
+                where_clauses.append("j.source IN ('indeed', 'linkedin', 'glassdoor', 'google', 'jobspy')")
+            else:
+                where_clauses.append("LOWER(j.source) = ?")
+                params.append(src)
+
+        if status:
+            where_clauses.append("j.status = ?")
+            params.append(status)
+
+        if min_score is not None:
+            where_clauses.append("e.score >= ?")
+            params.append(min_score)
+
+        active_modalities = [m.lower().strip() for m in (modalities or []) if m and m.lower().strip() not in ("sin_especificar", "todas")]
+        if not active_modalities and modality and modality.lower().strip() not in ("sin_especificar", "todas", ""):
+            active_modalities = [modality.lower().strip()]
+
+        if active_modalities:
+            mod_subclauses = []
+            for m in active_modalities:
+                if m in ("remoto", "teletrabajo"):
+                    mod_subclauses.append("((j.is_remote = 1 OR LOWER(j.location) LIKE '%remot%' OR LOWER(j.location) LIKE '%teletrabaj%' OR LOWER(j.title) LIKE '%remot%' OR LOWER(j.title) LIKE '%teletrabaj%') AND LOWER(j.location) NOT LIKE '%hibrid%' AND LOWER(j.location) NOT LIKE '%hybrid%' AND LOWER(j.title) NOT LIKE '%hibrid%' AND LOWER(j.title) NOT LIKE '%hybrid%')")
+                elif m == "hibrido":
+                    mod_subclauses.append("(LOWER(j.location) LIKE '%hibrid%' OR LOWER(j.location) LIKE '%hybrid%' OR LOWER(j.location) LIKE '%híbrid%' OR LOWER(j.title) LIKE '%hibrid%' OR LOWER(j.title) LIKE '%hybrid%' OR LOWER(j.title) LIKE '%híbrid%' OR LOWER(j.description) LIKE '%hibrid%' OR LOWER(j.description) LIKE '%hybrid%' OR LOWER(j.description) LIKE '%híbrid%')")
+                elif m == "presencial":
+                    mod_subclauses.append("(j.is_remote = 0 AND LOWER(j.location) NOT LIKE '%remot%' AND LOWER(j.location) NOT LIKE '%teletrabaj%' AND LOWER(j.title) NOT LIKE '%remot%' AND LOWER(j.title) NOT LIKE '%teletrabaj%' AND LOWER(j.location) NOT LIKE '%hibrid%' AND LOWER(j.location) NOT LIKE '%hybrid%' AND LOWER(j.location) NOT LIKE '%híbrid%' AND LOWER(j.title) NOT LIKE '%hibrid%' AND LOWER(j.title) NOT LIKE '%hybrid%' AND LOWER(j.title) NOT LIKE '%híbrid%' AND LOWER(j.description) NOT LIKE '%hibrid%' AND LOWER(j.description) NOT LIKE '%hybrid%')")
+            if mod_subclauses:
+                where_clauses.append(f"({' OR '.join(mod_subclauses)})")
+        elif is_remote is not None:
+            where_clauses.append("j.is_remote = ?")
+            params.append(1 if is_remote else 0)
+
+        active_cats = [c.lower().strip() for c in (categories or []) if c and c.lower().strip() not in ("sin_especificar", "todas")]
+        if active_cats:
+            cat_clauses = []
+            for cat in active_cats:
+                cat_clauses.append("(LOWER(j.title) LIKE ? OR LOWER(j.description) LIKE ? OR (e.matched_skills IS NOT NULL AND LOWER(e.matched_skills) LIKE ?))")
+                params.extend([f"%{cat}%", f"%{cat}%", f"%{cat}%"])
+            where_clauses.append(f"({' OR '.join(cat_clauses)})")
+
+        active_edus = [e.lower().strip() for e in (educations or []) if e and e.lower().strip() not in ("sin_especificar", "todas")]
+        if active_edus:
+            edu_clauses = []
+            for edu in active_edus:
+                edu_clauses.append("(LOWER(j.education_level) LIKE ? OR LOWER(j.description) LIKE ?)")
+                params.extend([f"%{edu}%", f"%{edu}%"])
+            where_clauses.append(f"({' OR '.join(edu_clauses)})")
+
+        if min_experience_years and min_experience_years > 0:
+            if min_experience_years == 1:
+                where_clauses.append("(LOWER(j.title) LIKE '%junior%' OR LOWER(j.title) LIKE '%jr%' OR LOWER(j.title) LIKE '%prácticas%' OR LOWER(j.title) LIKE '%beca%' OR LOWER(j.description) LIKE '%sin experiencia%' OR LOWER(j.description) LIKE '%recién titulado%' OR LOWER(j.description) LIKE '%reciente titulado%' OR LOWER(j.description) LIKE '%0-1 año%' OR LOWER(j.description) LIKE '%sin experiencia requerida%')")
+            elif min_experience_years == 2:
+                where_clauses.append("(LOWER(j.description) LIKE '%1 año%' OR LOWER(j.description) LIKE '%1+ año%' OR LOWER(j.description) LIKE '%al menos 1 año%' OR LOWER(j.description) LIKE '%mínimo 1 año%')")
+            elif min_experience_years == 3:
+                where_clauses.append("(LOWER(j.description) LIKE '%2 año%' OR LOWER(j.description) LIKE '%2+ año%' OR LOWER(j.description) LIKE '%al menos 2 año%' OR LOWER(j.description) LIKE '%mínimo 2 año%')")
+            elif min_experience_years == 4:
+                where_clauses.append("(LOWER(j.description) LIKE '%3 año%' OR LOWER(j.description) LIKE '%3+ año%' OR LOWER(j.description) LIKE '%al menos 3 año%' OR LOWER(j.description) LIKE '%mínimo 3 año%')")
+            elif min_experience_years >= 5:
+                where_clauses.append("(LOWER(j.description) LIKE '%5 año%' OR LOWER(j.description) LIKE '%5+ año%' OR LOWER(j.description) LIKE '%al menos 5 año%' OR LOWER(j.title) LIKE '%senior%' OR LOWER(j.title) LIKE '%lead%')")
+
+        if min_salary and min_salary > 0:
+            where_clauses.append(
+                "((CASE WHEN j.salary_max <= 100 THEN j.salary_max * 1800 WHEN j.salary_max < 6000 THEN j.salary_max * 12 ELSE j.salary_max END) >= ? "
+                "OR (CASE WHEN j.salary_min <= 100 THEN j.salary_min * 1800 WHEN j.salary_min < 6000 THEN j.salary_min * 12 ELSE j.salary_min END) >= ?)"
+            )
+            params.extend([min_salary, min_salary])
+
+        active_scheds = [s.lower().strip() for s in (schedules or []) if s and s.lower().strip() not in ("sin_especificar", "todas")]
+        if active_scheds:
+            sched_clauses = []
+            for sc in active_scheds:
+                sched_clauses.append("(LOWER(j.schedule) LIKE ? OR LOWER(j.description) LIKE ?)")
+                params.extend([f"%{sc}%", f"%{sc}%"])
+            where_clauses.append(f"({' OR '.join(sched_clauses)})")
+
+        active_contracts = [c.lower().strip() for c in (contract_types or []) if c and c.lower().strip() not in ("sin_especificar", "todas")]
+        if active_contracts:
+            contract_clauses = []
+            for ct in active_contracts:
+                contract_clauses.append("(LOWER(j.contract_type) LIKE ? OR LOWER(j.description) LIKE ?)")
+                params.extend([f"%{ct}%", f"%{ct}%"])
+            where_clauses.append(f"({' OR '.join(contract_clauses)})")
+
+        if location and location.strip() and not any(k in location.lower() for k in ("todos", "all", "cualquiera")):
+            loc_val = location.strip()
+            where_clauses.append("(LOWER(j.location) LIKE ? OR j.is_remote = 1 OR LOWER(j.location) LIKE '%remot%' OR LOWER(j.location) LIKE '%teletrabaj%')")
+            params.append(f"%{loc_val.lower()}%")
+
+        if time_range and str(time_range).strip().lower() not in ("all", "todas", "todos", "cualquiera", ""):
+            tr = str(time_range).strip().lower()
+            if tr in ("24h", "1d", "hoy", "today"):
+                where_clauses.append("(j.created_at >= datetime('now', '-1 day', 'localtime') OR j.date_posted >= date('now', '-1 day', 'localtime'))")
+            elif tr in ("7d", "week", "semana", "7_dias"):
+                where_clauses.append("(j.created_at >= datetime('now', '-7 days', 'localtime') OR j.date_posted >= date('now', '-7 days', 'localtime'))")
+            elif tr in ("30d", "month", "mes", "30_dias"):
+                where_clauses.append("(j.created_at >= datetime('now', '-30 days', 'localtime') OR j.date_posted >= date('now', '-30 days', 'localtime'))")
+
+        where_str = " AND ".join(where_clauses)
+
+        with self._get_connection() as conn:
+            count_sql = f"""
+                SELECT COUNT(*) FROM jobs j
+                LEFT JOIN evaluations e ON j.id = e.job_id
+                WHERE {where_str}
+            """
+            total_items = conn.execute(count_sql, params).fetchone()[0]
+
+            query_sql = f"""
+                SELECT
+                    j.id, j.title, j.company, j.location, j.is_remote, j.source,
+                    j.canonical_url, j.salary_min, j.salary_max, j.salary_currency,
+                    j.date_posted, j.created_at, j.updated_at, j.status,
+                    j.duplicate_of_id, j.similarity_score, j.alternate_sources,
+                    j.telegram_notified, j.ui_saved,
+                    j.description, j.contract_type, j.schedule, j.education_level,
+                    e.score, e.fit_level, e.should_apply, e.matched_skills,
+                    d.cv_pdf_path, d.cv_md_path, d.letter_pdf_path, d.letter_md_path
+                FROM jobs j
+                LEFT JOIN evaluations e ON j.id = e.job_id
+                LEFT JOIN generated_documents d ON j.id = d.job_id
+                WHERE {where_str}
+                ORDER BY {sort_col} {sort_dir}
+                LIMIT ? OFFSET ?
+            """
+            cursor = conn.execute(query_sql, params + [page_size, offset])
+            items = []
+            for row in cursor.fetchall():
+                row_dict = _decode_row_json_fields(dict(row))
+                row_dict["has_cv"] = bool(row_dict.get("cv_pdf_path") or row_dict.get("cv_md_path"))
+                row_dict["has_letter"] = bool(row_dict.get("letter_pdf_path") or row_dict.get("letter_md_path"))
+                items.append(row_dict)
+
+            total_pages = (total_items + page_size - 1) // page_size if total_items > 0 else 1
+            return {
+                "items": items,
+                "total": total_items,
+                "page": page,
+                "page_size": page_size,
+                "total_pages": total_pages,
+            }
+
+    # =========================================================================
+    # EVALUACIONES ATS Y DOCUMENTOS GENERADOS
+    # =========================================================================
     def save_evaluation(self, eval_data: Dict[str, Any]) -> int:
-        """Registra o actualiza la evaluación de afinidad de una oferta sin perder historial."""
+        """Registra o actualiza la evaluación de afinidad de una oferta de manera atómica."""
         job_id = eval_data["job_id"]
         matched = json.dumps(eval_data.get("matched_skills", []), ensure_ascii=False)
         missing = json.dumps(eval_data.get("missing_skills", []), ensure_ascii=False)
         strengths = json.dumps(eval_data.get("strengths", []), ensure_ascii=False)
         gaps = json.dumps(eval_data.get("gaps", []), ensure_ascii=False)
-
-        if sqlite_utils:
-            try:
-                db = self.get_utils_db()
-                if not db["jobs"].get(job_id):
-                    logger.warning("Oferta ID %s ya no existe en tabla jobs. Omitiendo guardado de evaluación.", job_id)
-                    return -1
-                db["evaluations"].upsert(
-                    {
-                        "job_id": job_id,
-                        "score": eval_data.get("score", 0),
-                        "fit_level": eval_data.get("fit_level", "MODERADO"),
-                        "matched_skills": matched,
-                        "missing_skills": missing,
-                        "strengths": strengths,
-                        "gaps": gaps,
-                        "reasoning": eval_data.get("reasoning", ""),
-                        "should_apply": 1 if eval_data.get("should_apply") else 0,
-                    },
-                    pk="job_id",
-                )
-                return job_id
-            except Exception as e:
-                logger.debug("Fallback save_evaluation a SQL: %s", e)
+        score = eval_data.get("score", 0)
+        fit_level = eval_data.get("fit_level", "MODERADO")
+        reasoning = eval_data.get("reasoning", "")
+        should_apply = 1 if eval_data.get("should_apply") else 0
 
         with self._get_connection() as conn:
             job_exists = conn.execute("SELECT 1 FROM jobs WHERE id = ?", (job_id,)).fetchone()
@@ -975,43 +1085,18 @@ class Database:
                     should_apply = excluded.should_apply,
                     created_at = datetime('now', 'localtime')
                 """,
-                (
-                    job_id,
-                    eval_data.get("score", 0),
-                    eval_data.get("fit_level", "MODERADO"),
-                    matched,
-                    missing,
-                    strengths,
-                    gaps,
-                    eval_data.get("reasoning", ""),
-                    1 if eval_data.get("should_apply") else 0,
-                ),
+                (job_id, score, fit_level, matched, missing, strengths, gaps, reasoning, should_apply),
             )
-            return cursor.lastrowid
+            return job_id
 
     def save_documents(self, doc_data: Dict[str, Any]) -> int:
         """Registra o actualiza las rutas de los archivos PDF y Markdown generados."""
         job_id = doc_data["job_id"]
-        if sqlite_utils:
-            try:
-                db = self.get_utils_db()
-                if not db["jobs"].get(job_id):
-                    logger.warning("Oferta ID %s ya no existe en tabla jobs. Omitiendo guardado de documentos.", job_id)
-                    return -1
-                db["generated_documents"].upsert(
-                    {
-                        "job_id": job_id,
-                        "cv_pdf_path": doc_data.get("cv_pdf_path"),
-                        "cv_md_path": doc_data.get("cv_md_path"),
-                        "letter_pdf_path": doc_data.get("letter_pdf_path"),
-                        "letter_md_path": doc_data.get("letter_md_path"),
-                        "diff_summary": doc_data.get("diff_summary", ""),
-                    },
-                    pk="job_id",
-                )
-                return job_id
-            except Exception as e:
-                logger.debug("Fallback save_documents a SQL: %s", e)
+        cv_pdf_path = doc_data.get("cv_pdf_path")
+        cv_md_path = doc_data.get("cv_md_path")
+        letter_pdf_path = doc_data.get("letter_pdf_path")
+        letter_md_path = doc_data.get("letter_md_path")
+        diff_summary = doc_data.get("diff_summary", "")
 
         with self._get_connection() as conn:
             job_exists = conn.execute("SELECT 1 FROM jobs WHERE id = ?", (job_id,)).fetchone()
@@ -1033,25 +1118,106 @@ class Database:
                     diff_summary = excluded.diff_summary,
                     created_at = datetime('now', 'localtime')
                 """,
-                (
-                    job_id,
-                    doc_data.get("cv_pdf_path"),
-                    doc_data.get("cv_md_path"),
-                    doc_data.get("letter_pdf_path"),
-                    doc_data.get("letter_md_path"),
-                    doc_data.get("diff_summary", ""),
-                ),
+                (job_id, cv_pdf_path, cv_md_path, letter_pdf_path, letter_md_path, diff_summary),
             )
             return cursor.lastrowid
 
+    def get_unevaluated_jobs(self, limit: int = 500, cv_filename: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Recupera ofertas pendientes de evaluación."""
+        with self._get_connection() as conn:
+            if cv_filename and cv_filename not in ("none", "Ninguno", ""):
+                query = """
+                    SELECT j.* FROM jobs j
+                    LEFT JOIN evaluations e ON j.id = e.job_id
+                    WHERE e.id IS NULL
+                      AND j.status NOT IN ('evaluated', 'discarded', 'rejected')
+                      AND (j.cv_filename = ? OR j.cv_filename IS NULL OR j.cv_filename = '')
+                    ORDER BY j.id ASC
+                    LIMIT ?
+                """
+                cursor = conn.execute(query, (cv_filename, limit))
+            else:
+                query = """
+                    SELECT j.* FROM jobs j
+                    LEFT JOIN evaluations e ON j.id = e.job_id
+                    WHERE e.id IS NULL AND j.status NOT IN ('evaluated', 'discarded', 'rejected')
+                    ORDER BY j.id ASC
+                    LIMIT ?
+                """
+                cursor = conn.execute(query, (limit,))
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_all_jobs_for_scoring(self, limit: int = 200, cv_filename: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Recupera todas las ofertas activas registradas para contrastar afinidad."""
+        with self._get_connection() as conn:
+            if cv_filename and cv_filename not in ("none", "Ninguno", ""):
+                query = """
+                    SELECT id, title, company, location, is_remote, description, source, created_at
+                    FROM jobs
+                    WHERE ui_saved = 1 AND cv_filename = ?
+                    ORDER BY id DESC
+                    LIMIT ?
+                """
+                cursor = conn.execute(query, (cv_filename, limit))
+            else:
+                query = """
+                    SELECT id, title, company, location, is_remote, description, source, created_at
+                    FROM jobs
+                    WHERE ui_saved = 1
+                    ORDER BY id DESC
+                    LIMIT ?
+                """
+                cursor = conn.execute(query, (limit,))
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_evaluated_jobs_needing_docs(
+        self, min_score: int = 50, cv_filename: Optional[str] = None, limit: int = 50
+    ) -> List[Dict[str, Any]]:
+        """Recupera ofertas evaluadas con score >= min_score que aún no tienen documentos generados."""
+        with self._get_connection() as conn:
+            where = ["e.score >= ?", "d.id IS NULL", "j.ui_saved = 1"]
+            params: List[Any] = [min_score]
+            if cv_filename and cv_filename not in ("none", "Ninguno", ""):
+                where.append("j.cv_filename = ?")
+                params.append(cv_filename)
+
+            sql = f"""
+                SELECT
+                    j.id, j.title, j.company, j.location, j.is_remote, j.description, j.source,
+                    e.score, e.fit_level, e.should_apply, e.matched_skills, e.missing_skills,
+                    e.strengths, e.gaps, e.reasoning
+                FROM jobs j
+                JOIN evaluations e ON j.id = e.job_id
+                LEFT JOIN generated_documents d ON j.id = d.job_id
+                WHERE {' AND '.join(where)}
+                ORDER BY e.score DESC, j.id DESC
+                LIMIT ?
+            """
+            cursor = conn.execute(sql, params + [limit])
+            items = []
+            for row in cursor.fetchall():
+                items.append(_decode_row_json_fields(dict(row)))
+            return items
+
+    def reset_evaluating_jobs(self) -> int:
+        """Reinicia a 'discovered' cualquier vacante bloqueada en 'evaluating'."""
+        with self._get_connection() as conn:
+            cursor = conn.execute("UPDATE jobs SET status = 'discovered' WHERE status = 'evaluating'")
+            return cursor.rowcount
+
+    # =========================================================================
+    # EJECUCIONES DEL PIPELINE
+    # =========================================================================
     def start_pipeline_run(self, trigger_type: str) -> int:
-        """Registra el inicio de una ejecución en la tabla persistente pipeline_runs."""
-        if sqlite_utils:
+        """Registra el inicio de una ejecución en pipeline_runs."""
+        udb = self.get_utils_db()
+        if udb:
             try:
-                pk = self.get_utils_db()["pipeline_runs"].insert({"trigger_type": trigger_type, "status": "running"}).last_pk
+                pk = udb["pipeline_runs"].insert({"trigger_type": trigger_type, "status": "running"}).last_pk
                 return int(pk) if pk is not None else 0
             except Exception:
                 pass
+
         with self._get_connection() as conn:
             cursor = conn.execute(
                 "INSERT INTO pipeline_runs (trigger_type, status) VALUES (?, 'running')",
@@ -1077,16 +1243,18 @@ class Database:
             "relevant_jobs": relevant_jobs,
             "error_message": error_message,
         }
-        if sqlite_utils:
+        udb = self.get_utils_db()
+        if udb:
             try:
-                self.get_utils_db()["pipeline_runs"].update(run_id, data)
+                udb["pipeline_runs"].update(run_id, data)
                 return
             except Exception:
                 pass
+
         with self._get_connection() as conn:
             conn.execute(
                 """
-                UPDATE pipeline_runs SET 
+                UPDATE pipeline_runs SET
                     finished_at = datetime('now', 'localtime'),
                     status = ?,
                     total_found = ?,
@@ -1099,12 +1267,12 @@ class Database:
             )
 
     def has_run_today(self) -> bool:
-        """Comprueba si ya se completó con éxito una ejecución en el día natural actual."""
+        """Comprueba si ya se completó con éxito una ejecución en el día actual."""
         with self._get_connection() as conn:
             cursor = conn.execute(
                 """
-                SELECT 1 FROM pipeline_runs 
-                WHERE status = 'completed' 
+                SELECT 1 FROM pipeline_runs
+                WHERE status = 'completed'
                   AND date(started_at) = date('now', 'localtime')
                 LIMIT 1
                 """
@@ -1128,6 +1296,84 @@ class Database:
                 time.sleep(0.1 * (attempt + 1))
         return None
 
+    def get_recent_pipeline_runs(self, limit: int = 20) -> List[Dict[str, Any]]:
+        """Recupera el historial cronológico reciente de ejecuciones."""
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                "SELECT * FROM pipeline_runs ORDER BY id DESC LIMIT ?",
+                (limit,),
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def recover_interrupted_runs(self) -> int:
+        """Detecta ejecuciones en estado 'running' tras caídas y las marca como 'interrupted'."""
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE pipeline_runs
+                SET status = 'interrupted',
+                    finished_at = datetime('now', 'localtime'),
+                    error_message = 'Interrumpido por reinicio o detención del contenedor'
+                WHERE status = 'running'
+                """
+            )
+            count = cursor.rowcount
+            if count > 0:
+                logger.warning("Recuperadas %d ejecuciones interrumpidas en pipeline_runs.", count)
+            return count
+
+    def record_skipped_days(self) -> int:
+        """Registra como 'skipped' los días en los que el sistema estuvo apagado."""
+        last_run = self.get_last_completed_run()
+        if not last_run or not last_run.get("started_at"):
+            return 0
+
+        last_date_str = str(last_run["started_at"]).split()[0]
+        try:
+            last_date = datetime.strptime(last_date_str, "%Y-%m-%d").date()
+            today = datetime.now().date()
+            delta_days = (today - last_date).days
+        except Exception as e:
+            logger.debug("Error calculando días omitidos: %s", e)
+            return 0
+
+        if delta_days <= 1:
+            return 0
+
+        skipped_count = 0
+        with self._get_connection() as conn:
+            for d in range(1, delta_days):
+                skipped_date = last_date + timedelta(days=d)
+                date_str = skipped_date.strftime("%Y-%m-%d")
+
+                existing = conn.execute(
+                    "SELECT 1 FROM pipeline_runs WHERE date(started_at) = ? LIMIT 1",
+                    (date_str,),
+                ).fetchone()
+
+                if not existing:
+                    conn.execute(
+                        """
+                        INSERT INTO pipeline_runs (
+                            started_at, finished_at, trigger_type, status,
+                            total_found, new_jobs, relevant_jobs, error_message
+                        ) VALUES (?, ?, 'scheduled_skipped', 'skipped', 0, 0, 0, ?)
+                        """,
+                        (
+                            f"{date_str} 08:30:00",
+                            f"{date_str} 08:30:00",
+                            "Día omitido deliberadamente por apagado prolongado del equipo; se previene saturación en ráfaga.",
+                        ),
+                    )
+                    skipped_count += 1
+
+        if skipped_count > 0:
+            logger.info("Registrados formalmente %d días omitidos en pipeline_runs por apagado del equipo.", skipped_count)
+        return skipped_count
+
+    # =========================================================================
+    # ESTADÍSTICAS Y FACETAS DE FILTROS
+    # =========================================================================
     def get_statistics(self) -> Dict[str, Any]:
         """Recupera estadísticas globales para el diagnóstico por Telegram e interfaz."""
         default_stats = {
@@ -1166,14 +1412,10 @@ class Database:
                 time.sleep(0.1 * (attempt + 1))
         return default_stats
 
-    def reset_evaluating_jobs(self) -> int:
-        """Reinicia a 'discovered' cualquier vacante que hubiera quedado bloqueada en 'evaluating'."""
-        with self._get_connection() as conn:
-            cursor = conn.execute("UPDATE jobs SET status = 'discovered' WHERE status = 'evaluating'")
-            return cursor.rowcount
-
-    def get_top_recent_jobs(self, limit: int = 10, min_score: int = 65, cv_filename: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Devuelve las mejores ofertas recientes que superan el umbral, opcionalmente filtradas por CV activo."""
+    def get_top_recent_jobs(
+        self, limit: int = 10, min_score: int = 65, cv_filename: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """Devuelve las mejores ofertas recientes que superan el umbral."""
         with self._get_connection() as conn:
             if cv_filename and cv_filename not in ("none", "Ninguno", ""):
                 query = """
@@ -1213,96 +1455,166 @@ class Database:
                 results.append(item)
             return results
 
-    def get_unevaluated_jobs(self, limit: int = 500, cv_filename: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Recupera ofertas descubiertas pendientes de evaluación o sin registro de evaluación en orden cronológico (FIFO),
-        filtrando por cv_filename si se especifica."""
-        with self._get_connection() as conn:
-            if cv_filename and cv_filename not in ("none", "Ninguno", ""):
-                query = """
-                    SELECT j.* FROM jobs j
-                    LEFT JOIN evaluations e ON j.id = e.job_id
-                    WHERE e.id IS NULL 
-                      AND j.status NOT IN ('evaluated', 'discarded', 'rejected')
-                      AND (j.cv_filename = ? OR j.cv_filename IS NULL OR j.cv_filename = '')
-                    ORDER BY j.id ASC
-                    LIMIT ?
-                """
-                cursor = conn.execute(query, (cv_filename, limit))
+    def get_filter_facets(self, cv_filename: Optional[str] = None) -> Dict[str, Any]:
+        """Calcula los contadores dinámicos para los filtros laterales en base al CV activo."""
+        target_cv = cv_filename
+        if target_cv is None:
+            from .storage import read_active_cv_pointer
+            pointer = read_active_cv_pointer()
+            if isinstance(pointer, dict):
+                target_cv = pointer.get("selected_filename", "")
             else:
-                query = """
-                    SELECT j.* FROM jobs j
-                    LEFT JOIN evaluations e ON j.id = e.job_id
-                    WHERE e.id IS NULL AND j.status NOT IN ('evaluated', 'discarded', 'rejected')
-                    ORDER BY j.id ASC
-                    LIMIT ?
-                """
-                cursor = conn.execute(query, (limit,))
-            return [dict(row) for row in cursor.fetchall()]
+                target_cv = str(pointer or "")
 
-    def get_all_jobs_for_scoring(self, limit: int = 200, cv_filename: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Recupera todas las ofertas activas registradas para contrastar afinidad con el CV activo."""
         with self._get_connection() as conn:
-            if cv_filename and cv_filename not in ("none", "Ninguno", ""):
-                query = """
-                    SELECT id, title, company, location, is_remote, description, source, created_at
-                    FROM jobs
-                    WHERE ui_saved = 1 AND cv_filename = ?
-                    ORDER BY id DESC
-                    LIMIT ?
-                """
-                cursor = conn.execute(query, (cv_filename, limit))
+            base_from = "jobs j LEFT JOIN evaluations e ON j.id = e.job_id"
+            base_where = "j.ui_saved = 1"
+
+            clean_target_cv = str(target_cv or "").strip()
+            if clean_target_cv and clean_target_cv.lower() not in ("none", "ninguno", "all", "todas", "*", ""):
+                safe_cv = clean_target_cv.replace("'", "''")
+                base_where += f" AND j.cv_filename = '{safe_cv}'"
             else:
-                query = """
-                    SELECT id, title, company, location, is_remote, description, source, created_at
-                    FROM jobs
-                    WHERE ui_saved = 1
-                    ORDER BY id DESC
-                    LIMIT ?
+                base_where += " AND 1=0"
+
+            # 1. Portales de origen
+            source_rows = conn.execute(
+                f"SELECT j.source, COUNT(*) as c FROM {base_from} WHERE {base_where} GROUP BY j.source ORDER BY c DESC"
+            ).fetchall()
+            sources = [{"id": r["source"], "label": r["source"].capitalize(), "count": r["c"]} for r in source_rows]
+
+            # 2. Modalidades de trabajo
+            modalities = []
+            remote_count = conn.execute(
+                f"SELECT COUNT(*) FROM {base_from} WHERE {base_where} AND ((j.is_remote = 1 OR LOWER(j.location) LIKE '%remot%' OR LOWER(j.location) LIKE '%teletrabaj%' OR LOWER(j.title) LIKE '%remot%' OR LOWER(j.title) LIKE '%teletrabaj%') AND LOWER(j.location) NOT LIKE '%hibrid%' AND LOWER(j.location) NOT LIKE '%hybrid%' AND LOWER(j.title) NOT LIKE '%hibrid%' AND LOWER(j.title) NOT LIKE '%hybrid%')"
+            ).fetchone()[0]
+            if remote_count > 0:
+                modalities.append({"id": "remoto", "label": "Remoto", "count": remote_count})
+
+            hybrid_count = conn.execute(
+                f"SELECT COUNT(*) FROM {base_from} WHERE {base_where} AND (LOWER(j.location) LIKE '%hibrid%' OR LOWER(j.location) LIKE '%hybrid%' OR LOWER(j.location) LIKE '%híbrid%' OR LOWER(j.title) LIKE '%hibrid%' OR LOWER(j.title) LIKE '%hybrid%' OR LOWER(j.title) LIKE '%híbrid%' OR LOWER(j.description) LIKE '%hibrid%' OR LOWER(j.description) LIKE '%hybrid%' OR LOWER(j.description) LIKE '%híbrid%')"
+            ).fetchone()[0]
+            if hybrid_count > 0:
+                modalities.append({"id": "hibrido", "label": "Híbrido", "count": hybrid_count})
+
+            onsite_count = conn.execute(
+                f"SELECT COUNT(*) FROM {base_from} WHERE {base_where} AND (j.is_remote = 0 AND LOWER(j.location) NOT LIKE '%remot%' AND LOWER(j.location) NOT LIKE '%teletrabaj%' AND LOWER(j.title) NOT LIKE '%remot%' AND LOWER(j.title) NOT LIKE '%teletrabaj%' AND LOWER(j.location) NOT LIKE '%hibrid%' AND LOWER(j.location) NOT LIKE '%hybrid%' AND LOWER(j.location) NOT LIKE '%híbrid%' AND LOWER(j.title) NOT LIKE '%hibrid%' AND LOWER(j.title) NOT LIKE '%hybrid%' AND LOWER(j.title) NOT LIKE '%híbrid%' AND LOWER(j.description) NOT LIKE '%hibrid%' AND LOWER(j.description) NOT LIKE '%hybrid%')"
+            ).fetchone()[0]
+            if onsite_count > 0:
+                modalities.append({"id": "presencial", "label": "Presencial", "count": onsite_count})
+
+            # 3. Niveles de ajuste IA
+            fit_rows = conn.execute(
+                f"SELECT e.fit_level, COUNT(*) as c FROM {base_from} WHERE {base_where} AND e.fit_level IS NOT NULL GROUP BY e.fit_level ORDER BY c DESC"
+            ).fetchall()
+            fit_levels = [{"id": r["fit_level"], "label": r["fit_level"].capitalize(), "count": r["c"]} for r in fit_rows]
+
+            # 4. Habilidades y categorías agregadas
+            skill_counter: collections.Counter = collections.Counter()
+            missing_counter: collections.Counter = collections.Counter()
+            strength_counter: collections.Counter = collections.Counter()
+            gap_counter: collections.Counter = collections.Counter()
+
+            eval_rows = conn.execute(
+                f"SELECT e.matched_skills, e.missing_skills, e.strengths, e.gaps FROM {base_from} WHERE {base_where} AND (e.matched_skills IS NOT NULL OR e.strengths IS NOT NULL)"
+            ).fetchall()
+            for er in eval_rows:
+                for field_key, counter in [
+                    ("matched_skills", skill_counter),
+                    ("missing_skills", missing_counter),
+                    ("strengths", strength_counter),
+                    ("gaps", gap_counter),
+                ]:
+                    raw = er[field_key]
+                    if raw:
+                        try:
+                            parsed = json.loads(raw) if isinstance(raw, str) else raw
+                            if isinstance(parsed, list):
+                                for item in parsed:
+                                    c_item = str(item).strip()
+                                    if c_item:
+                                        counter[c_item] += 1
+                        except Exception:
+                            pass
+
+            categories = [
+                {"id": name, "label": name, "count": count}
+                for name, count in skill_counter.most_common(12)
+            ]
+
+            # 5. Formación mínima
+            raw_edu_rows = conn.execute(
+                f"SELECT j.education_level, COUNT(*) as c FROM {base_from} WHERE {base_where} AND j.education_level IS NOT NULL AND TRIM(j.education_level) != '' GROUP BY j.education_level ORDER BY c DESC"
+            ).fetchall()
+            educations = [{"id": r["education_level"], "label": r["education_level"], "count": r["c"]} for r in raw_edu_rows]
+
+            # 6. Jornada laboral
+            sched_rows = conn.execute(
+                f"SELECT j.schedule, COUNT(*) as c FROM {base_from} WHERE {base_where} AND j.schedule IS NOT NULL AND TRIM(j.schedule) != '' GROUP BY j.schedule ORDER BY c DESC"
+            ).fetchall()
+            schedules = [{"id": r["schedule"], "label": r["schedule"], "count": r["c"]} for r in sched_rows]
+
+            # 7. Tipo de contrato
+            contract_rows = conn.execute(
+                f"SELECT j.contract_type, COUNT(*) as c FROM {base_from} WHERE {base_where} AND j.contract_type IS NOT NULL AND TRIM(j.contract_type) != '' GROUP BY j.contract_type ORDER BY c DESC"
+            ).fetchall()
+            contract_types = [{"id": r["contract_type"], "label": r["contract_type"], "count": r["c"]} for r in contract_rows]
+
+            # 8. Rangos salariales
+            salary_row = conn.execute(
+                f"""
+                SELECT
+                    MIN(CASE WHEN j.salary_min <= 100 THEN j.salary_min * 1800 WHEN j.salary_min < 6000 THEN j.salary_min * 12 ELSE j.salary_min END) as min_val,
+                    MAX(CASE WHEN j.salary_max <= 100 THEN j.salary_max * 1800 WHEN j.salary_max < 6000 THEN j.salary_max * 12 ELSE j.salary_max END) as max_val
+                FROM {base_from}
+                WHERE {base_where} AND (j.salary_min > 0 OR j.salary_max > 0)
                 """
-                cursor = conn.execute(query, (limit,))
-            return [dict(row) for row in cursor.fetchall()]
+            ).fetchone()
+            salary_min = float(salary_row["min_val"] or 15000.0)
+            salary_max = float(salary_row["max_val"] or 100000.0)
 
-    def get_evaluated_jobs_needing_docs(
-        self, min_score: int = 50, cv_filename: Optional[str] = None, limit: int = 50
-    ) -> List[Dict[str, Any]]:
-        """Recupera ofertas evaluadas con score >= min_score que aún no tienen documentos generados,
-        ordenadas estrictamente por puntuación descendente para priorizar siempre las de mayor nota."""
-        with self._get_connection() as conn:
-            where = ["e.score >= ?", "d.id IS NULL", "j.ui_saved = 1"]
-            params: List[Any] = [min_score]
-            if cv_filename and cv_filename not in ("none", "Ninguno", ""):
-                where.append("j.cv_filename = ?")
-                params.append(cv_filename)
+            # 9. Puntuaciones mínimas y máximas
+            score_row = conn.execute(
+                f"SELECT MIN(e.score) as min_score, MAX(e.score) as max_score FROM {base_from} WHERE {base_where} AND e.score IS NOT NULL"
+            ).fetchone()
+            min_score = int(score_row["min_score"] or 0)
+            max_score = int(score_row["max_score"] or 100)
 
-            sql = f"""
-                SELECT 
-                    j.id, j.title, j.company, j.location, j.is_remote, j.description, j.source,
-                    e.score, e.fit_level, e.should_apply, e.matched_skills, e.missing_skills,
-                    e.strengths, e.gaps, e.reasoning
-                FROM jobs j
-                JOIN evaluations e ON j.id = e.job_id
-                LEFT JOIN generated_documents d ON j.id = d.job_id
-                WHERE {' AND '.join(where)}
-                ORDER BY e.score DESC, j.id DESC
-                LIMIT ?
-            """
-            cursor = conn.execute(sql, params + [limit])
-            items = []
-            for row in cursor.fetchall():
-                items.append(_decode_row_json_fields(dict(row)))
-            return items
+            total_jobs = conn.execute(f"SELECT COUNT(*) FROM {base_from} WHERE {base_where}").fetchone()[0]
 
+            return {
+                "total_jobs": total_jobs,
+                "sources": sources,
+                "modalities": modalities,
+                "fit_levels": fit_levels,
+                "categories": categories,
+                "educations": educations,
+                "schedules": schedules,
+                "contract_types": contract_types,
+                "salary_range": {"min": salary_min, "max": salary_max},
+                "score_range": {"min": min_score, "max": max_score},
+                "skills": [{"id": name, "label": name, "count": count} for name, count in skill_counter.most_common(20)],
+                "missing_skills": [{"id": name, "label": name, "count": count} for name, count in missing_counter.most_common(20)],
+                "strengths": [{"id": name, "label": name, "count": count} for name, count in strength_counter.most_common(20)],
+                "gaps": [{"id": name, "label": name, "count": count} for name, count in gap_counter.most_common(20)],
+            }
+
+    # =========================================================================
+    # LOGS DEL SISTEMA Y AUDITORÍA
+    # =========================================================================
     def log_event(self, level: str, source: str, message: str, details: Optional[str] = None) -> None:
         """Registra un evento o error del sistema de forma persistente."""
         try:
-            if sqlite_utils:
-                self.get_utils_db()["system_logs"].insert({
+            udb = self.get_utils_db()
+            if udb:
+                udb["system_logs"].insert({
                     "level": level.upper(),
                     "source": source,
                     "message": message,
                     "details": details or "",
                 })
                 return
+
             with self._get_connection() as conn:
                 conn.execute(
                     "INSERT INTO system_logs (level, source, message, details) VALUES (?, ?, ?, ?)",
@@ -1311,414 +1623,54 @@ class Database:
         except Exception as e:
             logger.error("Fallo al escribir en system_logs: %s", e)
 
-    def get_jobs_paginated(
-        self,
-        search: Optional[str] = None,
-        exclude: Optional[str] = None,
-        location: Optional[str] = None,
-        source: Optional[str] = None,
-        status: Optional[str] = None,
-        min_score: Optional[int] = None,
-        is_remote: Optional[bool] = None,
-        modality: Optional[str] = None,
-        modalities: Optional[List[str]] = None,
-        categories: Optional[List[str]] = None,
-        educations: Optional[List[str]] = None,
-        min_experience_years: Optional[int] = None,
-        min_salary: Optional[float] = None,
-        schedules: Optional[List[str]] = None,
-        contract_types: Optional[List[str]] = None,
-        geo_lat: Optional[float] = None,
-        geo_lon: Optional[float] = None,
-        geo_radius_km: Optional[float] = None,
-        only_ui_saved: bool = True,
-        cv_filename: Optional[str] = None,
-        time_range: Optional[str] = "all",
-        page: int = 1,
-        page_size: int = 20,
-        sort_by: str = "created_at",
-        sort_order: str = "desc",
-    ) -> Dict[str, Any]:
-        """
-        Recupera ofertas paginadas con soporte de filtros multicriterio,
-        ordenación segura y datos consolidados de evaluación y documentos.
-        Por defecto, oculta visualmente ofertas descartadas o que no coinciden con el CV.
-        """
-        page = max(1, page)
-        page_size = min(max(5, page_size), 500)
-        offset = (page - 1) * page_size
-
-        allowed_sort_fields = {
-            "created_at": "j.created_at",
-            "score": "e.score",
-            "company": "j.company",
-            "title": "j.title",
-            "date_posted": "j.date_posted",
-        }
-        sort_col = allowed_sort_fields.get(sort_by, "j.created_at")
-        sort_dir = "ASC" if str(sort_order).lower() == "asc" else "DESC"
-
-        where_clauses = ["1=1"]
-        params: List[Any] = []
-
-        from .storage import read_active_cv_pointer
-        target_cv = cv_filename
-        if target_cv is None:
-            pointer = read_active_cv_pointer()
-            if isinstance(pointer, dict):
-                target_cv = pointer.get("selected_filename", "")
-            else:
-                target_cv = str(pointer or "")
-
-        clean_target_cv = str(target_cv or "").strip()
-        if clean_target_cv and clean_target_cv.lower() not in ("none", "ninguno", "all", "todas", "*", ""):
-            where_clauses.append("j.cv_filename = ?")
-            params.append(clean_target_cv)
-        else:
-            # Si no hay CV activo, no mostrar ninguna oferta (estado limpio)
-            where_clauses.append("1=0")
-
-        if only_ui_saved:
-            where_clauses.append("j.ui_saved = 1")
-
-        if search:
-            search_param = f"%{search.strip().lower()}%"
-            where_clauses.append("(LOWER(j.title) LIKE ? OR LOWER(j.company) LIKE ? OR LOWER(j.location) LIKE ?)")
-            params.extend([search_param, search_param, search_param])
-
-        if exclude:
-            exclude_terms = [t.strip().lower() for t in exclude.split(",") if t.strip()]
-            for term in exclude_terms:
-                where_clauses.append("(LOWER(j.title) NOT LIKE ? AND LOWER(j.description) NOT LIKE ?)")
-                params.extend([f"%{term}%", f"%{term}%"])
-
-        if source:
-            src = str(source).strip().lower()
-            if src in ("tecnoempleo", "tecnoempleo_rss"):
-                where_clauses.append("j.source IN ('tecnoempleo', 'tecnoempleo_rss')")
-            elif src in ("infojobs", "infojobs_api"):
-                where_clauses.append("j.source IN ('infojobs', 'infojobs_api')")
-            elif src == "jobspy":
-                where_clauses.append("j.source IN ('indeed', 'linkedin', 'glassdoor', 'google', 'jobspy')")
-            else:
-                where_clauses.append("LOWER(j.source) = ?")
-                params.append(src)
-
-        if status:
-            where_clauses.append("j.status = ?")
-            params.append(status)
-
-        if min_score is not None:
-            where_clauses.append("e.score >= ?")
-            params.append(min_score)
-
-        # 1. Filtro de modalidades múltiples (Checkboxes)
-        active_modalities = [m.lower().strip() for m in (modalities or []) if m and m.lower().strip() not in ("sin_especificar", "todas")]
-        if not active_modalities and modality and modality.lower().strip() not in ("sin_especificar", "todas", ""):
-            active_modalities = [modality.lower().strip()]
-
-        if active_modalities:
-            mod_subclauses = []
-            for m in active_modalities:
-                if m in ("remoto", "teletrabajo"):
-                    mod_subclauses.append("((j.is_remote = 1 OR LOWER(j.location) LIKE '%remot%' OR LOWER(j.location) LIKE '%teletrabaj%' OR LOWER(j.title) LIKE '%remot%' OR LOWER(j.title) LIKE '%teletrabaj%') AND LOWER(j.location) NOT LIKE '%hibrid%' AND LOWER(j.location) NOT LIKE '%hybrid%' AND LOWER(j.title) NOT LIKE '%hibrid%' AND LOWER(j.title) NOT LIKE '%hybrid%')")
-                elif m == "hibrido":
-                    mod_subclauses.append("(LOWER(j.location) LIKE '%hibrid%' OR LOWER(j.location) LIKE '%hybrid%' OR LOWER(j.location) LIKE '%híbrid%' OR LOWER(j.title) LIKE '%hibrid%' OR LOWER(j.title) LIKE '%hybrid%' OR LOWER(j.title) LIKE '%híbrid%' OR LOWER(j.description) LIKE '%hibrid%' OR LOWER(j.description) LIKE '%hybrid%' OR LOWER(j.description) LIKE '%híbrid%')")
-                elif m == "presencial":
-                    mod_subclauses.append("(j.is_remote = 0 AND LOWER(j.location) NOT LIKE '%remot%' AND LOWER(j.location) NOT LIKE '%teletrabaj%' AND LOWER(j.title) NOT LIKE '%remot%' AND LOWER(j.title) NOT LIKE '%teletrabaj%' AND LOWER(j.location) NOT LIKE '%hibrid%' AND LOWER(j.location) NOT LIKE '%hybrid%' AND LOWER(j.location) NOT LIKE '%híbrid%' AND LOWER(j.title) NOT LIKE '%hibrid%' AND LOWER(j.title) NOT LIKE '%hybrid%' AND LOWER(j.title) NOT LIKE '%híbrid%' AND LOWER(j.description) NOT LIKE '%hibrid%' AND LOWER(j.description) NOT LIKE '%hybrid%')")
-            if mod_subclauses:
-                where_clauses.append(f"({' OR '.join(mod_subclauses)})")
-        elif is_remote is not None:
-            where_clauses.append("j.is_remote = ?")
-            params.append(1 if is_remote else 0)
-
-        # 2. Filtro de Categoría / Competencias profesionales (Checkboxes) - Extraídas dinámicamente de ofertas
-        active_cats = [c.lower().strip() for c in (categories or []) if c and c.lower().strip() not in ("sin_especificar", "todas")]
-        if active_cats:
-            cat_clauses = []
-            for cat in active_cats:
-                cat_clauses.append("(LOWER(j.title) LIKE ? OR LOWER(j.description) LIKE ? OR (e.matched_skills IS NOT NULL AND LOWER(e.matched_skills) LIKE ?))")
-                params.extend([f"%{cat}%", f"%{cat}%", f"%{cat}%"])
-            where_clauses.append(f"({' OR '.join(cat_clauses)})")
-
-        # 3. Filtro de Formación mínima (Checkboxes) - Columna real y descripción
-        active_edus = [e.lower().strip() for e in (educations or []) if e and e.lower().strip() not in ("sin_especificar", "todas")]
-        if active_edus:
-            edu_clauses = []
-            for edu in active_edus:
-                edu_clauses.append("(LOWER(j.education_level) LIKE ? OR LOWER(j.description) LIKE ?)")
-                params.extend([f"%{edu}%", f"%{edu}%"])
-            where_clauses.append(f"({' OR '.join(edu_clauses)})")
-
-        # 4. Filtro de Experiencia (Deslizante / Slider)
-        # 0=Sin especificar, 1=Junior/Sin experiencia, 2=1+ año, 3=2+ años, 4=3+ años, 5=5+ años
-        if min_experience_years and min_experience_years > 0:
-            if min_experience_years == 1:
-                where_clauses.append("(LOWER(j.title) LIKE '%junior%' OR LOWER(j.title) LIKE '%jr%' OR LOWER(j.title) LIKE '%prácticas%' OR LOWER(j.title) LIKE '%beca%' OR LOWER(j.description) LIKE '%sin experiencia%' OR LOWER(j.description) LIKE '%recién titulado%' OR LOWER(j.description) LIKE '%reciente titulado%' OR LOWER(j.description) LIKE '%0-1 año%' OR LOWER(j.description) LIKE '%sin experiencia requerida%')")
-            elif min_experience_years == 2:
-                where_clauses.append("(LOWER(j.description) LIKE '%1 año%' OR LOWER(j.description) LIKE '%1+ año%' OR LOWER(j.description) LIKE '%al menos 1 año%' OR LOWER(j.description) LIKE '%mínimo 1 año%')")
-            elif min_experience_years == 3:
-                where_clauses.append("(LOWER(j.description) LIKE '%2 año%' OR LOWER(j.description) LIKE '%2+ año%' OR LOWER(j.description) LIKE '%al menos 2 año%' OR LOWER(j.description) LIKE '%mínimo 2 año%')")
-            elif min_experience_years == 4:
-                where_clauses.append("(LOWER(j.description) LIKE '%3 año%' OR LOWER(j.description) LIKE '%3+ año%' OR LOWER(j.description) LIKE '%al menos 3 año%' OR LOWER(j.description) LIKE '%mínimo 3 año%')")
-            elif min_experience_years >= 5:
-                where_clauses.append("(LOWER(j.description) LIKE '%5 año%' OR LOWER(j.description) LIKE '%5+ año%' OR LOWER(j.description) LIKE '%al menos 5 año%' OR LOWER(j.title) LIKE '%senior%' OR LOWER(j.title) LIKE '%lead%')")
-
-        # 5. Filtro de Salario mínimo (Deslizante / Slider) con normalización anualizada homogénea
-        if min_salary and min_salary > 0:
-            where_clauses.append(
-                "((CASE WHEN j.salary_max <= 100 THEN j.salary_max * 1800 WHEN j.salary_max < 6000 THEN j.salary_max * 12 ELSE j.salary_max END) >= ? "
-                "OR (CASE WHEN j.salary_min <= 100 THEN j.salary_min * 1800 WHEN j.salary_min < 6000 THEN j.salary_min * 12 ELSE j.salary_min END) >= ?)"
-            )
-            params.extend([min_salary, min_salary])
-
-        # 6. Filtro de Jornada laboral (Checkboxes) - Columna real y descripción
-        active_scheds = [s.lower().strip() for s in (schedules or []) if s and s.lower().strip() not in ("sin_especificar", "todas")]
-        if active_scheds:
-            sched_clauses = []
-            for sc in active_scheds:
-                sched_clauses.append("(LOWER(j.schedule) LIKE ? OR LOWER(j.description) LIKE ?)")
-                params.extend([f"%{sc}%", f"%{sc}%"])
-            where_clauses.append(f"({' OR '.join(sched_clauses)})")
-
-        # 7. Filtro de Tipo de contrato (Checkboxes) - Columna real y descripción
-        active_contracts = [c.lower().strip() for c in (contract_types or []) if c and c.lower().strip() not in ("sin_especificar", "todas")]
-        if active_contracts:
-            contract_clauses = []
-            for ct in active_contracts:
-                contract_clauses.append("(LOWER(j.contract_type) LIKE ? OR LOWER(j.description) LIKE ?)")
-                params.extend([f"%{ct}%", f"%{ct}%"])
-            where_clauses.append(f"({' OR '.join(contract_clauses)})")
-
-        # 8. Filtro Geográfico y de Área recibido desde el mapa del Frontend
-        if location and location.strip() and not any(k in location.lower() for k in ("todos", "all", "cualquiera")):
-            loc_val = location.strip()
-            where_clauses.append("(LOWER(j.location) LIKE ? OR j.is_remote = 1 OR LOWER(j.location) LIKE '%remot%' OR LOWER(j.location) LIKE '%teletrabaj%')")
-            params.append(f"%{loc_val.lower()}%")
-
-        # 9. Filtro de Antigüedad / Fecha de publicación (all, 24h, 7d, 30d)
-        if time_range and str(time_range).strip().lower() not in ("all", "todas", "todos", "cualquiera", ""):
-            tr = str(time_range).strip().lower()
-            if tr in ("24h", "1d", "hoy", "today"):
-                where_clauses.append("(j.created_at >= datetime('now', '-1 day', 'localtime') OR j.date_posted >= date('now', '-1 day', 'localtime'))")
-            elif tr in ("7d", "week", "semana", "7_dias"):
-                where_clauses.append("(j.created_at >= datetime('now', '-7 days', 'localtime') OR j.date_posted >= date('now', '-7 days', 'localtime'))")
-            elif tr in ("30d", "month", "mes", "30_dias"):
-                where_clauses.append("(j.created_at >= datetime('now', '-30 days', 'localtime') OR j.date_posted >= date('now', '-30 days', 'localtime'))")
-
-        where_str = " AND ".join(where_clauses)
-
-        with self._get_connection() as conn:
-            # Conteo total para paginación
-            count_sql = f"""
-                SELECT COUNT(*) FROM jobs j
-                LEFT JOIN evaluations e ON j.id = e.job_id
-                WHERE {where_str}
-            """
-            total_items = conn.execute(count_sql, params).fetchone()[0]
-
-            # Consulta paginada
-            query_sql = f"""
-                SELECT 
-                    j.id, j.title, j.company, j.location, j.is_remote, j.source,
-                    j.canonical_url, j.salary_min, j.salary_max, j.salary_currency,
-                    j.date_posted, j.created_at, j.updated_at, j.status,
-                    j.duplicate_of_id, j.similarity_score, j.alternate_sources,
-                    j.telegram_notified, j.ui_saved,
-                    j.description, j.contract_type, j.schedule, j.education_level,
-                    e.score, e.fit_level, e.should_apply, e.matched_skills,
-                    d.cv_pdf_path, d.cv_md_path, d.letter_pdf_path, d.letter_md_path
-                FROM jobs j
-                LEFT JOIN evaluations e ON j.id = e.job_id
-                LEFT JOIN generated_documents d ON j.id = d.job_id
-                WHERE {where_str}
-                ORDER BY {sort_col} {sort_dir}
-                LIMIT ? OFFSET ?
-            """
-            cursor = conn.execute(query_sql, params + [page_size, offset])
-            items = []
-            for row in cursor.fetchall():
-                row_dict = _decode_row_json_fields(dict(row))
-                row_dict["has_cv"] = bool(row_dict.get("cv_pdf_path") or row_dict.get("cv_md_path"))
-                row_dict["has_letter"] = bool(row_dict.get("letter_pdf_path") or row_dict.get("letter_md_path"))
-                items.append(row_dict)
-
-            total_pages = (total_items + page_size - 1) // page_size if total_items > 0 else 1
-
-            return {
-                "items": items,
-                "total": total_items,
-                "page": page,
-                "page_size": page_size,
-                "total_pages": total_pages,
-            }
-
-    def get_job_detail(self, job_id: int) -> Optional[Dict[str, Any]]:
-        """Recupera la ficha integral de una vacante, incluyendo análisis de IA y auditoría de documentos."""
-        with self._get_connection() as conn:
-            query = """
-                SELECT 
-                    j.*,
-                    e.score, e.fit_level, e.matched_skills, e.missing_skills,
-                    e.strengths, e.gaps, e.reasoning, e.should_apply,
-                    e.created_at AS evaluated_at,
-                    d.cv_pdf_path, d.cv_md_path, d.letter_pdf_path, d.letter_md_path,
-                    d.diff_summary, d.created_at AS documents_generated_at
-                FROM jobs j
-                LEFT JOIN evaluations e ON j.id = e.job_id
-                LEFT JOIN generated_documents d ON j.id = d.job_id
-                WHERE j.id = ?
-            """
-            cursor = conn.execute(query, (job_id,))
-            row = cursor.fetchone()
-            if not row:
-                return None
-
-            data = _decode_row_json_fields(dict(row))
-            for list_field in ("matched_skills", "missing_skills", "strengths", "gaps", "alternate_sources"):
-                if not data.get(list_field):
-                    data[list_field] = []
-
-            data["has_cv"] = bool(data.get("cv_pdf_path") or data.get("cv_md_path"))
-            data["has_letter"] = bool(data.get("letter_pdf_path") or data.get("letter_md_path"))
-            return data
-
-    def update_job_channel_status(
-        self,
-        job_id: int,
-        telegram_notified: Optional[int] = None,
-        ui_saved: Optional[int] = None,
-    ) -> None:
-        """Actualiza independientemente los estados de canal de una oferta."""
-        updates: Dict[str, Any] = {}
-        if telegram_notified is not None:
-            updates["telegram_notified"] = telegram_notified
-        if ui_saved is not None:
-            updates["ui_saved"] = ui_saved
-
-        if updates:
-            updates["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            if sqlite_utils:
-                try:
-                    self.get_utils_db()["jobs"].update(job_id, updates)
-                    return
-                except Exception:
-                    pass
-            sql_parts = [f"{k} = ?" for k in updates.keys()]
-            params = list(updates.values()) + [job_id]
-            with self._get_connection() as conn:
-                conn.execute(f"UPDATE jobs SET {', '.join(sql_parts)} WHERE id = ?", params)
-
-    def prune_old_system_logs(self, max_entries: int = 150, retention_hours: int = 24, force: bool = False) -> int:
-        """
-        Elimina los logs antiguos conservando únicamente los registros recientes (últimas 24h).
-        Garantiza que la consola web y los registros solo muestren eventos nuevos.
-        Está limitado en frecuencia a como máximo una vez cada 30 minutos para evitar bloqueo de disco.
-        """
-        now = time.time()
-        if not force and (now - self._last_prune_time < 1800.0):
-            return 0
-
-        self._last_prune_time = now
-        try:
-            with self._get_connection() as conn:
-                # 1. Eliminar logs con más de retention_hours de antigüedad
-                cursor1 = conn.execute(
-                    "DELETE FROM system_logs WHERE timestamp < datetime('now', '-' || ? || ' hours', 'localtime')",
-                    (retention_hours,),
-                )
-                deleted_by_time = cursor1.rowcount
-
-                # 2. Asegurar que nunca exceda max_entries manteniendo los IDs más recientes
-                cursor2 = conn.execute(
-                    """
-                    DELETE FROM system_logs 
-                    WHERE id NOT IN (
-                        SELECT id FROM system_logs ORDER BY id DESC LIMIT ?
-                    )
-                    """,
-                    (max_entries,),
-                )
-                deleted_by_limit = cursor2.rowcount
-                return deleted_by_time + deleted_by_limit
-        except Exception as e:
-            logger.error("Error purgando logs antiguos: %s", e)
-            return 0
-
-    def clear_system_logs(self) -> int:
-        """Elimina todos los logs del sistema para reiniciar la consola con registros limpios."""
-        try:
-            with self._get_connection() as conn:
-                cursor = conn.execute("DELETE FROM system_logs")
-                return int(cursor.rowcount)
-        except Exception as e:
-            logger.error("Error vaciando system_logs: %s", e)
-            return 0
-
     def get_system_logs(
         self,
-        limit: int = 150,
+        limit: int = 100,
         level: Optional[str] = None,
         source: Optional[str] = None,
-        since_id: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
-        """Recupera los logs del sistema estructurados para la consola web de administración.
-        
-        Soporta since_id para streaming en tiempo real ultra eficiente vía SSE sin sobrecarga de disco.
-        """
-        # Mantenimiento automático diferido (máximo 1 vez cada 30 minutos)
-        if (time.time() - self._last_prune_time) > 1800.0:
-            self.prune_old_system_logs(max_entries=2000, retention_hours=48)
-
+        """Recupera los logs más recientes con filtros opcionales."""
         where = ["1=1"]
         params: List[Any] = []
-        if since_id is not None:
-            where.append("id > ?")
-            params.append(since_id)
         if level:
             where.append("level = ?")
             params.append(level.upper())
         if source:
-            s_clean = source.strip().lower()
-            if s_clean == "pipeline":
-                where.append("source IN ('pipeline', 'evaluator', 'scoring', 'scheduler', 'connectors')")
-            elif s_clean in ("app", "backend"):
-                where.append("source IN ('system', 'jobs', 'cv', 'search_api', 'maintenance', 'settings', 'docker')")
-            else:
-                where.append("source = ?")
-                params.append(s_clean)
+            where.append("source = ?")
+            params.append(source)
 
-        order_dir = "ASC" if since_id is not None else "DESC"
-        sql = f"""
-            SELECT id, timestamp, level, source, message, details
-            FROM system_logs
+        query = f"""
+            SELECT * FROM system_logs
             WHERE {' AND '.join(where)}
-            ORDER BY id {order_dir}
+            ORDER BY id DESC
             LIMIT ?
         """
-        with self._get_connection() as conn:
-            cursor = conn.execute(sql, params + [limit])
-            return [dict(r) for r in cursor.fetchall()]
+        params.append(limit)
 
-    def get_recent_pipeline_runs(self, limit: int = 10) -> List[Dict[str, Any]]:
-        """Recupera el historial de ejecuciones del pipeline."""
-        if sqlite_utils:
-            try:
-                return list(self.get_utils_db()["pipeline_runs"].rows_where(order_by="id desc", limit=limit))
-            except Exception:
-                pass
+        with self._get_connection() as conn:
+            cursor = conn.execute(query, params)
+            return [dict(row) for row in cursor.fetchall()]
+
+    def prune_old_system_logs(self, days_to_keep: int = 30) -> int:
+        """Elimina logs con una antigüedad superior a days_to_keep días."""
         with self._get_connection() as conn:
             cursor = conn.execute(
-                "SELECT * FROM pipeline_runs ORDER BY id DESC LIMIT ?",
-                (limit,),
+                "DELETE FROM system_logs WHERE timestamp < datetime('now', ? || ' days', 'localtime')",
+                (f"-{days_to_keep}",),
             )
-            return [dict(r) for r in cursor.fetchall()]
+            return cursor.rowcount
 
+    def clear_system_logs(self) -> int:
+        """Vacía completamente el registro de eventos del sistema."""
+        with self._get_connection() as conn:
+            cursor = conn.execute("DELETE FROM system_logs")
+            return cursor.rowcount
+
+    # =========================================================================
+    # MANTENIMIENTO, DOCUMENTOS Y PURGAS
+    # =========================================================================
     def delete_selected_documents(self, job_ids: List[int]) -> int:
-        """
-        Elimina de disco y de base de datos los archivos PDF/MD generados para las ofertas indicadas.
-        No elimina la oferta ni la evaluación de la base de datos.
-        """
+        """Elimina de disco y de base de datos los archivos de las ofertas indicadas."""
         if not job_ids:
             return 0
 
@@ -1748,20 +1700,17 @@ class Database:
         return deleted_count
 
     def clear_applications_history(self) -> Dict[str, int]:
-        """
-        Elimina el historial completo de ofertas, evaluaciones y documentos generados.
-        Conserva la estructura de tablas y los registros de system_logs para auditoría.
-        """
-        if sqlite_utils:
+        """Elimina el historial completo de ofertas, evaluaciones y documentos generados."""
+        udb = self.get_utils_db()
+        if udb:
             try:
-                db = self.get_utils_db()
-                jobs_count = db["jobs"].count
-                evals_count = db["evaluations"].count
-                docs_count = db["generated_documents"].count
-                db["generated_documents"].delete_where()
-                db["evaluations"].delete_where()
-                db["jobs"].delete_where()
-                db["pipeline_runs"].delete_where()
+                jobs_count = udb["jobs"].count
+                evals_count = udb["evaluations"].count
+                docs_count = udb["generated_documents"].count
+                udb["generated_documents"].delete_where()
+                udb["evaluations"].delete_where()
+                udb["jobs"].delete_where()
+                udb["pipeline_runs"].delete_where()
                 return {
                     "jobs_deleted": jobs_count,
                     "evaluations_deleted": evals_count,
@@ -1797,204 +1746,3 @@ class Database:
             conn.commit()
             logger.info("Eliminadas %d ofertas asociadas al CV '%s'", deleted, cv_filename)
             return deleted
-
-    def get_filter_facets(self, cv_filename: Optional[str] = None) -> Dict[str, Any]:
-        """
-        Escanea las ofertas reales registradas en SQLite procedentes de los portales
-        y extrae dinámicamente las facetas y opciones de filtro disponibles con sus conteos reales.
-        Se adapta a las ofertas visibles vinculadas al CV activo (no descartadas).
-        """
-        from .storage import read_active_cv_pointer
-        target_cv = cv_filename
-        if target_cv is None:
-            pointer = read_active_cv_pointer()
-            if isinstance(pointer, dict):
-                target_cv = pointer.get("selected_filename", "")
-            else:
-                target_cv = str(pointer or "")
-
-        with self._get_connection() as conn:
-            has_evals = conn.execute("SELECT 1 FROM evaluations LIMIT 1").fetchone() is not None
-            base_from = "jobs j LEFT JOIN evaluations e ON j.id = e.job_id" if has_evals else "jobs j"
-            base_where = "j.ui_saved = 1"
-
-            clean_target_cv = str(target_cv or "").strip()
-            if clean_target_cv and clean_target_cv.lower() not in ("none", "ninguno", "all", "todas", "*", ""):
-                escaped_cv = clean_target_cv.replace("'", "''")
-                base_where += f" AND j.cv_filename = '{escaped_cv}'"
-            else:
-                base_where += " AND 1=0"
-
-            # 1. Portales / Fuentes reales registradas en las ofertas
-            source_rows = conn.execute(
-                f"SELECT j.source, COUNT(*) as c FROM {base_from} WHERE {base_where} GROUP BY j.source ORDER BY c DESC"
-            ).fetchall()
-            sources = [
-                {
-                    "id": r["source"],
-                    "label": r["source"].capitalize(),
-                    "count": r["c"],
-                }
-                for r in source_rows
-            ]
-
-            # 2. Modalidades de trabajo reales (alineadas exactamente con getJobModality de las tarjetas)
-            offer_modality_rows = conn.execute(
-                f"SELECT j.is_remote, j.location, j.title, j.description FROM {base_from} WHERE {base_where}"
-            ).fetchall()
-
-            hybrid_count = 0
-            remote_count = 0
-            onsite_count = 0
-            for r in offer_modality_rows:
-                loc = (r["location"] or "").lower()
-                tit = (r["title"] or "").lower()
-                desc = (r["description"] or "").lower()
-                combined = f"{loc} {tit} {desc}"
-                if "hibrid" in combined or "hybrid" in combined or "híbrid" in combined:
-                    hybrid_count += 1
-                elif r["is_remote"] == 1 or any(k in f"{loc} {tit}" for k in ("remot", "teletrabaj", "work from home")):
-                    remote_count += 1
-                else:
-                    onsite_count += 1
-
-            modalities = []
-            if hybrid_count > 0:
-                modalities.append({"id": "hibrido", "label": "Híbrido", "count": hybrid_count})
-            if remote_count > 0:
-                modalities.append({"id": "teletrabajo", "label": "Remoto / Teletrabajo", "count": remote_count})
-            if onsite_count > 0:
-                modalities.append({"id": "presencial", "label": "Presencial", "count": onsite_count})
-
-            # 3. Niveles de ajuste / afinidad evaluados directamente por la IA en SQLite
-            fit_rows = conn.execute(
-                f"SELECT e.fit_level, COUNT(*) as c FROM {base_from} WHERE {base_where} AND e.fit_level IS NOT NULL GROUP BY e.fit_level ORDER BY c DESC"
-            ).fetchall()
-            fit_levels = [{"id": r["fit_level"], "label": r["fit_level"].capitalize(), "count": r["c"]} for r in fit_rows]
-
-            # 4. Habilidades y carencias evaluadas por la IA en las ofertas
-            skill_counter: collections.Counter = collections.Counter()
-            missing_counter: collections.Counter = collections.Counter()
-            strength_counter: collections.Counter = collections.Counter()
-            gap_counter: collections.Counter = collections.Counter()
-
-            if has_evals:
-                eval_rows = conn.execute(
-                    f"SELECT e.matched_skills, e.missing_skills, e.strengths, e.gaps FROM {base_from} WHERE {base_where}"
-                ).fetchall()
-                for er in eval_rows:
-                    for field_key, counter in [
-                        ("matched_skills", skill_counter),
-                        ("missing_skills", missing_counter),
-                        ("strengths", strength_counter),
-                        ("gaps", gap_counter),
-                    ]:
-                        raw = er[field_key]
-                        if raw:
-                            try:
-                                parsed = json.loads(raw) if isinstance(raw, str) else raw
-                                if isinstance(parsed, list):
-                                    for item in parsed:
-                                        c_item = str(item).strip()
-                                        if c_item:
-                                            counter[c_item] += 1
-                            except Exception:
-                                pass
-
-            categories = [
-                {"id": name, "label": name, "count": count}
-                for name, count in skill_counter.most_common(30)
-            ]
-            missing_skills = [
-                {"id": name, "label": name, "count": count}
-                for name, count in missing_counter.most_common(20)
-            ]
-            strengths = [
-                {"id": name, "label": name, "count": count}
-                for name, count in strength_counter.most_common(20)
-            ]
-            gaps = [
-                {"id": name, "label": name, "count": count}
-                for name, count in gap_counter.most_common(20)
-            ]
-
-            # 5. Formaciones mínimas encontradas en las ofertas
-            edu_rows = conn.execute(
-                f"SELECT j.education_level, COUNT(*) as c FROM {base_from} WHERE {base_where} AND j.education_level IS NOT NULL AND j.education_level != '' GROUP BY j.education_level ORDER BY c DESC"
-            ).fetchall()
-            educations = [{"id": r["education_level"], "label": r["education_level"], "count": r["c"]} for r in edu_rows]
-
-            # 6. Jornadas laborales encontradas en las ofertas
-            sch_rows = conn.execute(
-                f"SELECT j.schedule, COUNT(*) as c FROM {base_from} WHERE {base_where} AND j.schedule IS NOT NULL AND j.schedule != '' GROUP BY j.schedule ORDER BY c DESC"
-            ).fetchall()
-            schedules = [{"id": r["schedule"], "label": r["schedule"], "count": r["c"]} for r in sch_rows]
-
-            # 7. Tipos de contrato encontrados en las ofertas
-            ct_rows = conn.execute(
-                f"SELECT j.contract_type, COUNT(*) as c FROM {base_from} WHERE {base_where} AND j.contract_type IS NOT NULL AND j.contract_type != '' GROUP BY j.contract_type ORDER BY c DESC"
-            ).fetchall()
-            contract_types = [{"id": r["contract_type"], "label": r["contract_type"], "count": r["c"]} for r in ct_rows]
-
-            # 8. Estadísticas salariales reales encontradas en las ofertas de SQLite
-            sal_rows = conn.execute(
-                f"SELECT j.salary_min, j.salary_max, j.salary_currency FROM {base_from} WHERE {base_where} AND (j.salary_min > 0 OR j.salary_max > 0)"
-            ).fetchall()
-
-            def _annualize(val: Optional[float]) -> float:
-                if not val or val <= 0:
-                    return 0.0
-                if val <= 100:
-                    return round(val * 1800, 2)
-                if val < 6000:
-                    return round(val * 12, 2)
-                return round(val, 2)
-
-            annual_salaries = [
-                (_annualize(r["salary_min"]), _annualize(r["salary_max"]))
-                for r in sal_rows
-            ]
-            valid_annuals = [max(smin, smax) for smin, smax in annual_salaries if max(smin, smax) > 0]
-            curr = sal_rows[0]["salary_currency"] if sal_rows and sal_rows[0]["salary_currency"] else "EUR"
-
-            salary_stats = {
-                "min": min(valid_annuals) if valid_annuals else 0.0,
-                "max": max(valid_annuals) if valid_annuals else 0.0,
-                "currency": curr,
-                "total_with_salary": len(valid_annuals),
-            }
-
-            # 9. Top ubicaciones reales encontradas en las ofertas
-            loc_rows = conn.execute(
-                f"SELECT j.location, COUNT(*) as c FROM {base_from} WHERE {base_where} AND j.location IS NOT NULL AND j.location != '' GROUP BY j.location ORDER BY c DESC LIMIT 20"
-            ).fetchall()
-            top_locations = [{"name": r["location"], "count": r["c"]} for r in loc_rows]
-
-            # 10. Estadísticas de puntuación de la IA
-            score_row = conn.execute(
-                f"SELECT MIN(e.score) as min_score, MAX(e.score) as max_score, AVG(e.score) as avg_score FROM {base_from} WHERE {base_where} AND e.score IS NOT NULL AND e.score > 0"
-            ).fetchone()
-            score_stats = {
-                "min": score_row["min_score"] if score_row and score_row["min_score"] is not None else 0,
-                "max": score_row["max_score"] if score_row and score_row["max_score"] is not None else 0,
-                "avg": round(score_row["avg_score"], 1) if score_row and score_row["avg_score"] is not None else 0.0,
-            }
-
-            total_visible = conn.execute(f"SELECT COUNT(*) FROM {base_from} WHERE {base_where}").fetchone()[0]
-
-            return {
-                "sources": sources,
-                "modalities": modalities,
-                "fit_levels": fit_levels,
-                "categories": categories,
-                "missing_skills": missing_skills,
-                "strengths": strengths,
-                "gaps": gaps,
-                "educations": educations,
-                "schedules": schedules,
-                "contract_types": contract_types,
-                "salary_stats": salary_stats,
-                "score_stats": score_stats,
-                "top_locations": top_locations,
-                "total_jobs": total_visible,
-            }

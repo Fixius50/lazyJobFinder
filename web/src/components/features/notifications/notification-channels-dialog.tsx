@@ -190,7 +190,7 @@ export function NotificationChannelsDialog({
                       ? "Configurado"
                       : settings?.secrets_status.telegram_token_present
                       ? "Token OK · Falta Chat ID"
-                      : "Falta token .env"}
+                      : "Sin Configurar"}
                   </Badge>
                 </div>
                 <p className="text-2xs text-muted-foreground">

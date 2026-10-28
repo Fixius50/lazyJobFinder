@@ -99,28 +99,26 @@ export function JobCard({ job, onOpenDetail, onUpdateStatus, onUpdateJob }: JobC
       }`}
     >
       <CardContent className="p-3 sm:p-3.5 flex flex-col h-full justify-between space-y-3">
-        {/* Cabecera de la Tarjeta: Badges de afinidad, estado y fuente */}
+        {/* Cabecera de la Tarjeta: tags | sitio | modalidad | ojo */}
         <div className="space-y-2.5">
-          <div className="flex items-center justify-between gap-1 flex-wrap">
-            <div className="flex items-center gap-1 flex-wrap">
+          <div className="flex items-center justify-between gap-1.5">
+            <div className="flex items-center gap-1 flex-wrap min-w-0">
               <JobScoreBadge score={job.score} isEvaluating={isEvaluating} size="sm" />
               <JobStatusBadge status={job.status} size="sm" />
-            </div>
-            <div className="flex items-center gap-1">
               <span className="text-3xs font-medium px-1.5 py-0.5 rounded bg-muted/90 text-muted-foreground shrink-0">
                 {sourceMeta ? sourceMeta.label : job.source}
               </span>
               <JobModalityBadge job={job} size="sm" />
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => onOpenDetail(job.id)}
-                className="h-6 w-6 p-0 rounded-md shrink-0 text-muted-foreground/60 hover:text-foreground hover:bg-muted/80 transition-colors"
-                title="Ver detalles de la oferta"
-              >
-                <Eye className="h-3.5 w-3.5" />
-              </Button>
             </div>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => onOpenDetail(job.id)}
+              className="h-6 w-6 p-0 rounded-md shrink-0 text-muted-foreground/60 hover:text-foreground hover:bg-muted/80 transition-colors"
+              title="Ver detalles de la oferta"
+            >
+              <Eye className="h-3.5 w-3.5" />
+            </Button>
           </div>
 
           {/* Título de la oferta con límite de 2 líneas */}

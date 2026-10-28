@@ -71,13 +71,23 @@ flowchart TD
 - **`TecnoempleoConnector`**: Lector de canales RSS públicos de Tecnoempleo. Portal vertical tecnológico que permanece desactivado por defecto para no contaminar búsquedas generales de otros sectores.
 - **`ConnectorManager`**: Orquesta la ejecución secuencial o concurrente controlada con retardos anti-saturación, capturando fallos puntuales de red sin detener las demás fuentes.
 
-### B. Deduplicación y Persistencia SQLite (`src/database.py`)
-- Base de datos relacional local **SQLite** (`data/lazyjobfinder.db`) con registro **WAL (Write-Ahead Logging)** y fallback a DELETE mode para entornos Docker sobre sistemas de archivos compartidos (VirtioFS / 9p).
+### B. Deduplicación y Persistencia SQLite (`src/database.py` y `src/models.py`)
+- **Fuente Única de Verdad (`src/models.py`)**: Modelos canónicos tipados con **Pydantic V2** (`JobModel`, `EvaluationModel`, `GeneratedDocumentModel`, `PipelineRunModel`, `SystemLogModel`, `AppStateModel`, `CVCacheModel`). Cualquier adición de campo se propaga automáticamente a la API FastAPI, a las conversiones JSON y a las tablas SQLite sin código redundante.
+- **Auto-migración y Utilidades de Alto Rendimiento con `sqlite-utils`**:
+  - Auto-migración en caliente (`alter=True`) que incorpora nuevas columnas a las tablas dinámicamente sin necesidad de scripts manuales de `ALTER TABLE`.
+  - Motor de búsqueda **FTS5** (`jobs_fts`) para búsquedas textuales instantáneas en tiempo real sobre títulos, empresas y descripciones.
+  - Inserciones masivas por lotes (`upsert_all`) en una única transacción atómica de milisegundos.
+- **Base de datos relacional local SQLite** (`data/lazyjobfinder.db`):
+  - Modo `TRUNCATE` / `WAL` optimizado para máxima compatibilidad y cero bloqueos de memoria compartida bajo Docker y sistemas de archivos montados (WSL2 / Windows).
+  - **Optimizaciones de Memoria**: `PRAGMA cache_size = -64000` (~64 MB de caché en RAM) y `PRAGMA temp_store = MEMORY` para que las agregaciones de facetas y ordenaciones se resuelvan en memoria.
+  - **Blindaje de Concurrencia**: `PRAGMA busy_timeout = 30000` con reintentos exponenciales automáticos ante bloqueos de escritura.
 - **Tablas Consolidadas**:
   - `jobs`: Ofertas indexadas con deduplicación por `url_hash` y similitud difusa `content_fingerprint` con RapidFuzz.
+  - `evaluations`: Evaluaciones ATS de IA y análisis estructurado con unicidad en `job_id`.
+  - `generated_documents`: Rutas auditadas de CVs y cartas adaptadas en PDF y Markdown.
   - `app_state`: Ajustes globales y puntero atómico al CV activo.
   - `cv_cache`: Caché centralizada del texto extraído de cada currículum subido (evita re-parseos y previene archivos temporales en disco).
-  - `pipeline_runs` y `system_logs`: Auditoría y registro de eventos.
+  - `pipeline_runs` y `system_logs`: Auditoría, control de días omitidos por apagado y registro de eventos.
 
 ### C. Pre-Filtro Determinista (`src/evaluator/scoring_engine.py`)
 Antes de invocar el modelo de lenguaje en CPU:

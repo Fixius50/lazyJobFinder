@@ -158,6 +158,105 @@ class TestScoringEngine(unittest.TestCase):
         self.assertIn("[CONTENIDO_FILTRADO_SEGURIDAD]", formatted)
 
 
+    def test_mathematical_scoring_formula_with_mandatory_requirements(self):
+        """Verifica que el divisor sea los requisitos obligatorios y el score sea round((dividendo/divisor)*100)."""
+        job = {
+            "id": 501,
+            "title": "Mozo de Almacén",
+            "company": "Logística Express",
+            "description": "Requisitos obligatorios: Carnet de carretillero, experiencia en picking, disponibilidad horaria.",
+        }
+
+        cv_text = "Experiencia como mozo de almacén y carretillero. Carnet de carretillero en vigor. Picking con pistola de radiofrecuencia."
+        cv_meta = {"filename": "cv_mozo.pdf", "has_cv": True}
+        mock_verifier = MagicMock()
+        mock_verifier.allowed_skills = {"carnet de carretillero", "picking"}
+        mock_verifier.validate_matched_skills.side_effect = lambda s: s
+
+        self.engine.get_active_cv_context = MagicMock(return_value=(cv_text, cv_meta, mock_verifier))
+        self.mock_ollama.check_health.return_value = {"online": True}
+
+        # Caso 1: Cumple 2 de 3 requisitos obligatorios -> 2 / 3 = 66.666...% -> round -> 67%
+        llm_response_2_of_3 = (
+            '{"mandatory_requirements": ["Carnet de carretillero", "Experiencia en picking", "Disponibilidad horaria completa en turno rotativo"], '
+            '"matched_requirements": ["Carnet de carretillero", "Experiencia en picking"], '
+            '"missing_requirements": ["Disponibilidad horaria completa en turno rotativo"], '
+            '"score": 67, '
+            '"reasoning": "Cumple 2 de 3 requisitos obligatorios (carnet y picking), pendiente turno rotativo."}'
+        )
+        self.mock_ollama.generate.return_value = llm_response_2_of_3
+
+        res = self.engine.evaluate(job)
+        self.assertEqual(res["score"], 67, "2 de 3 requisitos debe resultar en round((2/3)*100) = 67.")
+        self.assertEqual(res["fit_level"], "BUENO")
+        self.assertTrue(res["should_apply"])
+        self.assertEqual(len(res["matched_skills"]), 2)
+        self.assertEqual(len(res["missing_skills"]), 1)
+        self.assertIn("Cumple 2 de 3 requisitos obligatorios (67%).", res["strengths"][0])
+
+        # Caso 2: Cumple 1 de 3 requisitos obligatorios -> 1 / 3 = 33.333...% -> round -> 33%
+        llm_response_1_of_3 = (
+            '{"mandatory_requirements": ["Carnet de carretillero", "Experiencia en picking", "Disponibilidad horaria"], '
+            '"matched_requirements": ["Experiencia en picking"], '
+            '"missing_requirements": ["Carnet de carretillero", "Disponibilidad horaria"], '
+            '"score": 15, '  # El LLM puso un valor erróneo, Python debe garantizar la fórmula matemática
+            '"reasoning": "Cumple 1 de 3 requisitos obligatorios."}'
+        )
+        self.mock_ollama.generate.return_value = llm_response_1_of_3
+
+        res2 = self.engine.evaluate(job)
+        self.assertEqual(res2["score"], 33, "Python debe forzar la fórmula exacta: round((1/3)*100) = 33.")
+        self.assertEqual(res2["fit_level"], "DESCARTADO")
+        self.assertFalse(res2["should_apply"])
+
+        # Caso 3: Cumple 3 de 3 requisitos obligatorios -> 3 / 3 = 100%
+        llm_response_3_of_3 = (
+            '{"mandatory_requirements": ["Carnet de carretillero", "Experiencia en picking", "Disponibilidad horaria"], '
+            '"matched_requirements": ["Carnet de carretillero", "Experiencia en picking", "Disponibilidad horaria"], '
+            '"missing_requirements": [], '
+            '"score": 100, '
+            '"reasoning": "Cumple todos los requisitos obligatorios."}'
+        )
+        self.mock_ollama.generate.return_value = llm_response_3_of_3
+
+        res3 = self.engine.evaluate(job)
+        self.assertEqual(res3["score"], 100)
+        self.assertEqual(res3["fit_level"], "EXCELENTE")
+        self.assertTrue(res3["should_apply"])
+
+    def test_optional_requirements_excluded_from_divisor(self):
+        """Verifica que los requisitos opcionales/deseables no se incluyan en el divisor ni penalicen."""
+        job = {
+            "id": 502,
+            "title": "Fontanero / Instalador",
+            "company": "Instalaciones Sur",
+            "description": "Obligatorio: Carnet de conducir B y experiencia en soldadura de cobre. Deseable/Valorable: Carnet de instalador de gas y carnet RITE.",
+        }
+
+        cv_text = "Fontanero con carnet de conducir B y 5 años de experiencia en soldadura de cobre y tuberías."
+        cv_meta = {"filename": "cv_fontanero.pdf", "has_cv": True}
+        mock_verifier = MagicMock()
+        mock_verifier.allowed_skills = {"carnet b", "soldadura de cobre"}
+        mock_verifier.validate_matched_skills.side_effect = lambda s: s
+
+        self.engine.get_active_cv_context = MagicMock(return_value=(cv_text, cv_meta, mock_verifier))
+        self.mock_ollama.check_health.return_value = {"online": True}
+
+        # El divisor solo tiene los 2 obligatorios, NO los deseables (gas, RITE)
+        llm_response = (
+            '{"mandatory_requirements": ["Carnet de conducir B", "Experiencia en soldadura de cobre"], '
+            '"matched_requirements": ["Carnet de conducir B", "Experiencia en soldadura de cobre"], '
+            '"missing_requirements": [], '
+            '"score": 100, '
+            '"reasoning": "Cumple el 100% de los requisitos obligatorios; los deseables de gas/RITE no penalizan."}'
+        )
+        self.mock_ollama.generate.return_value = llm_response
+
+        res = self.engine.evaluate(job)
+        self.assertEqual(res["score"], 100, "Al cumplir los 2 requisitos obligatorios, la nota es 100% sin penalizar por opcionales.")
+        self.assertEqual(res["fit_level"], "EXCELENTE")
+
+
 if __name__ == "__main__":
     unittest.main()
 

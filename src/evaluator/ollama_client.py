@@ -112,6 +112,7 @@ class OllamaClient:
         """
         target_model = model or self.default_model
         num_pred = num_predict or (350 if (format_json or format_schema) else 512)
+        cpu_threads = max(2, min(os.cpu_count() or 4, 6))
         payload = {
             "model": target_model,
             "prompt": prompt,
@@ -123,6 +124,7 @@ class OllamaClient:
                 "top_p": 0.9,
                 "num_ctx": 2048,
                 "num_predict": num_pred,
+                "num_thread": cpu_threads,
             },
         }
 
@@ -148,12 +150,13 @@ class OllamaClient:
             try:
                 with OllamaClient._generation_lock:
                     logger.debug(
-                        "Llamando a Ollama (intento %d/%d) con modelo '%s' (timeout=%ss, num_predict=%d)...",
+                        "Llamando a Ollama (intento %d/%d) con modelo '%s' (timeout=%ss, num_predict=%d, threads=%d)...",
                         attempt,
                         max_retries,
                         target_model,
                         timeout,
                         num_pred,
+                        cpu_threads,
                     )
                     start_time = time.time()
 
@@ -164,6 +167,7 @@ class OllamaClient:
                                 "top_p": 0.9,
                                 "num_ctx": 2048,
                                 "num_predict": num_pred,
+                                "num_thread": cpu_threads,
                             }
                             gen_resp = self._ollama_sdk.generate(
                                 model=target_model,

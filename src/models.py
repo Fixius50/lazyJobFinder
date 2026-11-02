@@ -38,6 +38,7 @@ class JobModel(BaseModel):
     alternate_sources: List[Dict[str, Any]] = Field(default_factory=list)
     telegram_notified: int = 0
     ui_saved: int = 1
+    modality: Optional[str] = None
     contract_type: Optional[str] = None
     schedule: Optional[str] = None
     education_level: Optional[str] = None

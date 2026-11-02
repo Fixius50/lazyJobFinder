@@ -115,13 +115,16 @@ def get_search_status() -> Dict[str, Any]:
     db = get_db()
     runner = get_runner()
 
-    is_running = runner.is_running()
+    is_searching = runner.is_searching() if hasattr(runner, "is_searching") else runner.is_running()
+    is_evaluating = runner.is_evaluating() if hasattr(runner, "is_evaluating") else False
     last_run = db.get_last_completed_run()
     recent_runs = db.get_recent_pipeline_runs(limit=5)
     stats = db.get_statistics()
 
     return {
-        "is_running": is_running,
+        "is_running": is_searching,
+        "is_searching": is_searching,
+        "is_evaluating": is_evaluating,
         "last_run": last_run,
         "recent_runs": recent_runs,
         "statistics": stats,
@@ -131,16 +134,16 @@ def get_search_status() -> Dict[str, Any]:
 @router.post("/stop")
 @router.post("/stop/")
 def stop_search() -> Dict[str, Any]:
-    """Detiene la búsqueda en curso solicitada por el usuario."""
+    """Detiene la búsqueda en portales solicitada por el usuario sin cancelar la evaluación."""
     runner = get_runner()
-    stopped = runner.request_stop()
+    stopped = runner.stop_search() if hasattr(runner, "stop_search") else runner.request_stop()
     return {
         "success": True,
         "stopped": stopped,
         "message": (
-            "Solicitud de parada enviada. El proceso se detendrá de inmediato."
+            "Búsqueda en portales detenida. La evaluación de ofertas continúa en segundo plano."
             if stopped
-            else "No hay ninguna búsqueda en ejecución activa."
+            else "No hay ninguna búsqueda en portales en ejecución activa."
         ),
     }
 

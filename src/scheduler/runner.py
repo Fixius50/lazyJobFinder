@@ -118,6 +118,10 @@ class JobPipelineRunner:
         self.scheduler = AsyncIOScheduler()
         self._async_lock: Optional[asyncio.Lock] = None
         self._stop_requested: bool = False
+        self._discovery_stop_requested: bool = False
+        self._discovery_running: bool = False
+        self._eval_running: bool = False
+        self._discovery_task: Optional[asyncio.Task] = None
         self._active_tasks: List[asyncio.Task] = []
 
     def _load_yaml(self, path: str) -> Dict[str, Any]:
@@ -325,11 +329,13 @@ class JobPipelineRunner:
                 # Tarea Productora: Rastreo en portales con guardado incremental en tiempo real
                 async def _run_discovery_task():
                     try:
+                        self._discovery_running = True
+                        self._discovery_stop_requested = False
                         self.db.log_event("INFO", "pipeline", "Iniciando rastreo de ofertas en portales y evaluación simultánea...")
                         res = await asyncio.to_thread(
                             self.connectors_mgr.run_discovery,
                             _on_job_saved,
-                            lambda: self._stop_requested,
+                            lambda: self._discovery_stop_requested or self._stop_requested,
                         )
                         self.db.log_event("INFO", "pipeline", f"Descubrimiento completado: {res[1]['total_encontradas']} ofertas encontradas ({res[1]['nuevas_guardadas']} nuevas registradas).")
                         return res
@@ -337,53 +343,60 @@ class JobPipelineRunner:
                         logger.info("Rastreo en portales cancelado por detención de usuario.")
                         return [], {"total_encontradas": 0, "nuevas_guardadas": 0, "fuentes": {}}
                     finally:
+                        self._discovery_running = False
                         # Indicar a todos los workers de evaluación que la fase de descubrimiento ha concluido
                         for _ in range(concurrency):
                             loop.call_soon_threadsafe(eval_queue.put_nowait, None)
 
                 # Tarea Consumidora: Evaluación con IA en paralelo conforme van llegando o existían pendientes
                 async def _eval_worker():
-                    while True:
-                        if self._stop_requested:
-                            break
-                        try:
-                            job = await eval_queue.get()
-                        except asyncio.CancelledError:
-                            break
-                        if job is None or self._stop_requested:
-                            eval_queue.task_done()
-                            break
-                        try:
-                            self.db.update_job_status(job["id"], "evaluating")
-                            eval_res = await asyncio.to_thread(self.scoring_engine.evaluate, job)
+                    self._eval_running = True
+                    try:
+                        while True:
                             if self._stop_requested:
-                                self.db.update_job_status(job["id"], "discovered")
                                 break
-                            if not eval_res or eval_res.get("score") is None:
-                                self.db.update_job_status(job["id"], "discovered")
-                            else:
-                                score = eval_res.get("score", 0)
-                                if score >= min_score and eval_res.get("should_apply"):
-                                    self.db.update_job_status(job["id"], "evaluated")
-                                    logger.info("Oferta ID %d ('%s') puntuada: %d/100 -> APTO.", job["id"], job.get("title", "")[:30], score)
-                                    qualified_candidates.append((job, eval_res))
-                                    if can_generate_docs and job["id"] not in queued_doc_job_ids:
-                                        queued_doc_job_ids.add(job["id"])
-                                        docs_queue.put_nowait((job, eval_res))
+                            try:
+                                job = await eval_queue.get()
+                            except asyncio.CancelledError:
+                                break
+                            if job is None or self._stop_requested:
+                                eval_queue.task_done()
+                                break
+                            try:
+                                self.db.update_job_status(job["id"], "evaluating")
+                                eval_res = await asyncio.to_thread(self.scoring_engine.evaluate, job)
+                                if self._stop_requested:
+                                    self.db.update_job_status(job["id"], "discovered")
+                                    break
+                                if not eval_res or eval_res.get("score") is None:
+                                    self.db.update_job_status(job["id"], "discovered")
                                 else:
-                                    self.db.update_job_status(job["id"], "discarded")
-                                    logger.info("Oferta ID %d ('%s') puntuada: %d/100 -> Descartada (< %d).", job["id"], job.get("title", "")[:30], score, min_score)
-                        except asyncio.CancelledError:
-                            self.db.update_job_status(job.get("id"), "discovered")
-                            break
-                        except Exception as eval_err:
-                            logger.error("Error evaluando oferta ID %d: %s", job.get("id"), eval_err)
-                            self.db.update_job_status(job.get("id"), "discovered")
-                        finally:
-                            eval_queue.task_done()
+                                    score = eval_res.get("score", 0)
+                                    if score >= min_score and eval_res.get("should_apply"):
+                                        self.db.update_job_status(job["id"], "evaluated")
+                                        logger.info("Oferta ID %d ('%s') puntuada: %d/100 -> APTO.", job["id"], job.get("title", "")[:30], score)
+                                        qualified_candidates.append((job, eval_res))
+                                        if can_generate_docs and job["id"] not in queued_doc_job_ids:
+                                            queued_doc_job_ids.add(job["id"])
+                                            docs_queue.put_nowait((job, eval_res))
+                                    else:
+                                        self.db.update_job_status(job["id"], "discarded")
+                                        logger.info("Oferta ID %d ('%s') puntuada: %d/100 -> Descartada (< %d).", job["id"], job.get("title", "")[:30], score, min_score)
+                            except asyncio.CancelledError:
+                                self.db.update_job_status(job.get("id"), "discovered")
+                                break
+                            except Exception as eval_err:
+                                logger.error("Error evaluando oferta ID %d: %s", job.get("id"), eval_err)
+                                self.db.update_job_status(job.get("id"), "discovered")
+                            finally:
+                                eval_queue.task_done()
+                    finally:
+                        if eval_queue.empty():
+                            self._eval_running = False
 
                 # Ejecutar descubrimiento, evaluación y generación documental concurrentemente
-                discovery_task = asyncio.create_task(_run_discovery_task())
+                self._discovery_task = asyncio.create_task(_run_discovery_task())
+                discovery_task = self._discovery_task
                 eval_tasks = [asyncio.create_task(_eval_worker()) for _ in range(concurrency)]
                 docs_task = asyncio.create_task(_docs_worker())
                 self._active_tasks = [discovery_task, *eval_tasks, docs_task]
@@ -514,19 +527,42 @@ class JobPipelineRunner:
         )
         logger.info("Planificador programado diariamente a las %02d:%02d horas (coalesce=True).", hora, minuto)
 
+    def is_searching(self) -> bool:
+        """Indica si el rastreador de ofertas en portales externos está actualmente activo."""
+        return bool(self._discovery_running)
+
+    def is_evaluating(self) -> bool:
+        """Indica si el motor de scoring / IA está valorando ofertas activamente."""
+        return bool(self._eval_running)
+
     def is_running(self) -> bool:
         """Indica si el pipeline se encuentra actualmente en ejecución activa."""
-        return self._async_lock is not None and self._async_lock.locked()
+        return self._discovery_running or self._eval_running or (self._async_lock is not None and self._async_lock.locked())
+
+    def stop_search(self) -> bool:
+        """Detiene estrictamente el rastreo en portales externos sin cancelar la evaluación."""
+        if not self._discovery_running:
+            return False
+        self._discovery_stop_requested = True
+        if self._discovery_task and not self._discovery_task.done():
+            self._discovery_task.cancel()
+        self._discovery_running = False
+        logger.info("Búsqueda en portales detenida por el usuario. La evaluación continúa en segundo plano.")
+        self.db.log_event("INFO", "pipeline", "Búsqueda en portales detenida por el usuario. La evaluación continúa activa.")
+        return True
 
     def request_stop(self) -> bool:
         """Solicita la detención inmediata del ciclo de búsqueda en ejecución."""
         if not self.is_running():
             return False
+        self._discovery_stop_requested = True
         self._stop_requested = True
         tasks_to_cancel = list(getattr(self, "_active_tasks", []))
         for t in tasks_to_cancel:
             if not t.done():
                 t.cancel()
+        self._discovery_running = False
+        self._eval_running = False
         logger.info("Detención de búsqueda solicitada por el usuario. %d tareas activas canceladas.", len(tasks_to_cancel))
         self.db.log_event("WARNING", "pipeline", "Detención de búsqueda solicitada por el usuario desde la interfaz web.")
         return True

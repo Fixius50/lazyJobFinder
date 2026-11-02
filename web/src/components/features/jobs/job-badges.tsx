@@ -100,36 +100,65 @@ export type JobModality = "Remoto" | "Híbrido" | "Presencial";
 
 export function getJobModality(job: {
   is_remote?: number | boolean | null;
+  modality?: string | null;
   location?: string | null;
   title?: string | null;
   description?: string | null;
 }): JobModality {
+  // 1. Si la modalidad ya viene estructurada desde la base de datos
+  if (job.modality) {
+    const m = job.modality.trim().toLowerCase();
+    if (m === "híbrido" || m === "hibrido" || m === "hybrid") return "Híbrido";
+    if (m === "remoto" || m === "remote" || m === "teletrabajo") return "Remoto";
+    if (m === "presencial" || m === "onsite" || m === "on-site") return "Presencial";
+  }
+
   const loc = (job.location || "").toLowerCase();
   const tit = (job.title || "").toLowerCase();
   const desc = (job.description || "").toLowerCase();
-  const combined = `${loc} ${tit} ${desc}`;
+  const combined = `${tit} ${loc} ${desc}`;
 
-  // 1. Híbrido: si menciona híbrido o hybrid en ubicación, título o descripción
-  if (/h[ií]brid/i.test(combined)) {
+  // 2. Patrones estrictos de 100% presencial o 100% remoto
+  const isStrictlyOnsite = /\b(100%\s*presencial|totalmente\s+presencial|exclusivamente\s+presencial|sin\s+teletrabajo|no\s+(?:se\s+)?permite\s+teletrabajo)\b/i.test(combined);
+  const isStrictlyRemote = /\b(100%\s*remoto|100%\s*teletrabajo|totalmente\s+remoto|totalmente\s+en\s+remoto|full\s+remote|exclusivamente\s+remoto)\b/i.test(combined);
+
+  if (isStrictlyOnsite) return "Presencial";
+  if (isStrictlyRemote) return "Remoto";
+
+  // 3. Híbrido: mención explícita o días repartidos (oficina y casa/online)
+  const hasHybridWords = /\b(h[ií]brid[oa]?|hybrid|semipresencial|semi-presencial|modalidad\s+mixta|trabajo\s+mixto|smart\s+working)\b/i.test(combined);
+  const hasSplitDays = /\b\d+\s*d[ií]as?\s+(?:de\s+)?(?:teletrabajo|remoto|en\s+casa|online|home\s*office)\b/i.test(combined) ||
+                       /\b\d+\s*d[ií]as?\s+(?:de\s+)?(?:presencial|en\s+oficina|en\s+sede)\b/i.test(combined) ||
+                       /\b(?:teletrabajo|remoto|casa|oficina)\s+\d+\s*d[ií]as?\b/i.test(combined) ||
+                       /\b(?:teletrabajo|remoto)\s+parcial\b/i.test(combined);
+
+  // 4. Coexistencia de Presencial y Online/Remoto ("dando igual cuánto, días presenciales y online")
+  const hasOnsiteClues = /\b(presencial|presencialidad|en\s+oficina|en\s+instalaciones|en\s+sede|on-site|onsite)\b/i.test(combined);
+  const hasRemoteClues = /\b(teletrabajo|remoto|remote|desde\s+casa|home\s*office|online|trabajo\s+a\s+distancia)\b/i.test(combined);
+
+  if (hasHybridWords || hasSplitDays || (hasOnsiteClues && hasRemoteClues)) {
     return "Híbrido";
   }
 
-  // 2. Remoto: si is_remote es 1 o el texto menciona remoto o teletrabajo
+  // 5. Remoto: si is_remote es 1 o el texto menciona remoto / teletrabajo
   if (
     job.is_remote === 1 ||
     job.is_remote === true ||
-    /remot|teletrabaj|work from home/i.test(`${loc} ${tit}`)
+    hasRemoteClues ||
+    loc.includes("remot") ||
+    loc.includes("teletrabaj")
   ) {
     return "Remoto";
   }
 
-  // 3. Por defecto: Presencial
+  // 6. Por defecto: Presencial
   return "Presencial";
 }
 
 interface JobModalityBadgeProps {
   job: {
     is_remote?: number | boolean | null;
+    modality?: string | null;
     location?: string | null;
     title?: string | null;
     description?: string | null;

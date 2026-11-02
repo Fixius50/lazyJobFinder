@@ -21,6 +21,7 @@ class JobOffer:
     salary_max: Optional[float] = None
     salary_currency: str = "EUR"
     date_posted: Optional[str] = None
+    modality: Optional[str] = None
     contract_type: Optional[str] = None
     schedule: Optional[str] = None
     education_level: Optional[str] = None
@@ -35,6 +36,7 @@ class JobOffer:
             "source": self.source.strip().lower(),
             "location": self.location.strip() or "Global / Remote",
             "is_remote": 1 if self.is_remote else 0,
+            "modality": self.modality.strip() if self.modality else None,
             "description": self.description.strip(),
             "salary_min": self.salary_min,
             "salary_max": self.salary_max,

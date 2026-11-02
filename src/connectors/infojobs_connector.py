@@ -97,7 +97,18 @@ class InfoJobsConnector(BaseConnector):
                     province = province_info.get("value", "España") if province_info else "España"
                     teleworking = item.get("teleworking", {})
                     teleworking_val = teleworking.get("value", "").lower() if teleworking else ""
-                    is_remote = any(r in teleworking_val for r in ["remoto", "teletrabajo"])
+                    modality = None
+                    if "híbrido" in teleworking_val or "hibrido" in teleworking_val or "hybrid" in teleworking_val:
+                        modality = "Híbrido"
+                        is_remote = False
+                    elif any(r in teleworking_val for r in ["remoto", "teletrabajo", "distancia"]):
+                        modality = "Remoto"
+                        is_remote = True
+                    elif "presencial" in teleworking_val or "no se permite" in teleworking_val:
+                        modality = "Presencial"
+                        is_remote = False
+                    else:
+                        is_remote = any(r in teleworking_val for r in ["remoto", "teletrabajo"])
 
                     req_min = item.get("requirementMin", "")
                     desc = item.get("description", "") or req_min
@@ -121,6 +132,7 @@ class InfoJobsConnector(BaseConnector):
                         source="infojobs",
                         location=province,
                         is_remote=is_remote,
+                        modality=modality,
                         description=full_desc,
                         salary_min=float(salary_min) if salary_min else None,
                         salary_max=float(salary_max) if salary_max else None,

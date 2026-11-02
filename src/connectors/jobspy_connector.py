@@ -63,6 +63,8 @@ class JobSpyConnector(BaseConnector):
                         "location": primary_location,
                         "results_wanted": min(limit_per_search, 15),
                         "hours_old": hours_old,
+                        "fetch_description": True,
+                        "linkedin_fetch_description": True,
                     }
                     if site == "indeed":
                         loc_low = primary_location.lower()
@@ -148,10 +150,10 @@ class JobSpyConnector(BaseConnector):
                                 elif "parttime" in jt_lower or "part_time" in jt_lower:
                                     schedule = "Media Jornada"
                                 if "contract" in jt_lower:
-                                    contract_type = "Contrato Temporal"
+                                    contract_type = "Temporal"
                                 elif "internship" in jt_lower:
                                     contract_type = "Prácticas / Beca"
-                                elif "fulltime" in jt_lower or "permanent" in jt_lower:
+                                elif "permanent" in jt_lower or "direct_hire" in jt_lower:
                                     contract_type = "Indefinido"
 
                             offer = JobOffer(

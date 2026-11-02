@@ -337,8 +337,8 @@ export function ApplicationsView() {
   const pollSearchStatus = async () => {
     try {
       const status = await api.getSearchStatus();
-      if (status && status.is_running !== undefined) {
-        const running = Boolean(status.is_running);
+      if (status) {
+        const running = Boolean(status.is_searching !== undefined ? status.is_searching : status.is_running);
         if (userPausedRef.current) {
           if (!running) {
             userPausedRef.current = false;

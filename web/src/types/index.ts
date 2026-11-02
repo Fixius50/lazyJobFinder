@@ -64,6 +64,7 @@ export interface JobListItem {
   company: string;
   location: string;
   is_remote: number;
+  modality?: string | null;
   source: string;
   canonical_url: string;
   salary_min?: number | null;

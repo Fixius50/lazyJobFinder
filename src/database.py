@@ -97,6 +97,132 @@ def compute_description_hash(description: str) -> str:
     return hashlib.sha256(clean_desc.encode("utf-8")).hexdigest()
 
 
+def extract_job_metadata(
+    title: str = "",
+    description: str = "",
+    location: str = "",
+    is_remote: bool = False,
+    existing_contract: Optional[str] = None,
+    existing_schedule: Optional[str] = None,
+    existing_modality: Optional[str] = None,
+    existing_education: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Extrae rigurosamente la modalidad laboral (Presencial, Híbrido, Remoto),
+    el tipo de contrato, la jornada y el nivel educativo a partir del texto real
+    de la oferta, evitando falsos positivos y garantizando que las combinaciones
+    de presencialidad y teletrabajo (dando igual cuánto) se reconozcan como Híbrido.
+    """
+    text = f"{title}\n{location}\n{description}".strip()
+    text_lower = text.lower()
+
+    # --- 1. MODALIDAD (Presencial / Híbrido / Remoto) ---
+    modality = existing_modality
+    if not modality or modality.lower() in ("sin_especificar", "none", "", "desconocida"):
+        is_strictly_onsite = bool(re.search(
+            r"\b(100%\s*presencial|totalmente\s+presencial|exclusivamente\s+presencial|sin\s+teletrabajo|no\s+(?:se\s+)?permite\s+teletrabajo)\b",
+            text_lower,
+        ))
+        is_strictly_remote = bool(re.search(
+            r"\b(100%\s*remoto|100%\s*teletrabajo|totalmente\s+remoto|totalmente\s+en\s+remoto|full\s+remote|exclusivamente\s+remoto)\b",
+            text_lower,
+        ))
+
+        has_hybrid_explicit = bool(re.search(
+            r"\b(h[ií]brid[oa]?|hybrid|semipresencial|semi-presencial|modalidad\s+mixta|trabajo\s+mixto|smart\s+working)\b",
+            text_lower,
+        ))
+        has_split_days = bool(
+            re.search(r"\b\d+\s*d[ií]as?\s+(?:de\s+)?(?:teletrabajo|remoto|en\s+casa|online|home\s*office)\b", text_lower) or
+            re.search(r"\b\d+\s*d[ií]as?\s+(?:de\s+)?(?:presencial|en\s+oficina|en\s+sede)\b", text_lower) or
+            re.search(r"\b(?:teletrabajo|remoto|casa|oficina)\s+\d+\s*d[ií]as?\b", text_lower) or
+            re.search(r"\b(?:teletrabajo|remoto)\s+parcial\b", text_lower) or
+            re.search(r"\b(?:combinaci[oó]n|alternand?o)\s+(?:de\s+)?(?:presencial|oficina).*(?:teletrabajo|remoto|casa|online)\b", text_lower)
+        )
+
+        has_onsite_clues = bool(re.search(
+            r"\b(presencial|presencialidad|en\s+oficina|en\s+instalaciones|en\s+sede|on-site|onsite)\b",
+            text_lower,
+        ))
+        has_remote_clues = bool(re.search(
+            r"\b(teletrabajo|remoto|remote|desde\s+casa|home\s*office|online|trabajo\s+a\s+distancia)\b",
+            text_lower,
+        ))
+
+        if is_strictly_onsite:
+            modality = "Presencial"
+        elif is_strictly_remote:
+            modality = "Remoto"
+        elif has_hybrid_explicit or has_split_days or (has_onsite_clues and has_remote_clues):
+            modality = "Híbrido"
+        elif is_remote or has_remote_clues or "remot" in location.lower() or "teletrabaj" in location.lower():
+            modality = "Remoto"
+        else:
+            modality = "Presencial"
+
+    # --- 2. TIPO DE CONTRATO ---
+    contract_type = existing_contract
+    if not contract_type or contract_type.lower() in ("none", "", "sin_especificar"):
+        clean_desc_for_contract = re.sub(
+            r"\b(buenas\s+pr[aá]cticas|pr[aá]ctica\s+habitual|en\s+la\s+pr[aá]ctica|experiencia\s+pr[aá]ctica|pr[aá]cticas\s+[aá]giles)\b",
+            "",
+            text_lower,
+        )
+
+        if re.search(r"\b(?:contrato\s+(?:en\s+|formativo\s+en\s+)?pr[aá]cticas|convenio\s+de\s+pr[aá]cticas|pr[aá]cticas\s+remuneradas|pr[aá]cticas\s+curriculares|pr[aá]cticas\s+extracurriculares|estudiante\s+en\s+pr[aá]cticas|\bbecas?\b|\bbecari[oa]s?\b|contrato\s+formativo)\b", clean_desc_for_contract):
+            contract_type = "Prácticas / Beca"
+        elif re.search(r"\b(aut[oó]nom[oa]s?|freelance|contrato\s+mercantil|b2b|freelancer)\b", clean_desc_for_contract):
+            contract_type = "Autónomo / Freelance"
+        elif re.search(r"\b(fijo[\s-]discontinuo)\b", clean_desc_for_contract):
+            contract_type = "Fijo Discontinuo"
+        elif re.search(r"\b(?:contrato\s+(?:\w+\s+)?temporal|tipo\s+de\s+contrato\s+(?:es\s+)?temporal|duraci[oó]n\s+determinada|obra\s+y\s+servicio|interinidad|sustituci[oó]n|circunstancias\s+de\s+la\s+producci[oó]n|de\s+relevo|eventual)\b", clean_desc_for_contract):
+            contract_type = "Temporal"
+        elif re.search(r"\b(?:contrato\s+(?:\w+\s+)?indefinido|tipo\s+de\s+contrato\s+(?:es\s+)?indefinido|car[aá]cter\s+indefinido|puesto\s+indefinido|contrato\s+estable|puesto\s+estable|personal\s+fijo|incorporaci[oó]n\s+indefinida|contrataci[oó]n\s+indefinida|de\s+forma\s+indefinida)\b", clean_desc_for_contract):
+            contract_type = "Indefinido"
+        elif re.search(r"\b(?:contrato|puesto|incorporaci[oó]n|trabajo|relaci[oó]n)\b.{0,30}\bindefinid[oa]s?\b", clean_desc_for_contract) or \
+             re.search(r"\bindefinid[oa]s?\b.{0,30}\b(?:contrato|puesto|incorporaci[oó]n|trabajo|relaci[oó]n)\b", clean_desc_for_contract):
+            contract_type = "Indefinido"
+
+    # --- 3. JORNADA (SCHEDULE) ---
+    schedule = existing_schedule
+    if not schedule or schedule.lower() in ("none", "", "sin_especificar"):
+        clean_desc_for_sched = re.sub(
+            r"\b(formaci[oó]n\s+completa|soluci[oó]n\s+completa|gama\s+completa|cobertura\s+completa|experiencia\s+completa)\b",
+            "",
+            text_lower,
+        )
+
+        if re.search(r"\b(?:media\s+jornada|jornada\s+parcial|tiempo\s+parcial|part[\s-]time|(?:20|25|30)\s*(?:h|horas)(?:/|\s+a\s+la\s+|\s+)semana(?:les)?)\b", clean_desc_for_sched):
+            schedule = "Media Jornada"
+        elif re.search(r"\b(?:jornada\s+completa|tiempo\s+completo|full[\s-]time|40\s*(?:h|horas)(?:/|\s+a\s+la\s+|\s+)semana(?:les)?)\b", clean_desc_for_sched):
+            schedule = "Jornada Completa"
+        elif re.search(r"\b(?:horario\s+flexible|flexibilidad\s+horaria|jornada\s+flexible)\b", clean_desc_for_sched):
+            schedule = "Horario Flexible"
+
+    # --- 4. NIVEL EDUCATIVO ---
+    education_level = existing_education
+    if not education_level or education_level.lower() in ("none", "", "sin_especificar"):
+        clean_desc_for_edu = re.sub(
+            r"\b(alto\s+grado\s+de|cierto\s+grado\s+de|gran\s+grado\s+de|grado\s+de\s+satisfacci[oó]n)\b",
+            "",
+            text_lower,
+        )
+
+        if re.search(r"\b(m[aá]ster|postgrado|posgrado)\b", clean_desc_for_edu):
+            education_level = "Máster / Postgrado"
+        elif re.search(r"\b(?:formaci[oó]n\s+profesional|ciclo\s+formativo|grado\s+superior|grado\s+medio|fp1|fp2|\bfp\b)\b", clean_desc_for_edu):
+            education_level = "FP / Ciclo Formativo"
+        elif re.search(r"\b(?:grado\s+universitario|titulaci[oó]n\s+universitaria|carrera\s+universitaria|licenciatura|licenciad[oa]|ingenier[ií]a|ingenier[oa]|graduad[oa]\s+en|diplomatur[ao])\b", clean_desc_for_edu):
+            education_level = "Grado / Universidad"
+
+    return {
+        "modality": modality,
+        "contract_type": contract_type,
+        "schedule": schedule,
+        "education_level": education_level,
+    }
+
+
 def _decode_row_json_fields(row_data: Dict[str, Any]) -> Dict[str, Any]:
     """Decodifica dinámicamente cualquier campo serializado en JSON (listas o diccionarios)."""
     for key, val in list(row_data.items()):
@@ -205,6 +331,7 @@ class Database:
                     alternate_sources TEXT DEFAULT '[]',
                     telegram_notified INTEGER DEFAULT 0,
                     ui_saved INTEGER DEFAULT 1,
+                    modality TEXT,
                     contract_type TEXT,
                     schedule TEXT,
                     education_level TEXT,
@@ -217,8 +344,6 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON jobs(created_at);
                 CREATE INDEX IF NOT EXISTS idx_jobs_duplicate_of ON jobs(duplicate_of_id);
                 CREATE INDEX IF NOT EXISTS idx_jobs_notification_channels ON jobs(telegram_notified, ui_saved);
-                CREATE INDEX IF NOT EXISTS idx_jobs_contract_schedule ON jobs(contract_type, schedule);
-                CREATE INDEX IF NOT EXISTS idx_jobs_cv_filename ON jobs(cv_filename);
 
                 CREATE TABLE IF NOT EXISTS evaluations (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -300,6 +425,7 @@ class Database:
                 cols_info = conn.execute("PRAGMA table_info(jobs);").fetchall()
                 existing_cols = {col["name"] for col in cols_info}
                 for col, col_def in [
+                    ("modality", "TEXT"),
                     ("contract_type", "TEXT"),
                     ("schedule", "TEXT"),
                     ("education_level", "TEXT"),
@@ -311,6 +437,7 @@ class Database:
                 ]:
                     if col not in existing_cols:
                         conn.execute(f"ALTER TABLE jobs ADD COLUMN {col} {col_def};")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_modality ON jobs(modality);")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_contract_schedule ON jobs(contract_type, schedule);")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_cv_filename ON jobs(cv_filename);")
             except Exception as e:
@@ -323,6 +450,12 @@ class Database:
                 udb["jobs"].enable_fts(["title", "description", "company"], create_triggers=True, tokenize="porter")
         except Exception:
             pass
+
+        # Backfill inicial de metadatos (modalidad, tipo de contrato, jornada) para registros existentes
+        try:
+            self.backfill_jobs_metadata()
+        except Exception as e:
+            logger.debug("Backfill inicial de metadatos completado o ignorado: %s", e)
 
     # =========================================================================
     # ESTADO PERSISTENTE (APP STATE)
@@ -598,38 +731,20 @@ class Database:
         desc_hash = compute_description_hash(description)
         canonical_url = canonicalize_url(raw_url)
 
-        contract_type = job_data.get("contract_type")
-        schedule = job_data.get("schedule")
-        education_level = job_data.get("education_level")
-
-        if not contract_type and description:
-            dl = description.lower()
-            if "indefinid" in dl:
-                contract_type = "Indefinido"
-            elif "temporal" in dl or "duración determinada" in dl:
-                contract_type = "Temporal"
-            elif "práctica" in dl or "practica" in dl or "beca" in dl:
-                contract_type = "Prácticas / Beca"
-            elif "freelance" in dl or "autónom" in dl or "autonom" in dl:
-                contract_type = "Autónomo / Freelance"
-
-        if not schedule and description:
-            dl = description.lower()
-            if "completa" in dl or "full-time" in dl or "full time" in dl:
-                schedule = "Jornada Completa"
-            elif "parcial" in dl or "media jornada" in dl or "part-time" in dl:
-                schedule = "Media Jornada"
-            elif "flexible" in dl:
-                schedule = "Horario Flexible"
-
-        if not education_level and description:
-            dl = description.lower()
-            if any(k in dl for k in ["grado", "ingenier", "universit", "licenciat"]):
-                education_level = "Grado / Universidad"
-            elif any(k in dl for k in ["fp", "ciclo formativo", "módulo", "formación profesional"]):
-                education_level = "FP / Ciclo Formativo"
-            elif any(k in dl for k in ["master", "máster", "postgrado"]):
-                education_level = "Máster / Postgrado"
+        meta_extracted = extract_job_metadata(
+            title=title,
+            description=description,
+            location=location,
+            is_remote=bool(job_data.get("is_remote")),
+            existing_contract=job_data.get("contract_type"),
+            existing_schedule=job_data.get("schedule"),
+            existing_modality=job_data.get("modality"),
+            existing_education=job_data.get("education_level"),
+        )
+        modality = meta_extracted["modality"]
+        contract_type = meta_extracted["contract_type"]
+        schedule = meta_extracted["schedule"]
+        education_level = meta_extracted["education_level"]
 
         from .storage import read_active_cv_pointer
         cv_filename = job_data.get("cv_filename") or read_active_cv_pointer()
@@ -638,7 +753,7 @@ class Database:
 
         with self._get_connection() as conn:
             cursor = conn.execute(
-                "SELECT id, description_hash, alternate_sources, cv_filename FROM jobs WHERE url_hash = ?",
+                "SELECT id, description_hash, alternate_sources, cv_filename, modality, contract_type FROM jobs WHERE url_hash = ?",
                 (url_hash,),
             )
             existing = cursor.fetchone()
@@ -647,21 +762,22 @@ class Database:
                 old_desc_hash = existing["description_hash"]
                 if cv_filename and not existing["cv_filename"]:
                     conn.execute("UPDATE jobs SET cv_filename = ? WHERE id = ?", (cv_filename, existing_id))
-                if old_desc_hash and old_desc_hash != desc_hash:
+                if (old_desc_hash and old_desc_hash != desc_hash) or (not existing["modality"] and modality) or (not existing["contract_type"] and contract_type):
                     conn.execute(
                         """
                         UPDATE jobs SET
                             description = ?,
                             description_hash = ?,
+                            modality = COALESCE(?, modality),
                             contract_type = COALESCE(?, contract_type),
                             schedule = COALESCE(?, schedule),
                             education_level = COALESCE(?, education_level),
                             updated_at = datetime('now', 'localtime')
                         WHERE id = ?
                         """,
-                        (description, desc_hash, contract_type, schedule, education_level, existing_id),
+                        (description, desc_hash, modality, contract_type, schedule, education_level, existing_id),
                     )
-                    logger.info("Descripción actualizada para oferta existente ID %d (%s).", existing_id, title)
+                    logger.info("Oferta ID %d (%s) actualizada con nuevos metadatos.", existing_id, title)
                     return existing_id, "description_updated"
                 return None, "already_exists"
 
@@ -687,16 +803,16 @@ class Database:
                         """
                         INSERT INTO jobs (
                             url_hash, content_fingerprint, description_hash, canonical_url,
-                            title, company, location, is_remote, source, description,
+                            title, company, location, is_remote, modality, source, description,
                             salary_min, salary_max, salary_currency, date_posted, status,
                             duplicate_of_id, similarity_score, contract_type, schedule, education_level,
                             cv_filename
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'duplicate', ?, ?, ?, ?, ?, ?)
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'duplicate', ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             url_hash, content_fingerprint, desc_hash, canonical_url,
-                            title, company, location, 1 if job_data.get("is_remote") else 0,
-                            source, description, job_data.get("salary_min"),
+                            title, company, location, 1 if (job_data.get("is_remote") or modality == "Remoto") else 0,
+                            modality, source, description, job_data.get("salary_min"),
                             job_data.get("salary_max"), job_data.get("salary_currency", "EUR"),
                             job_data.get("date_posted", ""), cross_dup_id, fuzzy_sim,
                             contract_type, schedule, education_level, cv_filename
@@ -730,15 +846,15 @@ class Database:
                     """
                     INSERT INTO jobs (
                         url_hash, content_fingerprint, description_hash, canonical_url,
-                        title, company, location, is_remote, source, description,
+                        title, company, location, is_remote, modality, source, description,
                         salary_min, salary_max, salary_currency, date_posted, status,
                         contract_type, schedule, education_level, cv_filename
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         url_hash, content_fingerprint, desc_hash, canonical_url,
-                        title, company, location, 1 if job_data.get("is_remote") else 0,
-                        source, description, job_data.get("salary_min"),
+                        title, company, location, 1 if (job_data.get("is_remote") or modality == "Remoto") else 0,
+                        modality, source, description, job_data.get("salary_min"),
                         job_data.get("salary_max"), job_data.get("salary_currency", "EUR"),
                         job_data.get("date_posted", ""), job_data.get("status", "discovered"),
                         contract_type, schedule, education_level, cv_filename,
@@ -767,6 +883,86 @@ class Database:
                 "UPDATE jobs SET status = ?, updated_at = datetime('now', 'localtime') WHERE id = ?",
                 (status, job_id),
             )
+
+    def update_job_metadata(
+        self,
+        job_id: int,
+        modality: Optional[str] = None,
+        contract_type: Optional[str] = None,
+        schedule: Optional[str] = None,
+        education_level: Optional[str] = None,
+    ) -> None:
+        """Actualiza explícitamente los campos estructurados de metadatos de una vacante."""
+        updates = []
+        params = []
+        if modality is not None:
+            updates.append("modality = ?")
+            params.append(modality)
+        if contract_type is not None:
+            updates.append("contract_type = ?")
+            params.append(contract_type)
+        if schedule is not None:
+            updates.append("schedule = ?")
+            params.append(schedule)
+        if education_level is not None:
+            updates.append("education_level = ?")
+            params.append(education_level)
+        if not updates:
+            return
+        updates.append("updated_at = datetime('now', 'localtime')")
+        params.append(job_id)
+        with self._get_connection() as conn:
+            conn.execute(f"UPDATE jobs SET {', '.join(updates)} WHERE id = ?", params)
+
+    def backfill_jobs_metadata(self) -> int:
+        """
+        Rellena y normaliza los metadatos de modalidad, tipo de contrato, jornada
+        y nivel educativo para todas las vacantes existentes en la base de datos
+        que tengan campos vacíos o valores obsoletos.
+        """
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, title, description, location, is_remote, modality,
+                       contract_type, schedule, education_level
+                FROM jobs
+                WHERE modality IS NULL OR TRIM(modality) = '' OR contract_type IS NULL OR contract_type = 'Prácticas / Beca'
+                """
+            ).fetchall()
+            updated_count = 0
+            for r in rows:
+                extracted = extract_job_metadata(
+                    title=r["title"] or "",
+                    description=r["description"] or "",
+                    location=r["location"] or "",
+                    is_remote=bool(r["is_remote"]),
+                    existing_contract=None if r["contract_type"] == "Prácticas / Beca" else r["contract_type"],
+                    existing_schedule=r["schedule"],
+                    existing_modality=r["modality"],
+                    existing_education=r["education_level"],
+                )
+                conn.execute(
+                    """
+                    UPDATE jobs SET
+                        modality = ?,
+                        contract_type = ?,
+                        schedule = ?,
+                        education_level = ?,
+                        updated_at = datetime('now', 'localtime')
+                    WHERE id = ?
+                    """,
+                    (
+                        extracted["modality"],
+                        extracted["contract_type"],
+                        extracted["schedule"],
+                        extracted["education_level"],
+                        r["id"],
+                    ),
+                )
+                updated_count += 1
+            if updated_count > 0:
+                logger.info("Backfill completado: actualizados metadatos de %d vacantes en SQLite.", updated_count)
+            return updated_count
 
     def update_job_channel_status(
         self,
@@ -927,11 +1123,11 @@ class Database:
             mod_subclauses = []
             for m in active_modalities:
                 if m in ("remoto", "teletrabajo"):
-                    mod_subclauses.append("((j.is_remote = 1 OR LOWER(j.location) LIKE '%remot%' OR LOWER(j.location) LIKE '%teletrabaj%' OR LOWER(j.title) LIKE '%remot%' OR LOWER(j.title) LIKE '%teletrabaj%') AND LOWER(j.location) NOT LIKE '%hibrid%' AND LOWER(j.location) NOT LIKE '%hybrid%' AND LOWER(j.title) NOT LIKE '%hibrid%' AND LOWER(j.title) NOT LIKE '%hybrid%')")
-                elif m == "hibrido":
-                    mod_subclauses.append("(LOWER(j.location) LIKE '%hibrid%' OR LOWER(j.location) LIKE '%hybrid%' OR LOWER(j.location) LIKE '%híbrid%' OR LOWER(j.title) LIKE '%hibrid%' OR LOWER(j.title) LIKE '%hybrid%' OR LOWER(j.title) LIKE '%híbrid%' OR LOWER(j.description) LIKE '%hibrid%' OR LOWER(j.description) LIKE '%hybrid%' OR LOWER(j.description) LIKE '%híbrid%')")
+                    mod_subclauses.append("(j.modality = 'Remoto' OR (j.modality IS NULL AND ((j.is_remote = 1 OR LOWER(j.location) LIKE '%remot%' OR LOWER(j.location) LIKE '%teletrabaj%' OR LOWER(j.title) LIKE '%remot%' OR LOWER(j.title) LIKE '%teletrabaj%') AND LOWER(j.location) NOT LIKE '%hibrid%' AND LOWER(j.location) NOT LIKE '%hybrid%' AND LOWER(j.title) NOT LIKE '%hibrid%' AND LOWER(j.title) NOT LIKE '%hybrid%')))")
+                elif m in ("hibrido", "híbrido"):
+                    mod_subclauses.append("(j.modality = 'Híbrido' OR (j.modality IS NULL AND (LOWER(j.location) LIKE '%hibrid%' OR LOWER(j.location) LIKE '%hybrid%' OR LOWER(j.location) LIKE '%híbrid%' OR LOWER(j.title) LIKE '%hibrid%' OR LOWER(j.title) LIKE '%hybrid%' OR LOWER(j.title) LIKE '%híbrid%' OR LOWER(j.description) LIKE '%hibrid%' OR LOWER(j.description) LIKE '%hybrid%' OR LOWER(j.description) LIKE '%híbrid%')))")
                 elif m == "presencial":
-                    mod_subclauses.append("(j.is_remote = 0 AND LOWER(j.location) NOT LIKE '%remot%' AND LOWER(j.location) NOT LIKE '%teletrabaj%' AND LOWER(j.title) NOT LIKE '%remot%' AND LOWER(j.title) NOT LIKE '%teletrabaj%' AND LOWER(j.location) NOT LIKE '%hibrid%' AND LOWER(j.location) NOT LIKE '%hybrid%' AND LOWER(j.location) NOT LIKE '%híbrid%' AND LOWER(j.title) NOT LIKE '%hibrid%' AND LOWER(j.title) NOT LIKE '%hybrid%' AND LOWER(j.title) NOT LIKE '%híbrid%' AND LOWER(j.description) NOT LIKE '%hibrid%' AND LOWER(j.description) NOT LIKE '%hybrid%')")
+                    mod_subclauses.append("(j.modality = 'Presencial' OR (j.modality IS NULL AND (j.is_remote = 0 AND LOWER(j.location) NOT LIKE '%remot%' AND LOWER(j.location) NOT LIKE '%teletrabaj%' AND LOWER(j.title) NOT LIKE '%remot%' AND LOWER(j.title) NOT LIKE '%teletrabaj%' AND LOWER(j.location) NOT LIKE '%hibrid%' AND LOWER(j.location) NOT LIKE '%hybrid%' AND LOWER(j.location) NOT LIKE '%híbrid%' AND LOWER(j.title) NOT LIKE '%hibrid%' AND LOWER(j.title) NOT LIKE '%hybrid%' AND LOWER(j.title) NOT LIKE '%híbrid%' AND LOWER(j.description) NOT LIKE '%hibrid%' AND LOWER(j.description) NOT LIKE '%hybrid%')))")
             if mod_subclauses:
                 where_clauses.append(f"({' OR '.join(mod_subclauses)})")
         elif is_remote is not None:
@@ -1020,7 +1216,7 @@ class Database:
                     j.date_posted, j.created_at, j.updated_at, j.status,
                     j.duplicate_of_id, j.similarity_score, j.alternate_sources,
                     j.telegram_notified, j.ui_saved,
-                    j.description, j.contract_type, j.schedule, j.education_level,
+                    j.description, j.modality, j.contract_type, j.schedule, j.education_level,
                     e.score, e.fit_level, e.should_apply, e.matched_skills,
                     d.cv_pdf_path, d.cv_md_path, d.letter_pdf_path, d.letter_md_path
                 FROM jobs j
@@ -1486,19 +1682,19 @@ class Database:
             # 2. Modalidades de trabajo
             modalities = []
             remote_count = conn.execute(
-                f"SELECT COUNT(*) FROM {base_from} WHERE {base_where} AND ((j.is_remote = 1 OR LOWER(j.location) LIKE '%remot%' OR LOWER(j.location) LIKE '%teletrabaj%' OR LOWER(j.title) LIKE '%remot%' OR LOWER(j.title) LIKE '%teletrabaj%') AND LOWER(j.location) NOT LIKE '%hibrid%' AND LOWER(j.location) NOT LIKE '%hybrid%' AND LOWER(j.title) NOT LIKE '%hibrid%' AND LOWER(j.title) NOT LIKE '%hybrid%')"
+                f"SELECT COUNT(*) FROM {base_from} WHERE {base_where} AND (j.modality = 'Remoto' OR (j.modality IS NULL AND ((j.is_remote = 1 OR LOWER(j.location) LIKE '%remot%' OR LOWER(j.location) LIKE '%teletrabaj%' OR LOWER(j.title) LIKE '%remot%' OR LOWER(j.title) LIKE '%teletrabaj%') AND LOWER(j.location) NOT LIKE '%hibrid%' AND LOWER(j.location) NOT LIKE '%hybrid%' AND LOWER(j.title) NOT LIKE '%hibrid%' AND LOWER(j.title) NOT LIKE '%hybrid%')))"
             ).fetchone()[0]
             if remote_count > 0:
                 modalities.append({"id": "remoto", "label": "Remoto", "count": remote_count})
 
             hybrid_count = conn.execute(
-                f"SELECT COUNT(*) FROM {base_from} WHERE {base_where} AND (LOWER(j.location) LIKE '%hibrid%' OR LOWER(j.location) LIKE '%hybrid%' OR LOWER(j.location) LIKE '%híbrid%' OR LOWER(j.title) LIKE '%hibrid%' OR LOWER(j.title) LIKE '%hybrid%' OR LOWER(j.title) LIKE '%híbrid%' OR LOWER(j.description) LIKE '%hibrid%' OR LOWER(j.description) LIKE '%hybrid%' OR LOWER(j.description) LIKE '%híbrid%')"
+                f"SELECT COUNT(*) FROM {base_from} WHERE {base_where} AND (j.modality = 'Híbrido' OR (j.modality IS NULL AND (LOWER(j.location) LIKE '%hibrid%' OR LOWER(j.location) LIKE '%hybrid%' OR LOWER(j.location) LIKE '%híbrid%' OR LOWER(j.title) LIKE '%hibrid%' OR LOWER(j.title) LIKE '%hybrid%' OR LOWER(j.title) LIKE '%híbrid%' OR LOWER(j.description) LIKE '%hibrid%' OR LOWER(j.description) LIKE '%hybrid%' OR LOWER(j.description) LIKE '%híbrid%')))"
             ).fetchone()[0]
             if hybrid_count > 0:
                 modalities.append({"id": "hibrido", "label": "Híbrido", "count": hybrid_count})
 
             onsite_count = conn.execute(
-                f"SELECT COUNT(*) FROM {base_from} WHERE {base_where} AND (j.is_remote = 0 AND LOWER(j.location) NOT LIKE '%remot%' AND LOWER(j.location) NOT LIKE '%teletrabaj%' AND LOWER(j.title) NOT LIKE '%remot%' AND LOWER(j.title) NOT LIKE '%teletrabaj%' AND LOWER(j.location) NOT LIKE '%hibrid%' AND LOWER(j.location) NOT LIKE '%hybrid%' AND LOWER(j.location) NOT LIKE '%híbrid%' AND LOWER(j.title) NOT LIKE '%hibrid%' AND LOWER(j.title) NOT LIKE '%hybrid%' AND LOWER(j.title) NOT LIKE '%híbrid%' AND LOWER(j.description) NOT LIKE '%hibrid%' AND LOWER(j.description) NOT LIKE '%hybrid%')"
+                f"SELECT COUNT(*) FROM {base_from} WHERE {base_where} AND (j.modality = 'Presencial' OR (j.modality IS NULL AND (j.is_remote = 0 AND LOWER(j.location) NOT LIKE '%remot%' AND LOWER(j.location) NOT LIKE '%teletrabaj%' AND LOWER(j.title) NOT LIKE '%remot%' AND LOWER(j.title) NOT LIKE '%teletrabaj%' AND LOWER(j.location) NOT LIKE '%hibrid%' AND LOWER(j.location) NOT LIKE '%hybrid%' AND LOWER(j.location) NOT LIKE '%híbrid%' AND LOWER(j.title) NOT LIKE '%hibrid%' AND LOWER(j.title) NOT LIKE '%hybrid%' AND LOWER(j.title) NOT LIKE '%híbrid%' AND LOWER(j.description) NOT LIKE '%hibrid%' AND LOWER(j.description) NOT LIKE '%hybrid%')))"
             ).fetchone()[0]
             if onsite_count > 0:
                 modalities.append({"id": "presencial", "label": "Presencial", "count": onsite_count})

@@ -14,6 +14,7 @@ import {
   Sparkles,
   X,
   RotateCcw,
+  Trash2,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -32,9 +33,10 @@ interface JobCardProps {
   onOpenDetail: (id: number) => void;
   onUpdateStatus?: (id: number, newStatus: string) => void;
   onUpdateJob?: (updatedJob: JobListItem) => void;
+  onDeleteJob?: (id: number) => void;
 }
 
-export function JobCard({ job, onOpenDetail, onUpdateStatus, onUpdateJob }: JobCardProps) {
+export function JobCard({ job, onOpenDetail, onUpdateStatus, onUpdateJob, onDeleteJob }: JobCardProps) {
   const sourceMeta = PORTAL_SOURCES[job.source as keyof typeof PORTAL_SOURCES];
   const isEvaluating = job.status === "evaluating";
   const isDiscarded = job.status === "discarded";
@@ -227,6 +229,22 @@ export function JobCard({ job, onOpenDetail, onUpdateStatus, onUpdateJob }: JobC
                 title={isDiscarded ? "Recuperar a ofertas activas" : "Descartar oferta"}
               >
                 {isDiscarded ? <RotateCcw className="h-3.5 w-3.5" /> : <X className="h-3.5 w-3.5" />}
+              </Button>
+            )}
+
+            {/* Eliminar permanentemente de la BD para que se reevalúe al encontrarla de nuevo */}
+            {isDiscarded && onDeleteJob && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDeleteJob(job.id);
+                }}
+                className="h-7 w-7 p-0 rounded-md shrink-0 text-muted-foreground/60 hover:text-rose-400 hover:bg-rose-500/15"
+                title="Eliminar de la BD (se reevaluará desde cero si se vuelve a encontrar)"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
               </Button>
             )}
           </div>

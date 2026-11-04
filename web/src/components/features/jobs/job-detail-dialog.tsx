@@ -10,6 +10,7 @@ import {
   XCircle,
   X,
   RotateCcw,
+  Trash2,
 } from "lucide-react";
 import { Dialog } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -23,6 +24,7 @@ interface JobDetailDialogProps {
   jobDetail: JobDetail | null;
   loading: boolean;
   onUpdateStatus?: (id: number, status: string) => void;
+  onDeleteJob?: (id: number) => void;
 }
 
 export function JobDetailDialog({
@@ -31,6 +33,7 @@ export function JobDetailDialog({
   jobDetail,
   loading,
   onUpdateStatus,
+  onDeleteJob,
 }: JobDetailDialogProps) {
   const formatSalary = () => {
     if (!jobDetail) return null;
@@ -132,6 +135,22 @@ export function JobDetailDialog({
                       <span>Descartar</span>
                     </>
                   )}
+                </Button>
+              )}
+
+              {jobDetail.status === "discarded" && onDeleteJob && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    onDeleteJob(jobDetail.id);
+                    onOpenChange(false);
+                  }}
+                  className="h-7 px-2.5 text-2xs flex items-center gap-1.5 font-medium text-rose-400 border-rose-500/30 hover:bg-rose-500/10"
+                  title="Eliminar permanentemente de la BD (se reevaluará desde cero si se vuelve a encontrar)"
+                >
+                  <Trash2 className="h-3 w-3" />
+                  <span>Eliminar de BD</span>
                 </Button>
               )}
 

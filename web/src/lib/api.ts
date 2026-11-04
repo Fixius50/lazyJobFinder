@@ -289,6 +289,10 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ status }),
     }),
+  deleteJob: (jobId: number) =>
+    request<{ success: boolean; job_id: number; message: string }>(`/jobs/${jobId}`, {
+      method: "DELETE",
+    }),
   updateJobChannel: (jobId: number, payload: { telegram_notified?: number; ui_saved?: number }) =>
     request<{ success: boolean }>(`/jobs/${jobId}/channel`, {
       method: "PATCH",

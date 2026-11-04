@@ -543,6 +543,20 @@ export function ApplicationsView() {
     );
   };
 
+  const handleDeleteJob = async (jobId: number) => {
+    try {
+      await api.deleteJob(jobId);
+      setRawJobs((prev) => prev.filter((j) => j.id !== jobId));
+      if (selectedJobDetail && selectedJobDetail.id === jobId) {
+        setDetailModalOpen(false);
+      }
+      toast.success("Oferta y evaluaciones eliminadas de SQLite (se reevaluará al encontrarse de nuevo).");
+      loadFacets();
+    } catch (err: any) {
+      toast.error(`Error al eliminar oferta: ${err.message || err}`);
+    }
+  };
+
   const handleRefresh = async () => {
     try {
       setLoading(true);
@@ -795,6 +809,7 @@ export function ApplicationsView() {
                     onOpenDetail={handleOpenDetail}
                     onUpdateStatus={handleUpdateStatus}
                     onUpdateJob={handleJobUpdated}
+                    onDeleteJob={handleDeleteJob}
                   />
                 ))}
               </div>
@@ -867,6 +882,7 @@ export function ApplicationsView() {
         jobDetail={selectedJobDetail}
         loading={detailLoading}
         onUpdateStatus={handleUpdateStatus}
+        onDeleteJob={handleDeleteJob}
       />
     </div>
   );

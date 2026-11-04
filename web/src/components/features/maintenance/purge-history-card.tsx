@@ -5,6 +5,7 @@ import { Trash2, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog } from "@/components/ui/dialog";
+import { toast } from "@/components/ui/toast";
 import { api } from "@/lib/api";
 import { CONFIRMATION_PHRASES } from "@/lib/constants";
 
@@ -25,13 +26,14 @@ export function PurgeHistoryButton({ onHistoryCleared, className = "", iconOnly 
   const handleClearHistory = async () => {
     setIsLoading(true);
     try {
-      await api.maintenanceClearHistory(CONFIRMATION_PHRASES.clear_history);
+      const res = await api.maintenanceClearHistory(CONFIRMATION_PHRASES.clear_history);
       setModalOpen(false);
+      toast.success(res.message || "Historial purgado: ofertas y evaluaciones eliminadas de SQLite.");
       if (onHistoryCleared) {
         onHistoryCleared();
       }
     } catch (e: any) {
-      alert(`Fallo al borrar historial: ${e.message}`);
+      toast.error(`Fallo al borrar historial: ${e.message}`);
     } finally {
       setIsLoading(false);
     }

@@ -178,6 +178,22 @@ def update_job_channel_status(job_id: int, req: UpdateJobChannelRequest) -> Dict
     return {"success": True, "job_id": job_id}
 
 
+@router.delete("/{job_id}")
+def delete_job(job_id: int) -> Dict[str, Any]:
+    """Elimina permanentemente una oferta, sus evaluaciones y documentos generados de SQLite."""
+    db = get_db()
+    deleted = db.delete_job(job_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"Oferta con ID {job_id} no encontrada.")
+
+    db.log_event("INFO", "jobs", f"Oferta ID {job_id} eliminada permanentemente de SQLite y evaluaciones.")
+    return {
+        "success": True,
+        "job_id": job_id,
+        "message": f"Oferta {job_id} eliminada con éxito de la base de datos y de las evaluaciones.",
+    }
+
+
 @router.get("/{job_id}/document/{doc_type}")
 def download_job_document(job_id: int, doc_type: str):
     """

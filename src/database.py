@@ -747,9 +747,19 @@ class Database:
         education_level = meta_extracted["education_level"]
 
         from .storage import read_active_cv_pointer
-        cv_filename = job_data.get("cv_filename") or read_active_cv_pointer()
-        if cv_filename in ("none", "Ninguno", ""):
+        cv_filename = job_data.get("cv_filename")
+        if not cv_filename:
+            ptr = read_active_cv_pointer()
+            if isinstance(ptr, dict):
+                cv_filename = ptr.get("selected_filename")
+            elif isinstance(ptr, str):
+                cv_filename = ptr
+        if isinstance(cv_filename, dict):
+            cv_filename = cv_filename.get("selected_filename")
+        if cv_filename in ("none", "Ninguno", "", None):
             cv_filename = None
+        else:
+            cv_filename = str(cv_filename).strip()
 
         with self._get_connection() as conn:
             cursor = conn.execute(
@@ -1908,35 +1918,114 @@ class Database:
             )
         return deleted_count
 
-    def clear_applications_history(self) -> Dict[str, int]:
-        """Elimina el historial completo de ofertas, evaluaciones y documentos generados."""
-        udb = self.get_utils_db()
-        if udb:
+    def delete_job(self, job_id: int) -> bool:
+        """Elimina una oferta individual, sus evaluaciones y documentos generados de la BD y del disco."""
+        with self._get_connection() as conn:
+            # 1. Obtener y eliminar archivos físicos de documentos generados
+            cursor = conn.execute(
+                "SELECT cv_pdf_path, cv_md_path, letter_pdf_path, letter_md_path FROM generated_documents WHERE job_id = ?",
+                (job_id,),
+            )
+            row = cursor.fetchone()
+            if row:
+                for path_key in ("cv_pdf_path", "cv_md_path", "letter_pdf_path", "letter_md_path"):
+                    p = row[path_key]
+                    if p and os.path.exists(p):
+                        try:
+                            os.remove(p)
+                        except Exception as e:
+                            logger.warning("No se pudo eliminar archivo físico %s: %s", p, e)
+                if row["cv_pdf_path"]:
+                    folder = os.path.dirname(row["cv_pdf_path"])
+                    if os.path.exists(folder) and not os.listdir(folder):
+                        try:
+                            os.rmdir(folder)
+                        except Exception:
+                            pass
+
+            # 2. Eliminar explícitamente de generated_documents y evaluations
+            conn.execute("DELETE FROM generated_documents WHERE job_id = ?", (job_id,))
+            conn.execute("DELETE FROM evaluations WHERE job_id = ?", (job_id,))
+
+            # 3. Eliminar la vacante de jobs (y limpiar posibles referencias de duplicados huérfanas)
+            conn.execute("UPDATE jobs SET duplicate_of_id = NULL WHERE duplicate_of_id = ?", (job_id,))
+            res = conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
+            deleted = res.rowcount > 0
+
+            # 4. Sincronizar FTS si existe
             try:
-                jobs_count = udb["jobs"].count
-                evals_count = udb["evaluations"].count
-                docs_count = udb["generated_documents"].count
-                udb["generated_documents"].delete_where()
-                udb["evaluations"].delete_where()
-                udb["jobs"].delete_where()
-                udb["pipeline_runs"].delete_where()
-                return {
-                    "jobs_deleted": jobs_count,
-                    "evaluations_deleted": evals_count,
-                    "documents_deleted": docs_count,
-                }
+                conn.execute("DELETE FROM jobs_fts WHERE rowid = ?", (job_id,))
             except Exception:
                 pass
 
+            if deleted:
+                logger.info("Oferta ID %d y sus evaluaciones eliminadas de la base de datos.", job_id)
+            return deleted
+
+    def clear_applications_history(self) -> Dict[str, int]:
+        """Elimina el historial completo de ofertas, evaluaciones y documentos generados (en BD SQLite y en disco)."""
         with self._get_connection() as conn:
             jobs_count = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
             evals_count = conn.execute("SELECT COUNT(*) FROM evaluations").fetchone()[0]
             docs_count = conn.execute("SELECT COUNT(*) FROM generated_documents").fetchone()[0]
 
+            # 1. Eliminar archivos físicos de documentos generados en disco
+            try:
+                doc_rows = conn.execute(
+                    "SELECT cv_pdf_path, cv_md_path, letter_pdf_path, letter_md_path FROM generated_documents"
+                ).fetchall()
+                for row in doc_rows:
+                    for field in ["cv_pdf_path", "cv_md_path", "letter_pdf_path", "letter_md_path"]:
+                        file_path = row[field]
+                        if file_path and os.path.exists(file_path):
+                            try:
+                                os.remove(file_path)
+                            except Exception as e:
+                                logger.warning("No se pudo eliminar archivo físico %s: %s", file_path, e)
+                    if row["cv_pdf_path"]:
+                        folder = os.path.dirname(row["cv_pdf_path"])
+                        if os.path.exists(folder) and not os.listdir(folder):
+                            try:
+                                os.rmdir(folder)
+                            except Exception:
+                                pass
+            except Exception as e:
+                logger.warning("Error limpiando archivos físicos de documentos generados: %s", e)
+
+            # 2. Desactivar temporalmente foreign keys para purgar tablas sin restricciones de orden
+            conn.execute("PRAGMA foreign_keys = OFF;")
             conn.execute("DELETE FROM generated_documents;")
             conn.execute("DELETE FROM evaluations;")
             conn.execute("DELETE FROM jobs;")
             conn.execute("DELETE FROM pipeline_runs;")
+
+            # 3. Limpiar índice FTS5
+            try:
+                conn.execute("DELETE FROM jobs_fts;")
+            except Exception:
+                pass
+
+            # 4. Reiniciar secuencias autoincrementales
+            try:
+                conn.execute(
+                    "DELETE FROM sqlite_sequence WHERE name IN ('jobs', 'evaluations', 'generated_documents', 'pipeline_runs');"
+                )
+            except Exception:
+                pass
+
+            conn.execute("PRAGMA foreign_keys = ON;")
+
+        # 5. Ejecutar WAL checkpoint para truncar el log y dejar la base de datos totalmente limpia
+        try:
+            with self._get_connection() as conn:
+                conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
+        except Exception as e:
+            logger.debug("WAL checkpoint tras purgar historial: %s", e)
+
+        logger.info(
+            "Historial purgado completamente de SQLite y disco: %d ofertas, %d evaluaciones, %d documentos.",
+            jobs_count, evals_count, docs_count
+        )
 
         return {
             "jobs_deleted": jobs_count,
@@ -1950,8 +2039,36 @@ class Database:
             return 0
         cleaned = str(cv_filename).strip()
         with self._get_connection() as conn:
-            cursor = conn.execute("DELETE FROM jobs WHERE cv_filename = ?", (cleaned,))
+            job_rows = conn.execute("SELECT id FROM jobs WHERE cv_filename = ?", (cleaned,)).fetchall()
+            job_ids = [r["id"] for r in job_rows]
+            if not job_ids:
+                return 0
+
+            # Eliminar documentos físicos primero
+            placeholders = ",".join("?" * len(job_ids))
+            doc_rows = conn.execute(
+                f"SELECT cv_pdf_path, cv_md_path, letter_pdf_path, letter_md_path FROM generated_documents WHERE job_id IN ({placeholders})",
+                job_ids,
+            ).fetchall()
+            for row in doc_rows:
+                for field in ["cv_pdf_path", "cv_md_path", "letter_pdf_path", "letter_md_path"]:
+                    file_path = row[field]
+                    if file_path and os.path.exists(file_path):
+                        try:
+                            os.remove(file_path)
+                        except Exception as e:
+                            logger.warning("No se pudo eliminar archivo físico %s: %s", file_path, e)
+                if row["cv_pdf_path"]:
+                    folder = os.path.dirname(row["cv_pdf_path"])
+                    if os.path.exists(folder) and not os.listdir(folder):
+                        try:
+                            os.rmdir(folder)
+                        except Exception:
+                            pass
+
+            conn.execute(f"DELETE FROM generated_documents WHERE job_id IN ({placeholders})", job_ids)
+            conn.execute(f"DELETE FROM evaluations WHERE job_id IN ({placeholders})", job_ids)
+            cursor = conn.execute(f"DELETE FROM jobs WHERE id IN ({placeholders})", job_ids)
             deleted = int(cursor.rowcount)
-            conn.commit()
             logger.info("Eliminadas %d ofertas asociadas al CV '%s'", deleted, cv_filename)
             return deleted

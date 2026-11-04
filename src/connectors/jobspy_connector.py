@@ -61,7 +61,7 @@ class JobSpyConnector(BaseConnector):
                         "site_name": [site],
                         "search_term": term,
                         "location": primary_location,
-                        "results_wanted": min(limit_per_search, 15),
+                        "results_wanted": min(max(5, limit_per_search), 100),
                         "hours_old": hours_old,
                         "fetch_description": True,
                         "linkedin_fetch_description": True,
@@ -124,7 +124,7 @@ class JobSpyConnector(BaseConnector):
                                     try:
                                         from price_parser import parse_price
                                         import re
-                                        for snippet in re.findall(r"(?:salario|sueldo|remuneraci[oó]n)?\s*[:\s]?\s*([0-9.,kK\s]+(?:\s*€|\s*EUR|\s*euros)[\w\s/]*)", desc[:800], re.IGNORECASE):
+                                        for snippet in re.findall(r"(?:salario|sueldo|remuneraci[oó]n)?\s*[:\s]?\s*([0-9.,kK\s]+(?:\s*€|\s*EUR|\s*euros)[\w\s/]*)", desc, re.IGNORECASE):
                                             p = parse_price(snippet)
                                             if p.amount_float and 500 < p.amount_float < 200000:
                                                 val = float(p.amount_float)

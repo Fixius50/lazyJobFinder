@@ -67,11 +67,12 @@ class JobEvaluationSchema(BaseModel):
     )
 
 
-def format_job_content_for_ai(job: Dict[str, Any], max_chars: int = 3000) -> str:
+def format_job_content_for_ai(job: Dict[str, Any], max_chars: Optional[int] = None) -> str:
     """
     Formatea y limpia el contenido real de la oferta para su análisis por la IA.
     Elimina etiquetas HTML, normaliza saltos de línea y viñetas, limpia entidades,
     elimina boilerplate legal/corporativo redundante y aplica blindaje de seguridad contra prompt injection.
+    Si max_chars es None, conserva el contenido completo almacenado en SQLite sin truncar.
     """
     raw_desc = job.get("description") or ""
     # Si viene con HTML (como en portales web / scrapers / RSS), limpiarlo estructuradamente
@@ -101,7 +102,8 @@ def format_job_content_for_ai(job: Dict[str, Any], max_chars: int = 3000) -> str
     if not desc.strip():
         desc = "(Sin descripción detallada disponible en el portal origen. Evaluar únicamente los datos comprobables del puesto)."
 
-    desc = desc[:max_chars]
+    if max_chars is not None:
+        desc = desc[:max_chars]
     desc = desc.replace("</untrusted_job_description>", "")
     desc = desc.replace("<untrusted_job_description>", "")
 
@@ -285,10 +287,10 @@ class ScoringEngine:
             "}"
         )
 
-        formatted_description = format_job_content_for_ai(job, max_chars=2600)
+        formatted_description = format_job_content_for_ai(job)
         user_prompt = (
             f"### CURRÍCULUM ACTIVO DEL CANDIDATO ({cv_meta.get('filename')}):\n"
-            f"```markdown\n{cv_text[:8000]}\n```\n\n"
+            f"```markdown\n{cv_text.strip()}\n```\n\n"
             f"### VACANTE A EVALUAR:\n"
             f"Título: {job.get('title')}\n"
             f"Empresa: {job.get('company')}\n"

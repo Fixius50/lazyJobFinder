@@ -10,6 +10,7 @@ APPLICATION_STATUSES: Set[str] = {
     "interview",
     "discarded",
     "rejected",
+    "duplicate",
 }
 
 SERVICES: Set[str] = {"ollama", "lazyjobfinder"}

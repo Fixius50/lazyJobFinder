@@ -421,7 +421,7 @@ class TelegramJobBot:
         matched = eval_result.get("matched_skills", [])
         missing = eval_result.get("missing_skills", [])
 
-        matched_str = ", ".join(html.escape(str(s)) for s in matched) if matched else "Bases formativas DAM"
+        matched_str = ", ".join(html.escape(str(s)) for s in matched) if matched else "Perfil y competencias generales acreditadas"
         missing_str = ", ".join(html.escape(str(s)) for s in missing) if missing else "Ninguno relevante"
 
         card = (

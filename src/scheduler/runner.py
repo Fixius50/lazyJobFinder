@@ -64,7 +64,7 @@ def _calculate_job_evaluation_priority(job: Dict[str, Any], keywords: List[str])
     if not keywords:
         return 0
     title = (job.get("title") or "").lower()
-    desc = (job.get("description") or "")[:500].lower()
+    desc = (job.get("description") or "").lower()
     score = 0
     for kw in keywords:
         if kw in title:

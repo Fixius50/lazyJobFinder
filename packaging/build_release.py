@@ -178,6 +178,12 @@ class ReleaseBuilder:
         with open(os.path.join(STAGING_DIR, "docker-compose.yml"), "w", encoding="utf-8") as f:
             f.write(compose_content)
 
+        # Copiar extensiones opcionales de aceleración por GPU (NVIDIA y AMD ROCm / WSL2)
+        for compose_ext in ["docker-compose.gpu.yml", "docker-compose.rocm.yml", "docker-compose.rocm-wsl.yml"]:
+            ext_path = os.path.join(ROOT_DIR, compose_ext)
+            if os.path.exists(ext_path):
+                shutil.copy2(ext_path, os.path.join(STAGING_DIR, compose_ext))
+
         # 2. Copiar .env.example desde la raíz del proyecto
         shutil.copy2(
             os.path.join(ROOT_DIR, ".env.example"),

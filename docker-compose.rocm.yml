@@ -4,10 +4,11 @@
 # Válido para estaciones o servidores con Linux nativo (Ubuntu 22.04 / 24.04, Debian)
 # donde el driver amdgpu expone /dev/kfd y /dev/dri directamente en el sistema.
 #
-# NOTA TÉCNICA: En Windows con Docker Desktop (WSL2), el kernel virtualizado
-# no crea /dev/kfd (utiliza /dev/dxg para DirectX), por lo que mapear /dev/kfd
-# en Windows arroja "no such file or directory". Esta extensión está diseñada
-# para activarse automáticamente si Docker detecta la presencia de /dev/kfd.
+# Compatible con:
+# - RDNA 3 (Radeon RX 7900 XTX/XT, 7800 XT, 7700 XT, 7600 -> gfx1100 / HSA 11.0.0)
+# - RDNA 2 (Radeon RX 6900, 6800, 6700, 6600 -> gfx1030 / HSA 10.3.0)
+# - RDNA 1 (Radeon RX 5700, 5600 -> gfx1010 / HSA 10.1.0)
+# - APUs y aceleradores Radeon Instinct (MI series)
 
 services:
   ollama:
@@ -15,7 +16,9 @@ services:
     devices:
       - /dev/kfd
       - /dev/dri
+    group_add:
+      - video
+      - render
     environment:
-      # Arquitectura RDNA 2 (AMD Radeon RX 6600 -> Navi 23 / gfx1030)
-      - HSA_OVERRIDE_GFX_VERSION=10.3.0
-
+      # Si se define en .env se usará; de lo contrario ROCm intentará autodetección nativa
+      - HSA_OVERRIDE_GFX_VERSION=${HSA_OVERRIDE_GFX_VERSION:-}

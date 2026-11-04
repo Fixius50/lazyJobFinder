@@ -68,9 +68,50 @@ if ! docker compose images -q 2>/dev/null | grep -q .; then
     fi
 fi
 
-# 4. Levantar contenedores
+# 4. Comprobar capacidades de aceleración por hardware en Docker
+echo "--> Comprobando capacidades de aceleración por hardware en Docker..."
+COMPOSE_ARGS=""
+
+# 4.1 Comprobar AMD ROCm nativo en Linux (/dev/kfd y /dev/dri)
+if [ -c "/dev/kfd" ] && [ -d "/dev/dri" ]; then
+    echo "  [OK] Dispositivos AMD ROCm (/dev/kfd y /dev/dri) detectados en Linux."
+    if [ -f "docker-compose.rocm.yml" ]; then
+        # Autodetección de arquitectura AMD si no está definida
+        if [ -z "$HSA_OVERRIDE_GFX_VERSION" ]; then
+            if lspci 2>/dev/null | grep -Ei "Radeon.*(7900|7800|7700|7600)" >/dev/null; then
+                export HSA_OVERRIDE_GFX_VERSION="11.0.0"
+            elif lspci 2>/dev/null | grep -Ei "Radeon.*(6900|6800|6700|6600)" >/dev/null; then
+                export HSA_OVERRIDE_GFX_VERSION="10.3.0"
+            elif lspci 2>/dev/null | grep -Ei "Radeon.*(5700|5600)" >/dev/null; then
+                export HSA_OVERRIDE_GFX_VERSION="10.1.0"
+            fi
+        fi
+        echo "  [OK] Activando imagen ollama/ollama:rocm con aceleración AMD (HSA=${HSA_OVERRIDE_GFX_VERSION:-auto})..."
+        COMPOSE_ARGS="-f docker-compose.yml -f docker-compose.rocm.yml"
+    fi
+fi
+
+# 4.2 Comprobar GPU NVIDIA (nvidia-container-toolkit)
+if [ -z "$COMPOSE_ARGS" ]; then
+    if command -v nvidia-smi &>/dev/null; then
+        if docker run --rm --gpus all hello-world &>/dev/null; then
+            if [ -f "docker-compose.gpu.yml" ]; then
+                echo "  [OK] Aceleración GPU NVIDIA detectada y activa para Docker."
+                COMPOSE_ARGS="-f docker-compose.yml -f docker-compose.gpu.yml"
+            fi
+        fi
+    fi
+fi
+
+# 4.3 Fallback CPU optimizado
+if [ -z "$COMPOSE_ARGS" ]; then
+    echo "  [OK] Inferencia en contenedor Docker configurada en CPU de alto rendimiento."
+    COMPOSE_ARGS="-f docker-compose.yml"
+fi
+
+# 4.4 Levantar contenedores
 echo "--> Iniciando servicios con Docker Compose..."
-if ! docker compose up -d; then
+if ! docker compose $COMPOSE_ARGS up -d; then
     echo "[ERROR] Falló el inicio de los contenedores Docker."
     exit 1
 fi

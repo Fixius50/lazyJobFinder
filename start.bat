@@ -180,8 +180,16 @@ cd /d "%~dp0"
 echo.
 echo --^> Comprobando capacidades de aceleracion por hardware en Docker...
 set "DOCKER_COMPOSE_ARGS="
+set "DETECTED_GPU="
 
-:: 1. Comprobar si Docker dispone de nodos de kernel AMD ROCm (/dev/kfd y /dev/dri de Linux)
+:: 1. Comprobar si Ollama ya esta corriendo en el sistema host de Windows (maxima aceleracion GPU nativa)
+curl -s -f --connect-timeout 1 http://127.0.0.1:11434/api/tags >nul 2>&1
+if %ERRORLEVEL% equ 0 (
+    echo   [OK] Servidor Ollama local detectado en Windows [http://127.0.0.1:11434].
+    echo        lazyJobFinder conectara directamente con el host para aprovechar la aceleracion GPU.
+)
+
+:: 2. Comprobar si Docker dispone de nodos de kernel AMD ROCm nativos (/dev/kfd y /dev/dri de Linux)
 docker run --rm --device /dev/kfd hello-world >nul 2>&1
 if %ERRORLEVEL% equ 0 (
     if exist "docker-compose.rocm.yml" (
@@ -190,7 +198,7 @@ if %ERRORLEVEL% equ 0 (
     )
 )
 
-:: 2. Comprobar si Docker dispone de aceleracion GPU NVIDIA (nvidia-container-toolkit)
+:: 3. Comprobar si Docker dispone de aceleracion GPU NVIDIA (nvidia-container-toolkit)
 if not defined DOCKER_COMPOSE_ARGS (
     where nvidia-smi >nul 2>&1
     if !ERRORLEVEL! equ 0 (
@@ -204,9 +212,44 @@ if not defined DOCKER_COMPOSE_ARGS (
     )
 )
 
-:: 3. Si no hay dispositivos de GPU expuestos al daemon Docker (entorno estandar de Windows Desktop)
+:: 4. Comprobar GPU AMD en Windows (WSL2 con ROCDXG /dev/dxg para tarjetas RDNA 3 o forzadas en .env)
 if not defined DOCKER_COMPOSE_ARGS (
-    echo   [i] Docker en Windows no expone /dev/kfd [requiere Linux bare-metal para ROCm].
+    for /f "tokens=*" %%G in ('powershell -NoProfile -Command "(Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name) -join '; '" 2^>nul') do set "DETECTED_GPU=%%G"
+    
+    if defined DETECTED_GPU (
+        echo !DETECTED_GPU! | findstr /i "Radeon AMD" >nul 2>&1
+        if !ERRORLEVEL! equ 0 (
+            :: Deteccion de arquitectura para HSA_OVERRIDE_GFX_VERSION si no esta fijada
+            if not defined HSA_OVERRIDE_GFX_VERSION (
+                echo !DETECTED_GPU! | findstr /i "7900 7800 7700 7600 W7900 W7800" >nul 2>&1
+                if !ERRORLEVEL! equ 0 set "HSA_OVERRIDE_GFX_VERSION=11.0.0"
+                echo !DETECTED_GPU! | findstr /i "6900 6800 6700 6600" >nul 2>&1
+                if !ERRORLEVEL! equ 0 set "HSA_OVERRIDE_GFX_VERSION=10.3.0"
+                echo !DETECTED_GPU! | findstr /i "5700 5600" >nul 2>&1
+                if !ERRORLEVEL! equ 0 set "HSA_OVERRIDE_GFX_VERSION=10.1.0"
+            )
+
+            set "USE_WSL_ROCM=0"
+            if "!USE_ROCM_WSL!"=="1" set "USE_WSL_ROCM=1"
+            echo !DETECTED_GPU! | findstr /i "7900 7800 7700 7600 W7900 W7800" >nul 2>&1
+            if !ERRORLEVEL! equ 0 set "USE_WSL_ROCM=1"
+
+            if "!USE_WSL_ROCM!"=="1" (
+                if exist "docker-compose.rocm-wsl.yml" (
+                    echo   [OK] GPU AMD compatible con WSL2 detectada [!DETECTED_GPU!].
+                    echo        Activando puente ROCm WSL2 [/dev/dxg + ROCDXG, HSA=!HSA_OVERRIDE_GFX_VERSION!]...
+                    set "DOCKER_COMPOSE_ARGS=-f docker-compose.yml -f docker-compose.rocm-wsl.yml"
+                )
+            ) else (
+                echo   [i] GPU AMD detectada en Windows: !DETECTED_GPU!
+                echo   [i] Nota: WSL2 no expone ROCm para esta generacion [requiere Linux nativo o Ollama Windows].
+            )
+        )
+    )
+)
+
+:: 5. Si no hay dispositivos de GPU expuestos al daemon Docker (entorno estandar de Windows Desktop)
+if not defined DOCKER_COMPOSE_ARGS (
     echo   [OK] Inferencia en contenedor Docker configurada en CPU de alto rendimiento [Flash Attention + Q8 KV-Cache + Multi-slot].
     set "DOCKER_COMPOSE_ARGS=-f docker-compose.yml"
 )

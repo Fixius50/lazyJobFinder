@@ -119,14 +119,89 @@ if "!NEED_LOAD!"=="1" (
     )
 )
 
-:: 4. Arrancar los contenedores en segundo plano
+:: 4. Arrancar los contenedores en segundo plano con deteccion de aceleracion por hardware
+echo.
+echo --^> Comprobando capacidades de aceleracion por hardware en Docker...
+set "DOCKER_COMPOSE_ARGS="
+set "DETECTED_GPU="
+
+:: Comprobar si Ollama ya esta corriendo en el sistema host de Windows
+curl -s -f --connect-timeout 1 http://127.0.0.1:11434/api/tags >nul 2>&1
+if %ERRORLEVEL% equ 0 (
+    echo   [OK] Servidor Ollama local detectado en Windows [http://127.0.0.1:11434].
+    echo        lazyJobFinder conectara directamente con el host para aprovechar la aceleracion GPU.
+)
+
+:: Comprobar AMD ROCm nativo en Docker
+docker run --rm --device /dev/kfd hello-world >nul 2>&1
+if %ERRORLEVEL% equ 0 (
+    if exist "docker-compose.rocm.yml" (
+        echo   [OK] Dispositivos AMD ROCm [/dev/kfd] detectados en Docker. Activando ollama/ollama:rocm...
+        set "DOCKER_COMPOSE_ARGS=-f docker-compose.yml -f docker-compose.rocm.yml"
+    )
+)
+
+:: Comprobar GPU NVIDIA
+if not defined DOCKER_COMPOSE_ARGS (
+    where nvidia-smi >nul 2>&1
+    if !ERRORLEVEL! equ 0 (
+        docker run --rm --gpus all hello-world >nul 2>&1
+        if !ERRORLEVEL! equ 0 (
+            if exist "docker-compose.gpu.yml" (
+                echo   [OK] Aceleracion GPU NVIDIA detectada y activa para Docker.
+                set "DOCKER_COMPOSE_ARGS=-f docker-compose.yml -f docker-compose.gpu.yml"
+            )
+        )
+    )
+)
+
+:: Comprobar GPU AMD en Windows WSL2
+if not defined DOCKER_COMPOSE_ARGS (
+    for /f "tokens=*" %%G in ('powershell -NoProfile -Command "(Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name) -join '; '" 2^>nul') do set "DETECTED_GPU=%%G"
+    
+    if defined DETECTED_GPU (
+        echo !DETECTED_GPU! | findstr /i "Radeon AMD" >nul 2>&1
+        if !ERRORLEVEL! equ 0 (
+            if not defined HSA_OVERRIDE_GFX_VERSION (
+                echo !DETECTED_GPU! | findstr /i "7900 7800 7700 7600 W7900 W7800" >nul 2>&1
+                if !ERRORLEVEL! equ 0 set "HSA_OVERRIDE_GFX_VERSION=11.0.0"
+                echo !DETECTED_GPU! | findstr /i "6900 6800 6700 6600" >nul 2>&1
+                if !ERRORLEVEL! equ 0 set "HSA_OVERRIDE_GFX_VERSION=10.3.0"
+                echo !DETECTED_GPU! | findstr /i "5700 5600" >nul 2>&1
+                if !ERRORLEVEL! equ 0 set "HSA_OVERRIDE_GFX_VERSION=10.1.0"
+            )
+
+            set "USE_WSL_ROCM=0"
+            if "!USE_ROCM_WSL!"=="1" set "USE_WSL_ROCM=1"
+            echo !DETECTED_GPU! | findstr /i "7900 7800 7700 7600 W7900 W7800" >nul 2>&1
+            if !ERRORLEVEL! equ 0 set "USE_WSL_ROCM=1"
+
+            if "!USE_WSL_ROCM!"=="1" (
+                if exist "docker-compose.rocm-wsl.yml" (
+                    echo   [OK] GPU AMD compatible con WSL2 detectada [!DETECTED_GPU!].
+                    echo        Activando puente ROCm WSL2 [/dev/dxg + ROCDXG, HSA=!HSA_OVERRIDE_GFX_VERSION!]...
+                    set "DOCKER_COMPOSE_ARGS=-f docker-compose.yml -f docker-compose.rocm-wsl.yml"
+                )
+            ) else (
+                echo   [i] GPU AMD detectada en Windows: !DETECTED_GPU!
+                echo   [i] Nota: WSL2 no expone ROCm para esta generacion [requiere Linux nativo o Ollama Windows].
+            )
+        )
+    )
+)
+
+if not defined DOCKER_COMPOSE_ARGS (
+    echo   [OK] Inferencia en contenedor Docker configurada en CPU de alto rendimiento.
+    set "DOCKER_COMPOSE_ARGS=-f docker-compose.yml"
+)
+
 echo.
 echo --^> Levantando servicios en Docker...
-docker compose up -d
+docker compose !DOCKER_COMPOSE_ARGS! up -d
 if %ERRORLEVEL% neq 0 (
     echo   [i] Esperando liberacion de puertos del sistema... reintentando en 3 segundos...
     timeout /t 3 /nobreak >nul 2>&1
-    docker compose up -d
+    docker compose !DOCKER_COMPOSE_ARGS! up -d
 )
 if %ERRORLEVEL% neq 0 (
     echo.

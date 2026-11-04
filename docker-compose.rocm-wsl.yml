@@ -1,0 +1,24 @@
+# =============================================================================
+# docker-compose.rocm-wsl.yml: Aceleración AMD ROCm en Windows WSL2
+# =============================================================================
+# Válido para estaciones Windows 10/11 ejecutando Docker Desktop sobre WSL2
+# con tarjetas AMD Radeon con soporte de virtualización DirectX/ROCDXG
+# (ej. Radeon RX 7900 XTX/XT, PRO W7900, RDNA 3 / gfx1100).
+#
+# Mapea el nodo paravirtualizado /dev/dxg de Microsoft WSL2 y monta las librerías
+# gráficas de /usr/lib/wsl del anfitrión Windows, habilitando el puente ROCDXG.
+
+services:
+  ollama:
+    image: ollama/ollama:rocm
+    devices:
+      - /dev/dxg
+    volumes:
+      - /usr/lib/wsl:/usr/lib/wsl:ro
+      - ollama_models:/root/.ollama
+    environment:
+      - LD_LIBRARY_PATH=/usr/lib/wsl/lib
+      - HSA_ENABLE_DXG_DETECTION=1
+      # RDNA 3 por defecto para WSL2 (o valor especificado en .env)
+      - HSA_OVERRIDE_GFX_VERSION=${HSA_OVERRIDE_GFX_VERSION:-11.0.0}
+

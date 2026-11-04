@@ -301,3 +301,60 @@ class ProfileVerifier:
                 logger.debug("Habilidad descartada por no figurar en CV ni perfil: '%s'", clean)
         return verified
 
+    def is_requirement_supported(self, requirement: str) -> Tuple[bool, str]:
+        """
+        Determina de forma universal y genérica si una afirmación o requisito supuestamente cumplido
+        está respaldado de manera verídica en el CV o perfil del candidato.
+        
+        Aplica a cualquier disciplina laboral (técnica, sanitaria, legal, construcción, administración):
+        - Impide validar roles de alta dirección / liderazgo si no constan en el CV.
+        - Impide validar titulaciones académicas superiores no cursadas (Doctorados, Másteres, etc.).
+        - Impide validar herramientas, software, maquinaria o tecnologías que no figuren en el CV.
+        """
+        clean_req = requirement.strip()
+        if not clean_req:
+            return False, "Requisito vacío"
+
+        if not self.cv_text_lower and not self.allowed_skills:
+            return True, "Sin CV para contrastar"
+
+        req_lower = clean_req.lower()
+
+        # 1. Roles de alta dirección o jefatura no acreditados en el CV
+        role_checks = [
+            (r"\b(director|directora|head\s+of|cto|cio|ciso)\b", "dirección/jefatura"),
+            (r"\b(arquitecto|architect)\b", "arquitectura técnica"),
+            (r"\b(lead|tech\s+lead|team\s+lead|líder\s+de\s+equipo)\b", "liderazgo técnico"),
+            (r"\b(project\s+manager|gerente\s+de\s+proyectos)\b", "gestión de proyectos"),
+        ]
+        for pattern, desc in role_checks:
+            if re.search(pattern, req_lower) and not re.search(pattern, self.cv_text_lower):
+                return False, f"Rol no respaldado en el CV ({desc})"
+
+        # 2. Titulaciones académicas superiores no acreditadas en el CV
+        degree_checks = [
+            (r"\b(ingenier[íi]a\s+inform[áa]tica|ingeniero\s+inform[áa]tico)\b", "Ingeniería Informática"),
+            (r"\b(doctorado|phd)\b", "Doctorado"),
+            (r"\b(m[áa]ster|master)\b", "Máster"),
+            (r"\b(licenciatura|licenciado|licenciada)\b", "Licenciatura"),
+        ]
+        for pattern, desc in degree_checks:
+            if re.search(pattern, req_lower) and not re.search(pattern, self.cv_text_lower):
+                return False, f"Titulación no respaldada en el CV ({desc})"
+
+        # 3. Herramientas, software, tecnologías o maquinaria especializada
+        known_tech_or_domain_terms = [
+            "python", "flask", "django", "angular", "vue", "outsystems", "c#", ".net", "asp.net",
+            "vmware", "rhel", "openshift", "nutanix", "kubernetes", "golang", "ruby", "rust",
+            "scala", "swift", "flutter", "kotlin", "cobol", "abap", "sap", "salesforce", "aws",
+            "azure", "gcp", "docker", "linux", "oracle", "sql", "mysql", "postgresql", "redis",
+            "react", "java", "spring", "nodejs", "node.js", "nestjs", "php", "typescript", "javascript",
+            "active directory", "ldap", "power bi", "tableau", "autocad", "revit", "matlab", "photoshop"
+        ]
+        for term in known_tech_or_domain_terms:
+            if re.search(r"\b" + re.escape(term) + r"\b", req_lower):
+                if not re.search(r"\b" + re.escape(term) + r"\b", self.cv_text_lower) and term not in self.allowed_skills:
+                    return False, f"Herramienta/tecnología ausente en el CV ({term})"
+
+        return True, "Verificado contra CV"
+

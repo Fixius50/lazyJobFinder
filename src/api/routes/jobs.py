@@ -316,3 +316,33 @@ async def generate_job_documents_endpoint(job_id: int) -> Dict[str, Any]:
             detail=f"Error al generar documentos: {str(e)}",
         )
 
+
+@router.post("/evaluate-pending")
+async def evaluate_pending_jobs_endpoint() -> Dict[str, Any]:
+    """Lanza la evaluación en segundo plano de las ofertas en estado 'discovered' que quedaron pendientes."""
+    from ..deps import get_runner, get_db
+    from ...tailoring.cv_reader import get_active_cv_status
+
+    db = get_db()
+    runner = get_runner()
+
+    cv_status = get_active_cv_status()
+    if not cv_status.get("has_cv"):
+        raise HTTPException(status_code=400, detail="No hay currículum activo configurado para evaluar.")
+
+    if runner.is_evaluating():
+        return {"success": True, "message": "La evaluación de ofertas ya está ejecutándose activamente en segundo plano."}
+
+    pending = db.get_unevaluated_jobs(limit=500, cv_filename=cv_status.get("filename"))
+    if not pending:
+        return {"success": True, "message": "No hay ofertas pendientes de evaluar en la base de datos.", "pending_count": 0}
+
+    import asyncio
+    asyncio.create_task(runner.evaluate_pending_jobs(trigger_label="api_manual"))
+    return {
+        "success": True,
+        "message": f"Evaluación de {len(pending)} ofertas pendientes iniciada en segundo plano con IA.",
+        "pending_count": len(pending),
+    }
+
+

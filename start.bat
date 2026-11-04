@@ -178,12 +178,45 @@ if %ERRORLEVEL% neq 0 (
 
 cd /d "%~dp0"
 echo.
+echo --^> Comprobando capacidades de aceleracion por hardware en Docker...
+set "DOCKER_COMPOSE_ARGS="
+
+:: 1. Comprobar si Docker dispone de nodos de kernel AMD ROCm (/dev/kfd y /dev/dri de Linux)
+docker run --rm --device /dev/kfd hello-world >nul 2>&1
+if %ERRORLEVEL% equ 0 (
+    if exist "docker-compose.rocm.yml" (
+        echo   [OK] Dispositivos AMD ROCm [/dev/kfd] detectados en Docker. Activando ollama/ollama:rocm...
+        set "DOCKER_COMPOSE_ARGS=-f docker-compose.yml -f docker-compose.rocm.yml"
+    )
+)
+
+:: 2. Comprobar si Docker dispone de aceleracion GPU NVIDIA (nvidia-container-toolkit)
+if not defined DOCKER_COMPOSE_ARGS (
+    where nvidia-smi >nul 2>&1
+    if !ERRORLEVEL! equ 0 (
+        docker run --rm --gpus all hello-world >nul 2>&1
+        if !ERRORLEVEL! equ 0 (
+            if exist "docker-compose.gpu.yml" (
+                echo   [OK] Aceleracion GPU NVIDIA detectada y activa para Docker.
+                set "DOCKER_COMPOSE_ARGS=-f docker-compose.yml -f docker-compose.gpu.yml"
+            )
+        )
+    )
+)
+
+:: 3. Si no hay dispositivos de GPU expuestos al daemon Docker (entorno estandar de Windows Desktop)
+if not defined DOCKER_COMPOSE_ARGS (
+    echo   [i] Docker en Windows no expone /dev/kfd [requiere Linux bare-metal para ROCm].
+    echo   [OK] Inferencia en contenedor Docker configurada en CPU de alto rendimiento [Flash Attention + Q8 KV-Cache + Multi-slot].
+    set "DOCKER_COMPOSE_ARGS=-f docker-compose.yml"
+)
+
 echo --^> Levantando servicios Docker Compose...
-docker compose up -d
+docker compose !DOCKER_COMPOSE_ARGS! up -d
 if %ERRORLEVEL% neq 0 (
     echo   [i] Esperando liberacion de puertos en el sistema... reintentando en 3 segundos...
     timeout /t 3 /nobreak >nul 2>&1
-    docker compose up -d
+    docker compose !DOCKER_COMPOSE_ARGS! up -d
 )
 if %ERRORLEVEL% neq 0 (
     echo.

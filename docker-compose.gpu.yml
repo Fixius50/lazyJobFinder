@@ -1,0 +1,18 @@
+# =============================================================================
+# docker-compose.gpu.yml: Extensión de Aceleración GPU NVIDIA para Docker
+# =============================================================================
+# Se aplica de forma transparente y condicional mediante start.bat únicamente
+# si Docker detecta adaptadores compatibles con nvidia-container-toolkit.
+# Si el equipo no cuenta con NVIDIA (ej. AMD Radeon en Windows WSL2 o CPU pura),
+# se ejecuta el docker-compose.yml base para garantizar estabilidad total.
+
+services:
+  ollama:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+

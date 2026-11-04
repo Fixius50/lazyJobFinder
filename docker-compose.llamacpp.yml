@@ -1,0 +1,35 @@
+# =============================================================================
+# docker-compose.llamacpp.yml: Motor alternativo llama.cpp Server (OpenAI Compatible)
+# =============================================================================
+# Despliega llama-server en contenedor Docker con interfaz de API compatible con OpenAI
+# (/v1/chat/completions) y aceleración Vulkan sobre D3D12 / GGUF.
+
+services:
+  llamacpp:
+    image: ghcr.io/ggml-org/llama.cpp:server-vulkan
+    container_name: lazyjob_llamacpp
+    restart: "no"
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data/models:/models
+      - /usr/lib/wsl:/usr/lib/wsl:ro
+    devices:
+      - /dev/dxg
+    environment:
+      - LD_LIBRARY_PATH=/usr/lib/wsl/lib
+    command: >
+      -m /models/qwen2.5-3b-instruct-q4_k_m.gguf
+      --host 0.0.0.0
+      --port 8080
+      -c 4096
+      -ngl 99
+      --flash-attn auto
+    networks:
+      - lazyjob_net
+
+  lazyjobfinder:
+    environment:
+      - OLLAMA_BASE_URL=http://llamacpp:8080
+      - LLM_BACKEND=openai
+

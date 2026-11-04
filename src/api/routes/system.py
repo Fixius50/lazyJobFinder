@@ -69,18 +69,35 @@ def _inspect_services() -> Dict[str, Dict[str, Any]]:
         },
     }
 
-    # Comprobación de salud directa de Ollama vía HTTP
+    # Comprobación de salud directa de Ollama o servidor LLM (OpenAI/llama.cpp) vía HTTP
     try:
         ollama_base = os.getenv("OLLAMA_BASE_URL", "http://ollama:11434").rstrip("/")
         ollama_url = f"{ollama_base}/api/tags"
         req = urllib.request.Request(ollama_url, headers={"User-Agent": "lazyJobFinder/1.0"})
-        with urllib.request.urlopen(req, timeout=2.5) as resp:
-            if resp.status == 200:
-                services["ollama"]["status"] = "saludable"
-                services["ollama"]["health"] = "healthy"
-                services["ollama"]["raw_state"] = "running"
+        is_healthy = False
+        try:
+            with urllib.request.urlopen(req, timeout=2.5) as resp:
+                if resp.status == 200:
+                    is_healthy = True
+        except Exception:
+            # Fallback a endpoint compatible OpenAI (/v1/models para llama-server, vLLM, etc.)
+            try:
+                oa_req = urllib.request.Request(f"{ollama_base}/v1/models", headers={"User-Agent": "lazyJobFinder/1.0"})
+                with urllib.request.urlopen(oa_req, timeout=2.5) as oa_resp:
+                    if oa_resp.status == 200:
+                        is_healthy = True
+            except Exception:
+                pass
+
+        if is_healthy:
+            services["ollama"]["status"] = "saludable"
+            services["ollama"]["health"] = "healthy"
+            services["ollama"]["raw_state"] = "running"
+        else:
+            services["ollama"]["status"] = "error"
+            services["ollama"]["health"] = "unhealthy"
     except Exception as e:
-        logger.debug("Ollama HTTP check no respondió: %s", e)
+        logger.debug("LLM HTTP check no respondió: %s", e)
         services["ollama"]["status"] = "error"
         services["ollama"]["health"] = "unhealthy"
 

@@ -67,11 +67,11 @@ class JobEvaluationSchema(BaseModel):
     )
 
 
-def format_job_content_for_ai(job: Dict[str, Any], max_chars: int = 4000) -> str:
+def format_job_content_for_ai(job: Dict[str, Any], max_chars: int = 3000) -> str:
     """
     Formatea y limpia el contenido real de la oferta para su análisis por la IA.
-    Elimina etiquetas HTML, normaliza saltos de línea y viñetas, limpia entidades
-    y aplica blindaje de seguridad contra prompt injection.
+    Elimina etiquetas HTML, normaliza saltos de línea y viñetas, limpia entidades,
+    elimina boilerplate legal/corporativo redundante y aplica blindaje de seguridad contra prompt injection.
     """
     raw_desc = job.get("description") or ""
     # Si viene con HTML (como en portales web / scrapers / RSS), limpiarlo estructuradamente
@@ -88,7 +88,17 @@ def format_job_content_for_ai(job: Dict[str, Any], max_chars: int = 4000) -> str
     desc = re.sub(r"[ \t]+", " ", desc)
     desc = re.sub(r"\n{3,}", "\n\n", desc).strip()
 
-    if not desc:
+    # Eliminar secciones de ruido corporativo o legal que inflan los tokens sin aportar requisitos
+    noise_patterns = [
+        r"(?i)en cumplimiento de (la ley|el reglamento|la normativa|el rgpd|la lopd)[^\n.]*",
+        r"(?i)política de privacidad y cookies[^\n.]*",
+        r"(?i)todos los candidatos cualificados serán considerados sin distinción[^\n.]*",
+        r"(?i)equal opportunity employer[^\n.]*",
+    ]
+    for np in noise_patterns:
+        desc = re.sub(np, "", desc)
+
+    if not desc.strip():
         desc = "(Sin descripción detallada disponible en el portal origen. Evaluar únicamente los datos comprobables del puesto)."
 
     desc = desc[:max_chars]
@@ -276,10 +286,10 @@ class ScoringEngine:
             "}"
         )
 
-        formatted_description = format_job_content_for_ai(job)
+        formatted_description = format_job_content_for_ai(job, max_chars=2200)
         user_prompt = (
             f"### CURRÍCULUM ACTIVO DEL CANDIDATO ({cv_meta.get('filename')}):\n"
-            f"```markdown\n{cv_text[:4000]}\n```\n\n"
+            f"```markdown\n{cv_text[:1800]}\n```\n\n"
             f"### VACANTE A EVALUAR:\n"
             f"Título: {job.get('title')}\n"
             f"Empresa: {job.get('company')}\n"
@@ -290,14 +300,14 @@ class ScoringEngine:
 
         try:
             print(f"\n[IA / Ollama] Evaluando contenido de oferta #{job['id']}: '{job.get('title')}' ({job.get('company')}) con modelo '{self.ollama.default_model}'...", flush=True)
-            # 1. Intento rápido con modo JSON nativo (evita la sobrecarga de evaluación GBNF token a token en CPU)
+            # 1. Intento rápido con modo JSON nativo (con tokens suficientes para evitar truncado y reintentos)
             try:
                 raw_response = self.ollama.generate(
                     prompt=user_prompt,
                     system_prompt=system_prompt,
                     format_json=True,
                     temperature=0.1,
-                    num_predict=180,
+                    num_predict=400,
                 )
                 validated = JobEvaluationSchema.model_validate_json(raw_response)
             except (ValidationError, Exception) as json_err:
@@ -308,7 +318,7 @@ class ScoringEngine:
                     system_prompt=system_prompt,
                     format_schema=schema_json,
                     temperature=0.1,
-                    num_predict=180,
+                    num_predict=400,
                 )
                 validated = JobEvaluationSchema.model_validate_json(raw_response)
 
@@ -415,18 +425,34 @@ class ScoringEngine:
             print("[IA / Ollama] Ollama no está online; las ofertas permanecen pendientes de evaluar por la IA.", flush=True)
             return 0
 
+        concurrency = max(1, int(self.settings.get("evaluacion", {}).get("concurrencia", 2)))
+        self.ollama.set_concurrency(concurrency)
+
         print(f"\n" + "=" * 65, flush=True)
-        print(f"[CV / IA] >>> Evaluando con IA {len(jobs)} ofertas contra el CV activo '{cv_meta.get('filename')}'...", flush=True)
+        print(f"[CV / IA] >>> Evaluando con IA {len(jobs)} ofertas contra el CV activo '{cv_meta.get('filename')}' (concurrencia={concurrency}, modelo={self.ollama.default_model})...", flush=True)
         print("=" * 65, flush=True)
 
         evaluated_count = 0
-        for job in jobs:
-            try:
-                res = self.evaluate(job)
-                if res:
-                    evaluated_count += 1
-            except Exception as e:
-                logger.error("Error evaluando oferta ID %s con Ollama: %s", job.get("id"), e)
+        if concurrency <= 1 or len(jobs) <= 1:
+            for job in jobs:
+                try:
+                    res = self.evaluate(job)
+                    if res:
+                        evaluated_count += 1
+                except Exception as e:
+                    logger.error("Error evaluando oferta ID %s con Ollama: %s", job.get("id"), e)
+        else:
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as executor:
+                future_to_job = {executor.submit(self.evaluate, j): j for j in jobs}
+                for future in concurrent.futures.as_completed(future_to_job):
+                    j = future_to_job[future]
+                    try:
+                        res = future.result()
+                        if res:
+                            evaluated_count += 1
+                    except Exception as e:
+                        logger.error("Error evaluando oferta ID %s con Ollama: %s", j.get("id"), e)
 
         print(f"[CV / IA] >>> Finalizada evaluación con IA de {evaluated_count} ofertas.", flush=True)
         return evaluated_count

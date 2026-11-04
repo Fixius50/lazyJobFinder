@@ -806,8 +806,8 @@ class Database:
                             title, company, location, is_remote, modality, source, description,
                             salary_min, salary_max, salary_currency, date_posted, status,
                             duplicate_of_id, similarity_score, contract_type, schedule, education_level,
-                            cv_filename
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'duplicate', ?, ?, ?, ?, ?, ?)
+                            cv_filename, ui_saved
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'duplicate', ?, ?, ?, ?, ?, ?, 0)
                         """,
                         (
                             url_hash, content_fingerprint, desc_hash, canonical_url,
@@ -1110,6 +1110,10 @@ class Database:
         if status:
             where_clauses.append("j.status = ?")
             params.append(status)
+            if status != "duplicate":
+                where_clauses.append("j.duplicate_of_id IS NULL")
+        else:
+            where_clauses.append("j.duplicate_of_id IS NULL AND j.status != 'duplicate'")
 
         if min_score is not None:
             where_clauses.append("e.score >= ?")
@@ -1319,14 +1323,15 @@ class Database:
             return cursor.lastrowid
 
     def get_unevaluated_jobs(self, limit: int = 500, cv_filename: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Recupera ofertas pendientes de evaluación."""
+        """Recupera ofertas pendientes de evaluación, excluyendo duplicados."""
         with self._get_connection() as conn:
             if cv_filename and cv_filename not in ("none", "Ninguno", ""):
                 query = """
                     SELECT j.* FROM jobs j
                     LEFT JOIN evaluations e ON j.id = e.job_id
                     WHERE e.id IS NULL
-                      AND j.status NOT IN ('evaluated', 'discarded', 'rejected')
+                      AND j.duplicate_of_id IS NULL
+                      AND j.status NOT IN ('evaluated', 'discarded', 'rejected', 'duplicate')
                       AND (j.cv_filename = ? OR j.cv_filename IS NULL OR j.cv_filename = '')
                     ORDER BY j.id ASC
                     LIMIT ?
@@ -1336,7 +1341,9 @@ class Database:
                 query = """
                     SELECT j.* FROM jobs j
                     LEFT JOIN evaluations e ON j.id = e.job_id
-                    WHERE e.id IS NULL AND j.status NOT IN ('evaluated', 'discarded', 'rejected')
+                    WHERE e.id IS NULL
+                      AND j.duplicate_of_id IS NULL
+                      AND j.status NOT IN ('evaluated', 'discarded', 'rejected', 'duplicate')
                     ORDER BY j.id ASC
                     LIMIT ?
                 """
@@ -1344,13 +1351,13 @@ class Database:
             return [dict(row) for row in cursor.fetchall()]
 
     def get_all_jobs_for_scoring(self, limit: int = 200, cv_filename: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Recupera todas las ofertas activas registradas para contrastar afinidad."""
+        """Recupera todas las ofertas activas registradas para contrastar afinidad, excluyendo duplicados."""
         with self._get_connection() as conn:
             if cv_filename and cv_filename not in ("none", "Ninguno", ""):
                 query = """
                     SELECT id, title, company, location, is_remote, description, source, created_at
                     FROM jobs
-                    WHERE ui_saved = 1 AND cv_filename = ?
+                    WHERE ui_saved = 1 AND duplicate_of_id IS NULL AND status != 'duplicate' AND cv_filename = ?
                     ORDER BY id DESC
                     LIMIT ?
                 """
@@ -1359,7 +1366,7 @@ class Database:
                 query = """
                     SELECT id, title, company, location, is_remote, description, source, created_at
                     FROM jobs
-                    WHERE ui_saved = 1
+                    WHERE ui_saved = 1 AND duplicate_of_id IS NULL AND status != 'duplicate'
                     ORDER BY id DESC
                     LIMIT ?
                 """
@@ -1371,7 +1378,13 @@ class Database:
     ) -> List[Dict[str, Any]]:
         """Recupera ofertas evaluadas con score >= min_score que aún no tienen documentos generados."""
         with self._get_connection() as conn:
-            where = ["e.score >= ?", "d.id IS NULL", "j.ui_saved = 1"]
+            where = [
+                "e.score >= ?",
+                "d.id IS NULL",
+                "j.ui_saved = 1",
+                "j.duplicate_of_id IS NULL",
+                "j.status != 'duplicate'",
+            ]
             params: List[Any] = [min_score]
             if cv_filename and cv_filename not in ("none", "Ninguno", ""):
                 where.append("j.cv_filename = ?")
@@ -1621,7 +1634,7 @@ class Database:
                     FROM jobs j
                     INNER JOIN evaluations e ON j.id = e.job_id
                     LEFT JOIN generated_documents d ON j.id = d.job_id
-                    WHERE e.score >= ? AND j.cv_filename = ?
+                    WHERE e.score >= ? AND j.duplicate_of_id IS NULL AND j.status != 'duplicate' AND j.cv_filename = ?
                     ORDER BY e.score DESC, j.created_at DESC
                     LIMIT ?
                 """
@@ -1634,7 +1647,7 @@ class Database:
                     FROM jobs j
                     INNER JOIN evaluations e ON j.id = e.job_id
                     LEFT JOIN generated_documents d ON j.id = d.job_id
-                    WHERE e.score >= ?
+                    WHERE e.score >= ? AND j.duplicate_of_id IS NULL AND j.status != 'duplicate'
                     ORDER BY e.score DESC, j.created_at DESC
                     LIMIT ?
                 """

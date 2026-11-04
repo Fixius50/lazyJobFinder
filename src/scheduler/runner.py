@@ -93,7 +93,8 @@ class JobPipelineRunner:
 
         # 2. Inicializar persistencia y clientes
         self.db = Database(db_path=db_path)
-        self.ollama = OllamaClient()
+        init_concurrency = max(1, int(self.settings.get("evaluacion", {}).get("concurrencia", 2)))
+        self.ollama = OllamaClient(max_concurrency=init_concurrency)
         self.connectors_mgr = ConnectorManager(db=self.db, settings=self.settings)
         self.scoring_engine = ScoringEngine(
             db=self.db,
@@ -242,7 +243,8 @@ class JobPipelineRunner:
                 # Parámetros de evaluación y generación documental
                 min_score = int(self.settings.get("evaluacion", {}).get("umbral_minimo_puntuacion", 50))
                 generate_docs = self.settings.get("evaluacion", {}).get("generar_documentos", False)
-                concurrency = max(1, int(self.settings.get("evaluacion", {}).get("concurrencia", 1)))
+                concurrency = max(1, int(self.settings.get("evaluacion", {}).get("concurrencia", 2)))
+                self.ollama.set_concurrency(concurrency)
                 qualified_candidates: List[Tuple[Dict[str, Any], Dict[str, Any]]] = []
 
                 from ..tailoring.cv_reader import get_active_cv_status
@@ -502,7 +504,135 @@ class JobPipelineRunner:
             loop = asyncio.get_event_loop()
             loop.call_later(15, lambda: asyncio.create_task(self.run_pipeline(trigger_label="catch_up")))
         else:
-            logger.info("Estado de ejecución diaria verificado: no se requiere catch-up en el arranque.")
+            logger.info("Estado de ejecución diaria verificado: no se requiere catch-up de rastreo en portales.")
+            # Comprobar si hay ofertas pendientes de evaluar acumuladas en la base de datos
+            unevaluated = self.db.get_unevaluated_jobs(limit=500, cv_filename=cv_status.get("filename"))
+            if unevaluated:
+                logger.info(
+                    "Detectadas %d ofertas pendientes de evaluación en la base de datos. Programando evaluación en segundo plano en 5 segundos...",
+                    len(unevaluated),
+                )
+                loop = asyncio.get_event_loop()
+                loop.call_later(5, lambda: asyncio.create_task(self.evaluate_pending_jobs(trigger_label="startup_pending")))
+
+    async def evaluate_pending_jobs(self, trigger_label: str = "startup_pending") -> int:
+        """
+        Evalúa en segundo plano las ofertas en estado 'discovered' que quedaron
+        pendientes de valoración en SQLite (por reinicios, fallos previos o carga inicial).
+        """
+        if self.is_evaluating() or (self._async_lock is not None and self._async_lock.locked()):
+            logger.info("Evaluación o pipeline ya en curso; omitiendo ciclo redundante de pendientes.")
+            return 0
+
+        from ..tailoring.cv_reader import get_active_cv_status
+        cv_status = get_active_cv_status()
+        if not cv_status.get("has_cv"):
+            logger.info("Sin CV activo configurado. Omitiendo evaluación de ofertas pendientes.")
+            return 0
+
+        active_cv_name = cv_status.get("filename")
+        pending_jobs = await asyncio.to_thread(self.db.get_unevaluated_jobs, 500, active_cv_name)
+        if not pending_jobs:
+            logger.info("No hay ofertas pendientes de evaluación en la base de datos.")
+            return 0
+
+        # Verificar conectividad con Ollama
+        health = self.ollama.check_health()
+        if not health.get("online"):
+            logger.warning("[IA / Ollama] Ollama no está online; las %d ofertas pendientes se evaluarán cuando esté disponible.", len(pending_jobs))
+            return 0
+
+        concurrency = max(1, int(self.settings.get("evaluacion", {}).get("concurrencia", 2)))
+        self.ollama.set_concurrency(concurrency)
+        min_score = int(self.settings.get("evaluacion", {}).get("umbral_minimo_puntuacion", 50))
+        telegram_enabled = self.settings.get("canales", {}).get("telegram", {}).get("activo", False)
+        save_ui_pref = self.settings.get("canales", {}).get("interfaz", {}).get("guardar_todas", True)
+
+        logger.info(
+            "Iniciando evaluación en segundo plano de %d ofertas pendientes con IA (concurrencia=%d, modelo=%s, motivo=%s)...",
+            len(pending_jobs),
+            concurrency,
+            self.ollama.default_model,
+            trigger_label,
+        )
+        print(
+            f"\n[IA / Arranque] Evaluando {len(pending_jobs)} ofertas pendientes de evaluar con IA ({self.ollama.default_model}, concurrencia={concurrency})...\n",
+            flush=True,
+        )
+
+        eval_queue: asyncio.Queue[Optional[Dict[str, Any]]] = asyncio.Queue()
+        for j in pending_jobs:
+            eval_queue.put_nowait(dict(j))
+
+        for _ in range(concurrency):
+            eval_queue.put_nowait(None)
+
+        self._eval_running = True
+        self._stop_requested = False
+        evaluated_count = 0
+        apto_count = 0
+
+        async def _worker():
+            nonlocal evaluated_count, apto_count
+            while True:
+                if self._stop_requested:
+                    break
+                try:
+                    job = await eval_queue.get()
+                except asyncio.CancelledError:
+                    break
+                if job is None or self._stop_requested:
+                    eval_queue.task_done()
+                    break
+
+                j_id = job.get("id")
+                try:
+                    self.db.update_job_status(j_id, "evaluating")
+                    eval_res = await asyncio.to_thread(self.scoring_engine.evaluate, job)
+                    if not eval_res or eval_res.get("score") is None:
+                        self.db.update_job_status(j_id, "discovered")
+                    else:
+                        score = eval_res.get("score", 0)
+                        evaluated_count += 1
+                        if score >= min_score and eval_res.get("should_apply"):
+                            self.db.update_job_status(j_id, "evaluated")
+                            apto_count += 1
+                            telegram_status = 0
+                            if telegram_enabled:
+                                try:
+                                    await asyncio.to_thread(self.telegram_bot.send_job_alert, job, eval_res)
+                                    telegram_status = 1
+                                except Exception as tg_err:
+                                    logger.error("Error notificación Telegram para ID %d: %s", j_id, tg_err)
+                                    telegram_status = -1
+                            ui_saved_val = 1 if save_ui_pref else 0
+                            self.db.update_job_channel_status(
+                                job_id=j_id,
+                                telegram_notified=telegram_status,
+                                ui_saved=ui_saved_val,
+                            )
+                        else:
+                            self.db.update_job_status(j_id, "discarded")
+                            self.db.update_job_channel_status(
+                                job_id=j_id,
+                                telegram_notified=0,
+                                ui_saved=1 if save_ui_pref else 0,
+                            )
+                except Exception as eval_err:
+                    logger.error("Error evaluando oferta ID %s: %s", j_id, eval_err)
+                    self.db.update_job_status(j_id, "discovered")
+                finally:
+                    eval_queue.task_done()
+
+        try:
+            workers = [asyncio.create_task(_worker()) for _ in range(concurrency)]
+            await asyncio.gather(*workers, return_exceptions=True)
+        finally:
+            self._eval_running = False
+
+        logger.info("Evaluación de ofertas pendientes finalizada: %d evaluadas (%d aptas).", evaluated_count, apto_count)
+        print(f"\n[IA / Arranque] Finalizada evaluación de pendientes: {evaluated_count} procesadas ({apto_count} aptas).\n", flush=True)
+        return evaluated_count
 
     def setup_schedule(self) -> None:
         """

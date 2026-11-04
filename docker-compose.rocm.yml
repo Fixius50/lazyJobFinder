@@ -1,0 +1,21 @@
+# =============================================================================
+# docker-compose.rocm.yml: Extensión de Aceleración GPU AMD (ROCm) para Docker
+# =============================================================================
+# Válido para estaciones o servidores con Linux nativo (Ubuntu 22.04 / 24.04, Debian)
+# donde el driver amdgpu expone /dev/kfd y /dev/dri directamente en el sistema.
+#
+# NOTA TÉCNICA: En Windows con Docker Desktop (WSL2), el kernel virtualizado
+# no crea /dev/kfd (utiliza /dev/dxg para DirectX), por lo que mapear /dev/kfd
+# en Windows arroja "no such file or directory". Esta extensión está diseñada
+# para activarse automáticamente si Docker detecta la presencia de /dev/kfd.
+
+services:
+  ollama:
+    image: ollama/ollama:rocm
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    environment:
+      # Arquitectura RDNA 2 (AMD Radeon RX 6600 -> Navi 23 / gfx1030)
+      - HSA_OVERRIDE_GFX_VERSION=10.3.0
+

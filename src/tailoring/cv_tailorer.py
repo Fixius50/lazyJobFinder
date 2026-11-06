@@ -121,8 +121,9 @@ class CVTailorer:
                 prompt=prompt,
                 format_json=False,
                 temperature=0.1,
-                timeout=90,
-                num_predict=150,
+                timeout=300,
+                num_predict=120,
+                num_ctx=2048,
             )
             cleaned = adapted.strip().strip('"')
             if len(cleaned) > 50:
@@ -202,21 +203,76 @@ class CVTailorer:
         if clean_sum:
             blocks.append(f"## Perfil Profesional\n{clean_sum}")
 
-        # 3. Formación Académica
+        # 3. Competencias Destacadas para el Puesto (si hay coincidencias verificadas)
+        if matched_skills:
+            blocks.append(f"## Competencias Destacadas para la Vacante\n- **Afinidad clave demostrada:** {', '.join(matched_skills)}")
+
+        # 4. Experiencia Laboral
+        exp_list = self.profile.get("experiencia_laboral", [])
+        if exp_list:
+            exp_lines = ["## Experiencia Laboral"]
+            for exp in exp_list:
+                if isinstance(exp, dict):
+                    puesto = exp.get("puesto", "").strip()
+                    empresa = exp.get("empresa", "").strip()
+                    periodo = exp.get("periodo", "").strip()
+                    ubicacion = exp.get("ubicacion", "").strip()
+                    detalles = exp.get("detalles", [])
+                    techs_exp = exp.get("tecnologias", [])
+                    descripcion = exp.get("descripcion", "").strip()
+
+                    # Omitir entradas espurias que sean frases sueltas sin empresa real ni rol
+                    if not puesto and not empresa:
+                        continue
+                    if empresa.lower().startswith(("colaboración", "comunicación", "refactorización", "análisis")):
+                        continue
+
+                    head = puesto or "Profesional"
+                    exp_header = f"### {head}"
+                    if empresa:
+                        exp_header += f" — *{empresa}*"
+                    if periodo:
+                        exp_header += f" ({periodo})"
+                    exp_lines.append(exp_header)
+
+                    if ubicacion:
+                        exp_lines.append(f"*{ubicacion}*")
+
+                    if detalles and isinstance(detalles, list):
+                        for det in detalles:
+                            det_clean = det.strip()
+                            if det_clean and not det_clean.isupper():
+                                exp_lines.append(f"- {det_clean}")
+                    elif descripcion:
+                        exp_lines.append(f"{descripcion}")
+
+                    if techs_exp:
+                        t_str = ", ".join(str(t) for t in techs_exp)
+                        exp_lines.append(f"- **Tecnologías:** {t_str}")
+                    exp_lines.append("")
+                elif isinstance(exp, str) and exp.strip():
+                    exp_lines.append(f"- {exp.strip()}")
+
+            if len(exp_lines) > 1:
+                blocks.append("\n".join(exp_lines).strip())
+
+        # 5. Formación Académica
         form_list = self.profile.get("formacion", [])
         if form_list:
             form_lines = ["## Formación Académica"]
             for form in form_list:
                 if isinstance(form, dict):
-                    t = form.get("titulo", "")
-                    inst = form.get("institucion", "")
-                    fecha = form.get("fecha_fin", "")
+                    t = form.get("titulo", "").strip()
+                    inst = form.get("institucion", "").strip()
+                    fecha = form.get("fecha_fin", "").strip()
                     if not t and not inst:
                         continue
-                    form_lines.append(f"- **{t or 'Titulación'}**")
-                    meta = " | ".join([p for p in [inst, fecha] if p])
-                    if meta:
-                        form_lines.append(f"  *{meta}*")
+                    header = f"- **{t or 'Titulación'}**"
+                    if fecha:
+                        header += f" ({fecha})"
+                    form_lines.append(header)
+                    if inst:
+                        form_lines.append(f"  *{inst}*")
                     modulos = form.get("modulos_destacados", [])
                     if modulos and isinstance(modulos, list):
                         form_lines.append(f"  - Módulos clave: {', '.join(str(m) for m in modulos)}")
@@ -225,37 +281,9 @@ class CVTailorer:
             if len(form_lines) > 1:
                 blocks.append("\n".join(form_lines))
 
-        # 4. Experiencia Laboral
-        exp_list = self.profile.get("experiencia_laboral", [])
-        if exp_list:
-            exp_lines = ["## Experiencia Laboral"]
-            for exp in exp_list:
-                if isinstance(exp, dict):
-                    puesto = exp.get("puesto", "")
-                    empresa = exp.get("empresa", "")
-                    periodo = exp.get("periodo", "")
-                    if not puesto and not empresa:
-                        continue
-                    head = puesto or "Puesto"
-                    exp_line = f"- **{head}**"
-                    if empresa:
-                        exp_line += f" — *{empresa}*"
-                    if periodo:
-                        exp_line += f" ({periodo})"
-                    exp_lines.append(exp_line)
-                    if exp.get("ubicacion"):
-                        exp_lines.append(f"  *{exp.get('ubicacion')}*")
-                    if exp.get("descripcion"):
-                        exp_lines.append(f"  {exp.get('descripcion').strip()}")
-                    techs_exp = exp.get("tecnologias", [])
-                    if techs_exp:
-                        exp_lines.append(f"  - Tecnologías: {', '.join(str(t) for t in techs_exp)}")
-            if len(exp_lines) > 1:
-                blocks.append("\n".join(exp_lines))
-
-        # 5. Competencias Profesionales y Técnicas
+        # 6. Competencias Profesionales y Técnicas
         techs = self.profile.get("competencias_tecnicas", {})
-        comp_lines = ["## Competencias Profesionales Destacadas"]
+        comp_lines = ["## Competencias Profesionales y Técnicas"]
         if isinstance(techs, dict):
             for cat, items in techs.items():
                 if isinstance(items, list) and items:
@@ -266,15 +294,12 @@ class CVTailorer:
         elif isinstance(techs, list) and techs:
             comp_lines.append(f"- **Competencias Principales:** {', '.join(str(t) for t in techs if t)}")
 
-        if matched_skills:
-            comp_lines.append(f"- **Coincidencias clave con la vacante:** {', '.join(matched_skills)}")
-
         if len(comp_lines) > 1:
             blocks.append("\n".join(comp_lines))
 
-        # 6. Proyectos Destacados
+        # 7. Proyectos Destacados (si aplican)
         if projects:
-            proj_lines = ["## Proyectos Destacados (Selección Relevante)"]
+            proj_lines = ["## Proyectos Destacados"]
             for p in projects:
                 if isinstance(p, dict):
                     tech_list = p.get("tecnologias", [])
@@ -290,10 +315,10 @@ class CVTailorer:
             if len(proj_lines) > 1:
                 blocks.append("\n".join(proj_lines))
 
-        # 7. Idiomas
+        # 8. Idiomas y Aptitudes
         idiomas = self.profile.get("idiomas", [])
         if idiomas:
-            idi_lines = ["## Idiomas"]
+            idi_lines = ["## Idiomas y Aptitudes"]
             for idi in idiomas:
                 if isinstance(idi, dict) and idi.get("idioma"):
                     idi_lines.append(f"- **{idi.get('idioma')}:** {idi.get('nivel', '')}")

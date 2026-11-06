@@ -243,8 +243,9 @@ class JobPipelineRunner:
                 # Parámetros de evaluación y generación documental
                 min_score = int(self.settings.get("evaluacion", {}).get("umbral_minimo_puntuacion", 50))
                 generate_docs = self.settings.get("evaluacion", {}).get("generar_documentos", False)
-                concurrency = max(1, int(self.settings.get("evaluacion", {}).get("concurrencia", 2)))
-                self.ollama.set_concurrency(concurrency)
+                cfg_concurrency = int(self.settings.get("evaluacion", {}).get("concurrencia", 2))
+                self.ollama.set_concurrency(cfg_concurrency)
+                concurrency = self.ollama.max_concurrency
                 qualified_candidates: List[Tuple[Dict[str, Any], Dict[str, Any]]] = []
 
                 from ..tailoring.cv_reader import get_active_cv_status
@@ -542,8 +543,9 @@ class JobPipelineRunner:
             logger.warning("[IA / Ollama] Ollama no está online; las %d ofertas pendientes se evaluarán cuando esté disponible.", len(pending_jobs))
             return 0
 
-        concurrency = max(1, int(self.settings.get("evaluacion", {}).get("concurrencia", 2)))
-        self.ollama.set_concurrency(concurrency)
+        cfg_concurrency = int(self.settings.get("evaluacion", {}).get("concurrencia", 2))
+        self.ollama.set_concurrency(cfg_concurrency)
+        concurrency = self.ollama.max_concurrency
         min_score = int(self.settings.get("evaluacion", {}).get("umbral_minimo_puntuacion", 50))
         telegram_enabled = self.settings.get("canales", {}).get("telegram", {}).get("activo", False)
         save_ui_pref = self.settings.get("canales", {}).get("interfaz", {}).get("guardar_todas", True)

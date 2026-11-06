@@ -320,12 +320,16 @@ class ProfileVerifier:
 
         req_lower = clean_req.lower()
 
-        # 1. Roles de alta dirección o jefatura no acreditados en el CV
+        # 1. Roles de alta dirección, liderazgo o especialidades no acreditadas en el CV
         role_checks = [
             (r"\b(director|directora|head\s+of|cto|cio|ciso)\b", "dirección/jefatura"),
             (r"\b(arquitecto|architect)\b", "arquitectura técnica"),
             (r"\b(lead|tech\s+lead|team\s+lead|líder\s+de\s+equipo)\b", "liderazgo técnico"),
-            (r"\b(project\s+manager|gerente\s+de\s+proyectos)\b", "gestión de proyectos"),
+            (r"\b(project\s+manager|gerente\s+de\s+proyectos|gesti[oó]n\s+de\s+proyectos)\b", "gestión de proyectos"),
+            (r"\b(scrum\s+master|agile\s+coach|product\s+owner|servant\s+leadership)\b", "metodologías ágiles avanzadas / Scrum Master"),
+            (r"\b(docente|profesor|profesora|maestro|maestra|enseñanza|pedagog[íi]a)\b", "docencia / educación"),
+            (r"\b(laboratorio|qu[íi]mic[ao]|f[íi]sic[ao]|electr[óo]nic[ao]\s+de\s+laboratorio|soldadura)\b", "laboratorio / ciencias físicas"),
+            (r"\b(game\s+developer|desarrollo\s+de\s+videojuegos|game\s+design)\b", "desarrollo de videojuegos"),
         ]
         for pattern, desc in role_checks:
             if re.search(pattern, req_lower) and not re.search(pattern, self.cv_text_lower):
@@ -342,14 +346,22 @@ class ProfileVerifier:
             if re.search(pattern, req_lower) and not re.search(pattern, self.cv_text_lower):
                 return False, f"Titulación no respaldada en el CV ({desc})"
 
-        # 3. Herramientas, software, tecnologías o maquinaria especializada
+        # 3. Niveles lingüísticos exigentes no respaldados
+        if re.search(r"\b(c1|c2|bilingual|bilingüe|nativo\s+en\s+ingl[ée]s|ingl[ée]s\s+(?:fluido|avanzado|c1|c2))\b", req_lower):
+            if not re.search(r"\b(c1|c2|bilingual|bilingüe|nativo)\b", self.cv_text_lower):
+                return False, "Nivel de idioma C1/C2 no respaldado en el CV"
+
+        # 4. Herramientas, software, tecnologías o maquinaria especializada
         known_tech_or_domain_terms = [
             "python", "flask", "django", "angular", "vue", "outsystems", "c#", ".net", "asp.net",
             "vmware", "rhel", "openshift", "nutanix", "kubernetes", "golang", "ruby", "rust",
             "scala", "swift", "flutter", "kotlin", "cobol", "abap", "sap", "salesforce", "aws",
             "azure", "gcp", "docker", "linux", "oracle", "sql", "mysql", "postgresql", "redis",
             "react", "java", "spring", "nodejs", "node.js", "nestjs", "php", "typescript", "javascript",
-            "active directory", "ldap", "power bi", "tableau", "autocad", "revit", "matlab", "photoshop"
+            "active directory", "ldap", "power bi", "tableau", "autocad", "revit", "matlab", "photoshop",
+            "jira", "confluence", "trello", "asana", "scrum", "kanban", "unity", "unreal", "blender",
+            "graphql", "terraform", "ansible", "microstrategy", "qlik", "jenkins", "gitlab ci", "sonarqube",
+            "selenium", "cypress", "junit", "maven", "gradle", "kafka", "rabbitmq"
         ]
         for term in known_tech_or_domain_terms:
             if re.search(r"\b" + re.escape(term) + r"\b", req_lower):

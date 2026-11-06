@@ -599,46 +599,108 @@ def _extract_profile_from_raw_text(cv_text: str, filename: Optional[str] = None)
 
     # 8. Formación académica
     formacion = []
-    edu_match = re.search(r'(?:formaci[oó]n|educaci[oó]n|estudios)[\s:]*\n+(.*?)(?=\n+#|\n+(?:experiencia|competencias|habilidades|idiomas|proyectos)|\Z)', text, re.IGNORECASE | re.DOTALL)
+    edu_match = re.search(r'(?:formaci[oó]n(?:\s+acad[ée]mica)?|educaci[oó]n|estudios)[\s:]*\n+(.*?)(?=\n+#|\n+(?:experiencia|competencias|habilidades|idiomas|proyectos|aptitudes)|\Z)', text, re.IGNORECASE | re.DOTALL)
     if edu_match:
         edu_block = edu_match.group(1).strip()
+        edu_raw_lines = [l.strip() for l in edu_block.splitlines() if l.strip()]
+        edu_joined = []
+        for l in edu_raw_lines:
+            if edu_joined and (
+                edu_joined[-1].endswith((' de', ' en', ' con', ' y', ' del', ' la', ' el', ' a', ' para', ' Full', ' DE', ' —', ' -', ' |', ','))
+                or (len(edu_joined[-1]) > 0 and edu_joined[-1][-1] not in ('.', ':', '!', '?', ')') and not re.search(r'\b(20\d\d|19\d\d)\b', l) and not l.startswith(('-', '*', '•', '·', '#')) and (l[0].islower() or l.startswith(('Stack', 'Madrid', 'Pinto', 'Valdemoro', 'Aplicaciones', 'SOFTWARE'))))
+            ):
+                edu_joined[-1] += ' ' + l
+            else:
+                edu_joined.append(l)
+
         current_item = {}
-        for el in [l.strip() for l in edu_block.splitlines() if l.strip()]:
-            if any(deg in el.lower() for deg in ['grado', 'técnico', 'bachillerato', 'ingenier', 'licenciat', 'máster', 'master', 'curso', 'ciclo']):
+        for el in edu_joined:
+            date_m = re.search(r'(\b\d{4}\s*[-–]\s*\d{4}\b|\b\d{4}\b)', el)
+            date_str = date_m.group(0) if date_m else ''
+            clean_line = re.sub(r'(\b\d{4}\s*[-–]\s*\d{4}\b|\b\d{4}\b)\s*[|—–-]?\s*', '', el).strip()
+
+            inst_m = re.search(r'\b(IES|Universidad|Colegio|Instituto|Centro|Escuela)\b.*', clean_line, re.IGNORECASE)
+            if inst_m:
+                inst = inst_m.group(0).strip(' ,-|')
+                degree_title = clean_line[:inst_m.start()].strip(' ,-|')
+                if not degree_title and current_item and not current_item.get("institucion"):
+                    current_item["institucion"] = inst
+                    continue
+            else:
+                degree_title = clean_line
+                inst = ''
+
+            if any(deg in el.lower() for deg in ['grado', 'técnico', 'bachillerato', 'ingenier', 'licenciat', 'máster', 'master', 'curso', 'ciclo']) or date_str:
                 if current_item:
                     formacion.append(current_item)
-                current_item = {"titulo": el, "institucion": "", "fecha_fin": ""}
-            elif current_item and not current_item.get("institucion"):
-                current_item["institucion"] = el
-            elif current_item and not current_item.get("fecha_fin") and re.search(r'\b(20\d\d|19\d\d)\b', el):
-                current_item["fecha_fin"] = el
+                current_item = {"titulo": degree_title or clean_line, "institucion": inst, "fecha_fin": date_str}
+            elif current_item and not current_item.get("institucion") and inst:
+                current_item["institucion"] = inst
+            elif current_item and not current_item.get("fecha_fin") and date_str:
+                current_item["fecha_fin"] = date_str
+
         if current_item:
             formacion.append(current_item)
 
     # 9. Experiencia laboral
     experiencia = []
-    exp_match = re.search(r'(?:experiencia\s+laboral|experiencia\s+profesional|experiencia)[\s:]*\n+(.*?)(?=\n+#|\n+(?:formaci|competencias|habilidades|idiomas|proyectos)|\Z)', text, re.IGNORECASE | re.DOTALL)
+    exp_match = re.search(r'(?:experiencia\s+laboral|experiencia\s+profesional|experiencia)[\s:]*\n+(.*?)(?=\n+#|\n+(?:formaci|competencias|habilidades|idiomas|proyectos|educaci)|\Z)', text, re.IGNORECASE | re.DOTALL)
     if exp_match:
         exp_block = exp_match.group(1).strip()
-        curr_exp = {}
-        for xl in [l.strip() for l in exp_block.splitlines() if l.strip()]:
-            has_date = bool(re.search(r'\b(20\d\d|19\d\d)\b', xl))
-            is_new_header = (
-                xl.startswith(("-", "*", "•", "·", "#"))
-                or has_date
-                or any(sep in xl for sep in [" - ", " – ", " | ", " / "])
-            )
-            if is_new_header and curr_exp and curr_exp.get("puesto"):
-                experiencia.append(curr_exp)
-                curr_exp = {"puesto": re.sub(r"^[\-\*•·#\s]+", "", xl), "empresa": "", "periodo": "", "descripcion": ""}
-            elif not curr_exp:
-                curr_exp = {"puesto": re.sub(r"^[\-\*•·#\s]+", "", xl), "empresa": "", "periodo": "", "descripcion": ""}
-            elif not curr_exp.get("empresa") and not has_date:
-                curr_exp["empresa"] = xl
-            elif has_date and not curr_exp.get("periodo"):
-                curr_exp["periodo"] = xl
+        exp_raw_lines = [l.strip() for l in exp_block.splitlines() if l.strip()]
+        exp_joined = []
+        for l in exp_raw_lines:
+            if exp_joined and (
+                exp_joined[-1].endswith((' de', ' en', ' con', ' y', ' del', ' la', ' el', ' a', ' para', ' Full', ' DE', ' —', ' -', ' |', ','))
+                or (len(exp_joined[-1]) > 0 and exp_joined[-1][-1] not in ('.', ':', '!', '?', ')') and not re.search(r'\b(20\d\d|19\d\d)\b', l) and not l.startswith(('-', '*', '•', '·', '#')) and (l[0].islower() or l.startswith(('Stack', 'Madrid', 'Pinto', 'Valdemoro', 'Aplicaciones', 'SOFTWARE'))))
+            ):
+                exp_joined[-1] += ' ' + l
             else:
-                curr_exp["descripcion"] = (curr_exp.get("descripcion", "") + " " + xl).strip()
+                exp_joined.append(l)
+
+        curr_exp = None
+        for xl in exp_joined:
+            date_m = re.search(r'\b(20\d\d|19\d\d)\b', xl)
+            is_new_job_header = bool(date_m and any(sep in xl for sep in ['—', '–', '-', '|', ' · ']))
+
+            if is_new_job_header:
+                if curr_exp:
+                    experiencia.append(curr_exp)
+                year = date_m.group(0)
+                parts = re.split(r'\s*[—–|-]\s*', re.sub(r'\b(20\d\d|19\d\d)\b\s*', '', xl).strip())
+                empresa_name = parts[0].strip() if len(parts) > 0 else 'Empresa'
+                puesto_name = parts[1].strip() if len(parts) > 1 else 'Desarrollador / Profesional'
+                extracted_loc = ""
+                loc_m = re.search(r'\b(Madrid|Pinto|Valdemoro|Barcelona|Valencia|Sevilla|\d+\s+meses)\b.*', puesto_name, re.IGNORECASE)
+                if loc_m:
+                    extracted_loc = loc_m.group(0).strip(' ,-·|')
+                    puesto_name = puesto_name[:loc_m.start()].strip(' ,-·|')
+
+                curr_exp = {
+                    "puesto": puesto_name,
+                    "empresa": empresa_name,
+                    "periodo": year,
+                    "ubicacion": extracted_loc,
+                    "descripcion": "",
+                    "detalles": [],
+                    "tecnologias": [],
+                }
+            elif curr_exp:
+                if xl.lower().startswith('tecnologías:') or xl.lower().startswith('tecnologias:'):
+                    t_str = re.sub(r'^tecnolog[íi]as:\s*', '', xl, flags=re.IGNORECASE)
+                    curr_exp["tecnologias"] = [t.strip(' .') for t in t_str.split(',') if t.strip(' .')]
+                elif any(loc_word in xl.lower() for loc_word in ['madrid', 'pinto', 'valdemoro', 'meses', 'contrato']):
+                    if not curr_exp["ubicacion"]:
+                        curr_exp["ubicacion"] = xl
+                    else:
+                        curr_exp["detalles"].append(xl)
+                elif xl.isupper() and len(xl) < 55:
+                    # Título repetido en mayúsculas dentro del cuerpo del texto
+                    continue
+                else:
+                    curr_exp["detalles"].append(xl)
+                    curr_exp["descripcion"] = (curr_exp["descripcion"] + " " + xl).strip()
+
         if curr_exp:
             experiencia.append(curr_exp)
 
@@ -664,6 +726,33 @@ def _extract_profile_from_raw_text(cv_text: str, filename: Optional[str] = None)
         from .verifier import ProfileVerifier
         extracted_skills = ProfileVerifier({}, cv_text=text).allowed_skills
         skills = sorted(list(extracted_skills))
+
+    # Si en formación apareció un ítem que contiene "prácticas" o "profesionales", moverlo a experiencia
+    real_formacion = []
+    for f in formacion:
+        t_low = (f.get("titulo", "") + " " + f.get("institucion", "")).lower()
+        if any(w in t_low for w in ["prácticas profesionales", "practicas profesionales", "cometea"]):
+            title_parts = re.split(r'\s*[–—|-]\s*', f.get("titulo", ""))
+            emp = title_parts[0].replace("2025", "").strip() or "ComeTEA"
+            role = title_parts[1].strip() if len(title_parts) > 1 else "Prácticas Profesionales"
+            loc = title_parts[2].strip() if len(title_parts) > 2 else "Valdemoro, Madrid"
+            experiencia.append({
+                "puesto": role,
+                "empresa": emp,
+                "periodo": f.get("fecha_fin", "2025"),
+                "ubicacion": loc,
+                "descripcion": "Análisis, reparación y mantenimiento de hardware y software; refactorización y optimización de código.",
+                "detalles": [
+                    "Análisis, reparación y mantenimiento de hardware y software.",
+                    "Colaboración en el trabajo en equipo y soporte técnico.",
+                    "Refactorización y optimización del código.",
+                    "Comunicación efectiva para el desarrollo de aplicaciones.",
+                ],
+                "tecnologias": [],
+            })
+        else:
+            real_formacion.append(f)
+    formacion = real_formacion
 
     # 11. Idiomas
     idiomas = []

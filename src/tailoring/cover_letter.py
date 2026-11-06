@@ -92,8 +92,9 @@ class CoverLetterGenerator:
                 prompt=prompt,
                 format_json=False,
                 temperature=0.1,
-                timeout=120,
-                num_predict=280,
+                timeout=300,
+                num_predict=220,
+                num_ctx=2048,
             )
             cleaned_body = self._clean_body_placeholders(body_text.strip().strip('"'), nombre, empresa, puesto, titulo_candidato)
             is_valid, violations = self.verifier.validate_concrete_assertions(cleaned_body, target_company=empresa)

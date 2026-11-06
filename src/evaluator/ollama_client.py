@@ -76,7 +76,11 @@ class OllamaClient:
 
     def set_concurrency(self, concurrency: int) -> None:
         """Ajusta dinámicamente la cantidad de peticiones paralelas permitidas hacia Ollama."""
-        self.max_concurrency = max(1, int(concurrency))
+        # En CPU, concurrencia > 1 satura los núcleos y causa timeouts por contención de hilos
+        if not getattr(self, "_is_gpu", False):
+            self.max_concurrency = 1
+        else:
+            self.max_concurrency = max(1, int(concurrency))
         self._semaphore = threading.Semaphore(self.max_concurrency)
         logger.debug("Concurrencia de OllamaClient ajustada a %d slots simultáneos.", self.max_concurrency)
 
@@ -204,8 +208,9 @@ class OllamaClient:
         format_json: bool = True,
         format_schema: Optional[Any] = None,
         temperature: float = 0.1,
-        timeout: int = 240,
+        timeout: int = 300,
         num_predict: Optional[int] = None,
+        num_ctx: Optional[int] = None,
     ) -> str:
         """
         Envía un prompt a Ollama y retorna la respuesta generada de forma sincronizada y thread-safe.
@@ -215,13 +220,14 @@ class OllamaClient:
         """
         target_model = model or self.default_model
         num_pred = num_predict or (400 if (format_json or format_schema) else 512)
+        ctx_size = num_ctx or (2048 if not (format_json or format_schema) else 4096)
 
         total_cpus = os.cpu_count() or 4
         if getattr(self, "_is_gpu", False):
             cpu_threads = max(2, min(total_cpus, 4))
         else:
             # En CPU repartir núcleos entre workers para evitar contención de memoria
-            cpu_threads = max(2, min(total_cpus // max(1, self.max_concurrency), 4))
+            cpu_threads = max(2, min(total_cpus // max(1, self.max_concurrency), 6))
 
         is_openai = self._backend_type == "openai"
         if is_openai:
@@ -250,7 +256,7 @@ class OllamaClient:
                 "options": {
                     "temperature": temperature,
                     "top_p": 0.9,
-                    "num_ctx": 4096,
+                    "num_ctx": ctx_size,
                     "num_predict": num_pred,
                     "num_thread": cpu_threads,
                 },
@@ -297,7 +303,7 @@ class OllamaClient:
                             options = {
                                 "temperature": temperature,
                                 "top_p": 0.9,
-                                "num_ctx": 4096,
+                                "num_ctx": ctx_size,
                                 "num_predict": num_pred,
                                 "num_thread": cpu_threads,
                             }

@@ -1431,26 +1431,32 @@ class Database:
             return [dict(row) for row in cursor.fetchall()]
 
     def get_all_jobs_for_scoring(self, limit: int = 200, cv_filename: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Recupera todas las ofertas activas registradas para contrastar afinidad, excluyendo duplicados."""
+        """Recupera ofertas pendientes o evaluadas para contrastar afinidad, excluyendo duplicados y estados terminales del usuario."""
+        # Estados terminales fijados por el usuario que nunca deben ser re-evaluados automáticamente
+        _TERMINAL_USER_STATUSES = ("duplicate", "discarded", "rejected", "interview")
+        placeholders = ",".join("?" * len(_TERMINAL_USER_STATUSES))
         with self._get_connection() as conn:
             if cv_filename and cv_filename not in ("none", "Ninguno", ""):
-                query = """
+                query = f"""
                     SELECT id, title, company, location, is_remote, description, source, created_at
                     FROM jobs
-                    WHERE ui_saved = 1 AND duplicate_of_id IS NULL AND status != 'duplicate' AND cv_filename = ?
+                    WHERE ui_saved = 1 AND duplicate_of_id IS NULL
+                      AND status NOT IN ({placeholders})
+                      AND cv_filename = ?
                     ORDER BY id DESC
                     LIMIT ?
                 """
-                cursor = conn.execute(query, (cv_filename, limit))
+                cursor = conn.execute(query, (*_TERMINAL_USER_STATUSES, cv_filename, limit))
             else:
-                query = """
+                query = f"""
                     SELECT id, title, company, location, is_remote, description, source, created_at
                     FROM jobs
-                    WHERE ui_saved = 1 AND duplicate_of_id IS NULL AND status != 'duplicate'
+                    WHERE ui_saved = 1 AND duplicate_of_id IS NULL
+                      AND status NOT IN ({placeholders})
                     ORDER BY id DESC
                     LIMIT ?
                 """
-                cursor = conn.execute(query, (limit,))
+                cursor = conn.execute(query, (*_TERMINAL_USER_STATUSES, limit))
             return [dict(row) for row in cursor.fetchall()]
 
     def get_evaluated_jobs_needing_docs(

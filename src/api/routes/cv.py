@@ -293,7 +293,10 @@ def _reevaluate_jobs_with_active_cv(db: Any) -> int:
                     print("[IA / Ollama] Ollama no está online; se mantiene la evaluación algorítmica rápida.", flush=True)
                     return
                 print(f"[IA / Ollama] >>> Iniciando reevaluación profunda con IA ({engine.ollama.default_model})...", flush=True)
-                promising_jobs = db.get_jobs_paginated(page_size=20)["items"]
+                # Solo re-evaluar ofertas no rechazadas ni descartadas manualmente por el usuario
+                _SKIP_STATUSES = {"rejected", "interview", "discarded", "duplicate"}
+                all_jobs = db.get_jobs_paginated(page_size=20)["items"]
+                promising_jobs = [j for j in all_jobs if j.get("status") not in _SKIP_STATUSES]
                 for pj in promising_jobs:
                     engine.evaluate(pj)
                 print(f"[IA / Ollama] >>> Reevaluación profunda con IA completada para {len(promising_jobs)} ofertas.", flush=True)

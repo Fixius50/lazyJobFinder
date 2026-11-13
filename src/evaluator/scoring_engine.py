@@ -223,6 +223,10 @@ class ScoringEngine:
         """
         cv_text, cv_meta, verifier = self.get_active_cv_context()
 
+        # Estados terminales fijados por el usuario que no deben alterarse automáticamente
+        _PROTECTED_STATUSES = ("rejected", "interview", "discarded")
+        current_status = job.get("status", "")
+
         if not cv_meta.get("has_cv") or not cv_text.strip() or verifier is None:
             logger.info("Oferta ID %d sin evaluar: no hay CV activo configurado", job["id"])
             no_cv_eval = {
@@ -237,7 +241,9 @@ class ScoringEngine:
                 "should_apply": False,
             }
             self.db.save_evaluation(no_cv_eval)
-            self.db.update_job_status(job["id"], "discovered")
+            # No revertir estados terminales del usuario
+            if current_status not in _PROTECTED_STATUSES:
+                self.db.update_job_status(job["id"], "discovered")
             return no_cv_eval
 
         # Si Ollama no está online, no inventar puntuaciones: mantener pendiente de evaluar
@@ -247,7 +253,9 @@ class ScoringEngine:
                 job.get("id"),
                 job.get("title"),
             )
-            self.db.update_job_status(job["id"], "discovered")
+            # No revertir estados terminales del usuario
+            if current_status not in _PROTECTED_STATUSES:
+                self.db.update_job_status(job["id"], "discovered")
             return None
 
         self.db.update_job_status(job["id"], "evaluating")
@@ -419,8 +427,10 @@ class ScoringEngine:
                 job.get("title"),
                 e,
             )
-            # Mantener en discovered para ser evaluada por Ollama cuando esté operativo
-            self.db.update_job_status(job["id"], "discovered")
+            # Mantener en discovered para ser evaluada por Ollama cuando esté operativo,
+            # pero NO revertir estados terminales fijados por el usuario
+            if job.get("status") not in ("rejected", "interview", "discarded"):
+                self.db.update_job_status(job["id"], "discovered")
             return None
 
     def reevaluate_all_jobs(self, max_jobs: int = 150) -> int:

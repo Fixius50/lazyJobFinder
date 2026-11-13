@@ -417,6 +417,13 @@ class Database:
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_cv_cache_hash ON cv_cache(file_hash);
+
+                CREATE TABLE IF NOT EXISTS provider_settings (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    enable_infojobs INTEGER NOT NULL DEFAULT 0,
+                    enable_tecnoempleo INTEGER NOT NULL DEFAULT 0,
+                    updated_at TEXT DEFAULT (datetime('now', 'localtime'))
+                );
                 """
             )
 
@@ -440,8 +447,22 @@ class Database:
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_modality ON jobs(modality);")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_contract_schedule ON jobs(contract_type, schedule);")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_cv_filename ON jobs(cv_filename);")
+
+                # Asegurar fila singleton y columnas en provider_settings
+                cols_ps = conn.execute("PRAGMA table_info(provider_settings);").fetchall()
+                existing_ps_cols = {col["name"] for col in cols_ps}
+                for col, col_def in [
+                    ("enable_infojobs", "INTEGER NOT NULL DEFAULT 0"),
+                    ("enable_tecnoempleo", "INTEGER NOT NULL DEFAULT 0"),
+                ]:
+                    if col not in existing_ps_cols:
+                        conn.execute(f"ALTER TABLE provider_settings ADD COLUMN {col} {col_def};")
+
+                row_ps = conn.execute("SELECT enable_infojobs, enable_tecnoempleo FROM provider_settings WHERE id = 1;").fetchone()
+                if not row_ps:
+                    conn.execute("INSERT OR IGNORE INTO provider_settings (id, enable_infojobs, enable_tecnoempleo) VALUES (1, 0, 0);")
             except Exception as e:
-                logger.debug("Comprobación de columnas en jobs completada: %s", e)
+                logger.debug("Comprobación de columnas en esquema completada: %s", e)
 
         # Habilitación FTS5 sin fallos
         try:
@@ -521,6 +542,55 @@ class Database:
                 pass
         with self._get_connection() as conn:
             conn.execute("DELETE FROM app_state WHERE key = ?", (key,))
+
+    # =========================================================================
+    # CONFIGURACIÓN DE PROVEEDORES SECUNDARIOS (COLUMNAS BOOLEANAS)
+    # =========================================================================
+    def get_provider_settings(self) -> Dict[str, bool]:
+        """Recupera las columnas booleanas de activación para InfoJobs y Tecnoempleo."""
+        with self._get_connection() as conn:
+            try:
+                cursor = conn.execute(
+                    "SELECT enable_infojobs, enable_tecnoempleo FROM provider_settings WHERE id = 1"
+                )
+                row = cursor.fetchone()
+                if row:
+                    return {
+                        "enable_infojobs": bool(row["enable_infojobs"]),
+                        "enable_tecnoempleo": bool(row["enable_tecnoempleo"]),
+                    }
+            except Exception as e:
+                logger.debug("Error consultando provider_settings: %s", e)
+        return {"enable_infojobs": False, "enable_tecnoempleo": False}
+
+    def update_provider_settings(
+        self,
+        enable_infojobs: Optional[bool] = None,
+        enable_tecnoempleo: Optional[bool] = None,
+    ) -> Dict[str, bool]:
+        """Actualiza las 2 columnas booleanas de activación para los proveedores secundarios."""
+        current = self.get_provider_settings()
+        new_infojobs = current["enable_infojobs"] if enable_infojobs is None else bool(enable_infojobs)
+        new_tecno = current["enable_tecnoempleo"] if enable_tecnoempleo is None else bool(enable_tecnoempleo)
+
+        with self._get_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO provider_settings (id, enable_infojobs, enable_tecnoempleo, updated_at)
+                VALUES (1, ?, ?, datetime('now', 'localtime'))
+                ON CONFLICT(id) DO UPDATE SET
+                    enable_infojobs = excluded.enable_infojobs,
+                    enable_tecnoempleo = excluded.enable_tecnoempleo,
+                    updated_at = excluded.updated_at
+                """,
+                (1 if new_infojobs else 0, 1 if new_tecno else 0),
+            )
+        logger.info(
+            "Columnas de activación de proveedores actualizadas en BD: InfoJobs=%s, Tecnoempleo=%s",
+            new_infojobs,
+            new_tecno,
+        )
+        return {"enable_infojobs": new_infojobs, "enable_tecnoempleo": new_tecno}
 
     # =========================================================================
     # CACHÉ DE EXTRACCIÓN Y PERFIL DE CV

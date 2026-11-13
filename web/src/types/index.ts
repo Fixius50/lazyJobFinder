@@ -240,6 +240,10 @@ export interface SettingsResponse {
     hora: number;
     minuto: number;
   };
+  provider_settings?: {
+    enable_infojobs: boolean;
+    enable_tecnoempleo: boolean;
+  };
   secrets_status: {
     telegram_configured: boolean;
     telegram_token_present?: boolean;
@@ -248,6 +252,8 @@ export interface SettingsResponse {
     infojobs_configured: boolean;
     infojobs_client_id?: string;
     infojobs_secret_present?: boolean;
+    jooble_configured?: boolean;
+    jooble_api_key_present?: boolean;
   };
   privacy_notice: {
     telegram_transmission_note: string;

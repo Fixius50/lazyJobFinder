@@ -61,6 +61,9 @@ class NotificationChannelsUpdate(BaseModel):
     umbral_minimo_puntuacion: Optional[int] = Field(None, ge=0, le=100, description="Umbral mínimo de afinidad")
     infojobs_client_id: Optional[str] = Field(None, description="Client ID de la API oficial de InfoJobs")
     infojobs_client_secret: Optional[str] = Field(None, description="Client Secret de la API oficial de InfoJobs")
+    enable_infojobs: Optional[bool] = Field(None, description="Activar o desactivar InfoJobs como método secundario")
+    enable_tecnoempleo: Optional[bool] = Field(None, description="Activar o desactivar Tecnoempleo como método secundario")
+    jooble_api_key: Optional[str] = Field(None, description="API Key para el metabuscador Jooble")
 
 
 class SearchConfigUpdate(BaseModel):
@@ -113,10 +116,30 @@ def get_settings() -> Dict[str, Any]:
     cfg_ij_secret = data.get("fuentes", {}).get("infojobs_api", {}).get("client_secret", "")
     current_ij_secret = _get_secret("INFOJOBS_CLIENT_SECRET", str(cfg_ij_secret or ""))
 
-    # Sanitizar fuentes para que NUNCA exponga client_secret
+    cfg_jooble_key = data.get("fuentes", {}).get("jooble", {}).get("api_key", "")
+    current_jooble_key = _get_secret("JOOBLE_API_KEY", str(cfg_jooble_key or ""))
+
+    # Consultar columnas booleanas de activación desde la base de datos
+    db = get_db()
+    prov_settings = {"enable_infojobs": False, "enable_tecnoempleo": False}
+    if db and hasattr(db, "get_provider_settings"):
+        try:
+            prov_settings = db.get_provider_settings()
+        except Exception as e:
+            logger.debug("Error leyendo provider_settings en settings.py: %s", e)
+
+    # Sanitizar fuentes para que NUNCA exponga client_secret ni api_key y sincronizar columnas booleanas
     fuentes_sanitized = copy.deepcopy(data.get("fuentes", {}))
     if "infojobs_api" in fuentes_sanitized:
         fuentes_sanitized["infojobs_api"].pop("client_secret", None)
+    fuentes_sanitized["infojobs_api"]["habilitado"] = prov_settings.get("enable_infojobs", False)
+
+    if "tecnoempleo_rss" not in fuentes_sanitized:
+        fuentes_sanitized["tecnoempleo_rss"] = {}
+    fuentes_sanitized["tecnoempleo_rss"]["habilitado"] = prov_settings.get("enable_tecnoempleo", False)
+
+    if "jooble" in fuentes_sanitized:
+        fuentes_sanitized["jooble"].pop("api_key", None)
 
     cfg_bot_user = data.get("notificaciones", {}).get("telegram", {}).get("bot_username", "")
     if not cfg_bot_user and telegram_bot_token_present:
@@ -136,6 +159,7 @@ def get_settings() -> Dict[str, Any]:
     return {
         "busqueda": data.get("busqueda", {}),
         "fuentes": fuentes_sanitized,
+        "provider_settings": prov_settings,
         "evaluacion": data.get("evaluacion", {}),
         "notificaciones": data.get("notificaciones", {}),
         "horario": data.get("horario", {}),
@@ -147,6 +171,8 @@ def get_settings() -> Dict[str, Any]:
             "infojobs_configured": bool(current_ij_id and current_ij_secret),
             "infojobs_client_id": current_ij_id,
             "infojobs_secret_present": bool(current_ij_secret),
+            "jooble_configured": bool(current_jooble_key),
+            "jooble_api_key_present": bool(current_jooble_key),
         },
         "privacy_notice": {
             "telegram_transmission_note": (
@@ -254,14 +280,52 @@ def update_notification_channels(req: NotificationChannelsUpdate) -> Dict[str, A
                 _update_env_file("INFOJOBS_CLIENT_SECRET", "")
             data["fuentes"]["infojobs_api"].pop("client_secret", None)
 
+    # Guardar clave de Jooble API de forma persistente
+    if req.jooble_api_key is not None:
+        clean_jooble = req.jooble_api_key.strip()
+        if "fuentes" not in data:
+            data["fuentes"] = {}
+        if "jooble" not in data["fuentes"]:
+            data["fuentes"]["jooble"] = {}
+
+        if clean_jooble:
+            os.environ["JOOBLE_API_KEY"] = clean_jooble
+            _save_persisted_secret("JOOBLE_API_KEY", clean_jooble)
+            _update_env_file("JOOBLE_API_KEY", clean_jooble)
+        else:
+            os.environ.pop("JOOBLE_API_KEY", None)
+            _delete_persisted_secret("JOOBLE_API_KEY")
+            _update_env_file("JOOBLE_API_KEY", "")
+        data["fuentes"]["jooble"].pop("api_key", None)
+
+    # Actualizar columnas de activación en base de datos y configuración
+    db = get_db()
+    if req.enable_infojobs is not None or req.enable_tecnoempleo is not None:
+        if db and hasattr(db, "update_provider_settings"):
+            db.update_provider_settings(
+                enable_infojobs=req.enable_infojobs,
+                enable_tecnoempleo=req.enable_tecnoempleo,
+            )
+        if "fuentes" not in data:
+            data["fuentes"] = {}
+        if "infojobs_api" not in data["fuentes"]:
+            data["fuentes"]["infojobs_api"] = {}
+        if req.enable_infojobs is not None:
+            data["fuentes"]["infojobs_api"]["habilitado"] = bool(req.enable_infojobs)
+
+        if "tecnoempleo_rss" not in data["fuentes"]:
+            data["fuentes"]["tecnoempleo_rss"] = {}
+        if req.enable_tecnoempleo is not None:
+            data["fuentes"]["tecnoempleo_rss"]["habilitado"] = bool(req.enable_tecnoempleo)
+
     _save_settings(data)
 
-    db = get_db()
-    db.log_event(
-        "INFO",
-        "settings",
-        f"Preferencias de canales actualizadas: interfaz=True, telegram={req.enviar_telegram}",
-    )
+    if db:
+        db.log_event(
+            "INFO",
+            "settings",
+            f"Preferencias de canales actualizadas: interfaz=True, telegram={req.enviar_telegram}, infojobs={req.enable_infojobs}, tecnoempleo={req.enable_tecnoempleo}",
+        )
 
     return {
         "success": True,

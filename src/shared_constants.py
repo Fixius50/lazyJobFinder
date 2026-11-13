@@ -45,6 +45,7 @@ PORTAL_SOURCES: Dict[str, Any] = {
     "glassdoor": {"label": "Glassdoor", "type": "scraper"},
     "google": {"label": "Google Jobs", "type": "scraper"},
     "jobspy": {"label": "JobSpy Multi-portal", "type": "scraper"},
+    "jooble": {"label": "Jooble Agregador", "type": "api"},
 }
 
 SCORING_THRESHOLDS: Dict[str, int] = {
@@ -63,13 +64,17 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     },
     "fuentes": {
         "tecnoempleo_rss": {"habilitado": False},
+        "infojobs_api": {
+            "habilitado": False,
+            "client_id": "",
+        },
         "jobspy": {
             "habilitado": True,
             "sitios": ["indeed", "linkedin", "glassdoor", "google"],
         },
-        "infojobs_api": {
+        "jooble": {
             "habilitado": True,
-            "client_id": "",
+            "api_key": "",
         },
     },
     "evaluacion": {

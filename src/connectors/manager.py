@@ -6,6 +6,7 @@ from ..database import Database
 from .base import JobOffer
 from .infojobs_connector import InfoJobsConnector
 from .jobspy_connector import JobSpyConnector
+from .jooble_connector import JoobleConnector
 from .tecnoempleo_connector import TecnoempleoConnector
 
 logger = logging.getLogger("lazyJobFinder.connectors.manager")
@@ -24,25 +25,45 @@ class ConnectorManager:
     def _init_connectors(self) -> None:
         sources_cfg = self.settings.get("fuentes", {})
 
-        # 1. Tecnoempleo RSS (Gratuito, abierto, sin claves)
-        tecno_cfg = sources_cfg.get("tecnoempleo_rss", {})
-        if tecno_cfg.get("habilitado", True):
+        # Leer columnas booleanas de activación desde la base de datos (provider_settings)
+        prov_settings = {}
+        if self.db and hasattr(self.db, "get_provider_settings"):
+            try:
+                prov_settings = self.db.get_provider_settings()
+            except Exception as exc:
+                logger.debug("Error leyendo columnas de provider_settings: %s", exc)
+
+        enable_tecno = prov_settings.get(
+            "enable_tecnoempleo",
+            sources_cfg.get("tecnoempleo_rss", {}).get("habilitado", False),
+        )
+        enable_infojobs = prov_settings.get(
+            "enable_infojobs",
+            sources_cfg.get("infojobs_api", {}).get("habilitado", False),
+        )
+
+        # 1. Tecnoempleo RSS (Método secundario - Nicho IT, activable en BD)
+        if enable_tecno:
             conn = TecnoempleoConnector(enabled=True)
             self.connectors.append(conn)
             self.source_health["tecnoempleo"] = {"status": "ready", "offers": 0, "error": None}
+        else:
+            self.source_health["tecnoempleo"] = {"status": "disabled", "offers": 0, "error": None}
 
-        # 2. InfoJobs API (Oficial REST)
-        infojobs_cfg = sources_cfg.get("infojobs_api", {})
-        if infojobs_cfg.get("habilitado", True):
+        # 2. InfoJobs API (Método secundario - Bolsa privada nacional, activable en BD)
+        if enable_infojobs:
             import os
+            infojobs_cfg = sources_cfg.get("infojobs_api", {})
             ij_id = infojobs_cfg.get("client_id") or os.getenv("INFOJOBS_CLIENT_ID", "").strip()
             ij_secret = infojobs_cfg.get("client_secret") or os.getenv("INFOJOBS_CLIENT_SECRET", "").strip()
             conn = InfoJobsConnector(client_id=ij_id, client_secret=ij_secret, enabled=True)
             self.connectors.append(conn)
             status_desc = "ready" if (conn.client_id and conn.client_secret) else "not_configured"
             self.source_health["infojobs"] = {"status": status_desc, "offers": 0, "error": None}
+        else:
+            self.source_health["infojobs"] = {"status": "disabled", "offers": 0, "error": None}
 
-        # 3. JobSpy (Indeed, LinkedIn, Glassdoor, Google Jobs)
+        # 3. JobSpy (Metabuscadores principales unificados: Indeed, LinkedIn, Glassdoor, Google Jobs)
         jobspy_cfg = sources_cfg.get("jobspy", {})
         if jobspy_cfg.get("habilitado", True):
             sites = jobspy_cfg.get("sitios", ["indeed", "linkedin", "glassdoor", "google"])
@@ -51,9 +72,26 @@ class ConnectorManager:
             for site in sites:
                 self.source_health[f"jobspy_{site}"] = {"status": "ready", "offers": 0, "error": None}
 
+        # 4. Jooble API (Metabuscador y agregador global multi-sitio)
+        jooble_cfg = sources_cfg.get("jooble", {})
+        if jooble_cfg.get("habilitado", True):
+            import os
+            from ..storage import get_secret
+            jooble_key = (
+                jooble_cfg.get("api_key")
+                or get_secret("JOOBLE_API_KEY", os.getenv("JOOBLE_API_KEY", "")).strip()
+            )
+            conn = JoobleConnector(api_key=jooble_key, enabled=True)
+            self.connectors.append(conn)
+            status_desc = "ready" if jooble_key else "not_configured"
+            self.source_health["jooble"] = {"status": status_desc, "offers": 0, "error": None}
+
         logger.info(
-            "ConnectorManager inicializado con %d conectores activos.",
+            "ConnectorManager inicializado con %d conectores activos (Tecnoempleo=%s, InfoJobs=%s, Jooble=%s).",
             len(self.connectors),
+            enable_tecno,
+            enable_infojobs,
+            bool(jooble_cfg.get("habilitado", True)),
         )
 
     def reload_connectors(self) -> None:
@@ -71,6 +109,8 @@ class ConnectorManager:
             err = data.get("error")
             if status == "ok":
                 summary[name] = f"🟢 OK ({offers} ofertas)"
+            elif status == "disabled":
+                summary[name] = "⚪ Desactivado (método secundario)"
             elif status == "not_configured":
                 summary[name] = "⚪ No configurado (sin claves)"
             elif status == "error":

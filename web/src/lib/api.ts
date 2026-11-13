@@ -325,6 +325,9 @@ export const api = {
     umbral_minimo_puntuacion?: number;
     infojobs_client_id?: string;
     infojobs_client_secret?: string;
+    jooble_api_key?: string;
+    enable_infojobs?: boolean;
+    enable_tecnoempleo?: boolean;
   }) =>
     request<{ success: boolean; message: string }>("/settings/channels", {
       method: "PUT",

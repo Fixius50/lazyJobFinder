@@ -24,6 +24,7 @@ export const PORTAL_SOURCES: Record<string, { label: string; type: string }> = {
   glassdoor: { label: "Glassdoor", type: "scraper" },
   google: { label: "Google Jobs", type: "scraper" },
   jobspy: { label: "JobSpy Multi-portal", type: "scraper" },
+  jooble: { label: "Jooble Agregador", type: "api" },
 };
 
 export const SERVICES = ["ollama", "lazyjobfinder"] as const;

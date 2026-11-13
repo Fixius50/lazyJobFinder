@@ -10,6 +10,9 @@ import {
   RotateCw,
   KeyRound,
   ExternalLink,
+  Laptop,
+  Layers,
+  Globe,
 } from "lucide-react";
 import { Dialog } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -43,9 +46,14 @@ export function NotificationChannelsDialog({
   const [showAdvancedTelegram, setShowAdvancedTelegram] = useState<boolean>(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
 
-  // Estados de InfoJobs API
+  // Estados de Proveedores Secundarios (InfoJobs y Tecnoempleo)
+  const [enableInfojobs, setEnableInfojobs] = useState<boolean>(false);
+  const [enableTecnoempleo, setEnableTecnoempleo] = useState<boolean>(false);
   const [infojobsClientId, setInfojobsClientId] = useState<string>("");
   const [infojobsClientSecret, setInfojobsClientSecret] = useState<string>("");
+
+  // Estado de Metabuscador Jooble (Agregador)
+  const [joobleApiKey, setJoobleApiKey] = useState<string>("");
 
   const fetchSettings = async () => {
     try {
@@ -60,8 +68,21 @@ export function NotificationChannelsDialog({
       );
       setTelegramBotToken("");
       setUmbralMinimo(res.evaluacion?.umbral_minimo_puntuacion ?? 50);
+
+      // Sincronizar estado de activación desde columnas en BD (provider_settings)
+      setEnableInfojobs(
+        res.provider_settings?.enable_infojobs ??
+          res.fuentes?.infojobs_api?.habilitado ??
+          false
+      );
+      setEnableTecnoempleo(
+        res.provider_settings?.enable_tecnoempleo ??
+          res.fuentes?.tecnoempleo_rss?.habilitado ??
+          false
+      );
       setInfojobsClientId(res.secrets_status?.infojobs_client_id || "");
       setInfojobsClientSecret("");
+      setJoobleApiKey("");
     } catch (e: any) {
       console.error("Error cargando configuración de canales:", e);
     } finally {
@@ -137,6 +158,9 @@ export function NotificationChannelsDialog({
         umbral_minimo_puntuacion: umbralMinimo,
         infojobs_client_id: infojobsClientId.trim() || undefined,
         infojobs_client_secret: infojobsClientSecret.trim() || undefined,
+        jooble_api_key: joobleApiKey.trim() || undefined,
+        enable_infojobs: enableInfojobs,
+        enable_tecnoempleo: enableTecnoempleo,
       });
       toast.success("Preferencias y credenciales guardadas con éxito.");
       setSaveStatus("Preferencias y claves guardadas correctamente");
@@ -155,8 +179,8 @@ export function NotificationChannelsDialog({
     <Dialog
       open={open}
       onOpenChange={onOpenChange}
-      title="Preferencias de Notificación y Conexiones API"
-      description="Gestiona las alertas automáticas de Telegram y tus credenciales de la API oficial de InfoJobs."
+      title="Preferencias de Notificación y Métodos de Búsqueda"
+      description="Configura las alertas de Telegram y decide si activar proveedores de empleo secundarios (InfoJobs y Tecnoempleo)."
       maxWidth="lg"
     >
       {loading ? (
@@ -373,67 +397,189 @@ export function NotificationChannelsDialog({
             )}
           </div>
 
-          {/* Sección 2: InfoJobs API */}
+          {/* Sección 2: Metabuscador Multi-sitio Jooble */}
           <div className="space-y-3 p-3.5 rounded-xl border bg-card/60">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <KeyRound className="h-4 w-4 text-amber-400" />
+                <Globe className="h-4 w-4 text-emerald-400" />
                 <span className="font-semibold text-xs text-foreground">
-                  API Oficial de InfoJobs
+                  Metabuscador Jooble (Agregador Multi-sitio)
                 </span>
                 <Badge
-                  variant={settings?.secrets_status.infojobs_configured ? "success" : "secondary"}
+                  variant={settings?.secrets_status.jooble_configured ? "success" : "secondary"}
                   className="text-3xs py-0"
                 >
-                  {settings?.secrets_status.infojobs_configured ? "API Conectada" : "Sin Claves"}
+                  {settings?.secrets_status.jooble_configured ? "API Conectada" : "Sin Clave (Opcional)"}
                 </Badge>
               </div>
               <a
-                href="https://developer.infojobs.net"
+                href="https://jooble.org/api/about"
                 target="_blank"
                 rel="noreferrer"
                 className="text-2xs text-primary hover:underline flex items-center gap-1"
               >
-                <span>developer.infojobs.net</span>
+                <span>jooble.org/api</span>
                 <ExternalLink className="h-3 w-3" />
               </a>
             </div>
 
-            <p className="text-2xs text-muted-foreground">
-              Introduce tus credenciales de desarrollador de InfoJobs para buscar ofertas oficiales sin restricciones de scraping.
+            <p className="text-2xs text-muted-foreground leading-relaxed">
+              Jooble es un metabuscador que indexa miles de bolsas de empleo, webs de empresas y ETTs (Randstad, Adecco, etc.) a la vez en España. Introduce tu clave gratuita de desarrollador para buscar ofertas oficiales sin restricciones.
             </p>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
-              <div className="space-y-1">
-                <label className="text-2xs font-medium text-foreground">Client ID:</label>
-                <Input
-                  type="text"
-                  placeholder="Ej: e82b13c..."
-                  value={infojobsClientId}
-                  onChange={(e) => setInfojobsClientId(e.target.value)}
-                  className="text-xs h-8 font-mono bg-background"
+            <div className="space-y-1 pt-0.5">
+              <label className="text-2xs font-medium text-foreground">
+                Jooble API Key:
+                {settings?.secrets_status.jooble_api_key_present && !joobleApiKey && (
+                  <span className="text-3xs text-emerald-400 ml-1.5 font-normal">(Configurada)</span>
+                )}
+              </label>
+              <Input
+                type="password"
+                placeholder={
+                  settings?.secrets_status.jooble_api_key_present
+                    ? "•••••••••••••••• (dejar en blanco para conservar)"
+                    : "Introduce tu API Key de Jooble"
+                }
+                value={joobleApiKey}
+                onChange={(e) => setJoobleApiKey(e.target.value)}
+                className="text-xs h-8 font-mono bg-background"
+              />
+            </div>
+          </div>
+
+          {/* Sección 3: Proveedores Secundarios de Empleo */}
+          <div className="space-y-3.5 p-3.5 rounded-xl border bg-card/60">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <Layers className="h-4 w-4 text-amber-400" />
+                <span className="font-semibold text-xs text-foreground">
+                  Proveedores Secundarios de Empleo (Opcionales)
+                </span>
+              </div>
+              <p className="text-2xs text-muted-foreground leading-relaxed">
+                Por defecto, la búsqueda principal utiliza <strong>metabuscadores globales</strong> (Google Jobs, Indeed, LinkedIn, Glassdoor) que agregan ofertas de miles de bolsas y ETTs a la vez. Puedes activar estos métodos secundarios si deseas consultar estas bolsas individuales directamente.
+              </p>
+            </div>
+
+            {/* Sub-item A: InfoJobs API */}
+            <div className="p-3 rounded-lg border bg-background/50 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <KeyRound className="h-4 w-4 text-amber-400" />
+                  <span className="font-semibold text-xs text-foreground">InfoJobs API</span>
+                  <Badge
+                    variant={
+                      enableInfojobs
+                        ? settings?.secrets_status.infojobs_configured
+                          ? "success"
+                          : "warning"
+                        : "secondary"
+                    }
+                    className="text-3xs py-0"
+                  >
+                    {!enableInfojobs
+                      ? "Desactivado"
+                      : settings?.secrets_status.infojobs_configured
+                      ? "API Conectada"
+                      : "Sin Claves"}
+                  </Badge>
+                </div>
+                <div className="flex items-center gap-2">
+                  <a
+                    href="https://developer.infojobs.net"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-3xs text-primary hover:underline flex items-center gap-1"
+                  >
+                    <span>developer.infojobs.net</span>
+                    <ExternalLink className="h-2.5 w-2.5" />
+                  </a>
+                  <Switch
+                    checked={enableInfojobs}
+                    onCheckedChange={setEnableInfojobs}
+                    id="switch-modal-infojobs"
+                  />
+                </div>
+              </div>
+
+              <p className="text-2xs text-muted-foreground">
+                Portal privado nacional. Requiere credenciales de desarrollador gratuitas.
+              </p>
+
+              {enableInfojobs ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1 border-t border-border/30">
+                  <div className="space-y-1">
+                    <label className="text-2xs font-medium text-foreground">Client ID:</label>
+                    <Input
+                      type="text"
+                      placeholder="Ej: e82b13c..."
+                      value={infojobsClientId}
+                      onChange={(e) => setInfojobsClientId(e.target.value)}
+                      className="text-xs h-8 font-mono bg-background"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-2xs font-medium text-foreground">
+                      Client Secret:
+                      {settings?.secrets_status.infojobs_secret_present && !infojobsClientSecret && (
+                        <span className="text-3xs text-emerald-400 ml-1.5 font-normal">(Configurado)</span>
+                      )}
+                    </label>
+                    <Input
+                      type="password"
+                      placeholder={
+                        settings?.secrets_status.infojobs_secret_present
+                          ? "•••••••••••••••• (dejar en blanco para conservar)"
+                          : "Introduce tu Client Secret"
+                      }
+                      value={infojobsClientSecret}
+                      onChange={(e) => setInfojobsClientSecret(e.target.value)}
+                      className="text-xs h-8 font-mono bg-background"
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div className="text-3xs text-muted-foreground/80 italic pt-0.5">
+                  ⚪ Desactivado: La búsqueda omitirá la API de InfoJobs y utilizará los agregadores principales.
+                </div>
+              )}
+            </div>
+
+            {/* Sub-item B: Tecnoempleo RSS */}
+            <div className="p-3 rounded-lg border bg-background/50 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Laptop className="h-4 w-4 text-indigo-400" />
+                  <span className="font-semibold text-xs text-foreground">Tecnoempleo RSS</span>
+                  <Badge
+                    variant={enableTecnoempleo ? "success" : "secondary"}
+                    className="text-3xs py-0"
+                  >
+                    {enableTecnoempleo ? "Activo (Solo IT)" : "Desactivado"}
+                  </Badge>
+                </div>
+                <Switch
+                  checked={enableTecnoempleo}
+                  onCheckedChange={setEnableTecnoempleo}
+                  id="switch-modal-tecnoempleo"
                 />
               </div>
 
-              <div className="space-y-1">
-                <label className="text-2xs font-medium text-foreground">
-                  Client Secret:
-                  {settings?.secrets_status.infojobs_secret_present && !infojobsClientSecret && (
-                    <span className="text-3xs text-emerald-400 ml-1.5 font-normal">(Configurado)</span>
-                  )}
-                </label>
-                <Input
-                  type="password"
-                  placeholder={
-                    settings?.secrets_status.infojobs_secret_present
-                      ? "•••••••••••••••• (dejar en blanco para conservar)"
-                      : "Introduce tu Client Secret"
-                  }
-                  value={infojobsClientSecret}
-                  onChange={(e) => setInfojobsClientSecret(e.target.value)}
-                  className="text-xs h-8 font-mono bg-background"
-                />
-              </div>
+              <p className="text-2xs text-muted-foreground">
+                Bolsa especializada en tecnología e informática en España (abierto, sin claves).
+              </p>
+
+              {enableTecnoempleo ? (
+                <div className="text-3xs text-emerald-400/90 pt-0.5">
+                  🟢 Activo: Se incluirán ofertas tecnológicas de tecnoempleo.com.
+                </div>
+              ) : (
+                <div className="text-3xs text-muted-foreground/80 italic pt-0.5">
+                  ⚪ Desactivado: Recomendado para mantener búsquedas generalistas o no tecnológicas.
+                </div>
+              )}
             </div>
           </div>
 

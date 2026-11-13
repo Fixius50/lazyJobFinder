@@ -68,9 +68,7 @@ class JobSpyConnector(BaseConnector):
                     }
                     if site == "indeed":
                         loc_low = primary_location.lower()
-                        if any(k in loc_low for k in ("spain", "españa", "madrid", "barcelona", "valencia")):
-                            kwargs["country_indeed"] = "spain"
-                        elif any(k in loc_low for k in ("uk", "united kingdom", "london", "londres", "manchester")):
+                        if any(k in loc_low for k in ("uk", "united kingdom", "london", "londres", "manchester")):
                             kwargs["country_indeed"] = "uk"
                         elif any(k in loc_low for k in ("germany", "deutschland", "berlin", "munich")):
                             kwargs["country_indeed"] = "germany"
@@ -78,8 +76,11 @@ class JobSpyConnector(BaseConnector):
                             kwargs["country_indeed"] = "france"
                         elif any(k in loc_low for k in ("canada", "toronto", "vancouver")):
                             kwargs["country_indeed"] = "canada"
-                        else:
+                        elif any(k in loc_low for k in ("usa", "united states", "eeuu", "estados unidos", "america")):
                             kwargs["country_indeed"] = "usa"
+                        else:
+                            # Por defecto en lazyJobFinder, la cobertura principal es España (incluyendo Remoto y cualquier provincia)
+                            kwargs["country_indeed"] = "spain"
 
                     jobs_df = scrape_jobs(**kwargs)
 

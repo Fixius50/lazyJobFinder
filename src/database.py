@@ -97,6 +97,74 @@ def compute_description_hash(description: str) -> str:
     return hashlib.sha256(clean_desc.encode("utf-8")).hexdigest()
 
 
+def extract_location_city(location: str) -> Optional[str]:
+    """
+    Extrae y normaliza el nombre de la ciudad o área metropolitana principal de una ubicación
+    para generar chips limpios y precisos en los filtros dinámicos.
+    """
+    if not location or not location.strip():
+        return None
+    s = location.strip()
+
+    # Manejar formatos como "Greater Madrid Metropolitan Area" o "Greater Bilbao Area"
+    m_greater = re.match(r"^Greater\s+(.+?)(?:\s+Metropolitan)?\s+Area$", s, re.IGNORECASE)
+    if m_greater:
+        city = m_greater.group(1).strip()
+        if city.lower() in ("la coruña", "a coruña", "coruña"):
+            return "A Coruña"
+        return city
+
+    # Tomar la primera parte antes de comas o guiones separadores
+    first_part = s.split(",")[0].strip()
+    lower = first_part.lower()
+
+    return first_part
+
+
+def extract_location_city(location: str) -> Optional[str]:
+    """
+    Extrae y normaliza el nombre de la ciudad o área metropolitana principal de una ubicación
+    para generar chips limpios y precisos en los filtros dinámicos.
+    """
+    if not location or not location.strip():
+        return None
+    s = location.strip()
+
+    # Manejar formatos como "Greater Madrid Metropolitan Area" o "Greater Bilbao Area"
+    m_greater = re.match(r"^Greater\s+(.+?)(?:\s+Metropolitan)?\s+Area$", s, re.IGNORECASE)
+    if m_greater:
+        city = m_greater.group(1).strip()
+        if city.lower() in ("la coruña", "a coruña", "coruña"):
+            return "A Coruña"
+        return city
+
+    # Tomar la primera parte antes de comas o guiones separadores
+    first_part = s.split(",")[0].strip()
+    lower = first_part.lower()
+
+    # Omitir etiquetas de país genérico o teletrabajo
+    if lower in ("spain", "españa", "en remoto", "trabajo en remoto", "remoto", "remote"):
+        return None
+    # Omitir siglas de provincias/comunidades (MD, CT, AR, IB, AN, etc.)
+    if len(first_part) <= 2:
+        return None
+    # Omitir comunidades autónomas genéricas si no especifican municipio
+    if lower in (
+        "basque country", "país vasco", "valencian community", "comunidad valenciana",
+        "community of madrid", "comunidad de madrid", "catalonia", "cataluña",
+        "andalusia", "andalucía", "galicia", "castilla and leon", "castilla y león"
+    ):
+        return None
+
+    # Normalizaciones comunes
+    if lower in ("seville", "sevilla"):
+        return "Sevilla"
+    if lower in ("la coruña", "a coruña", "coruña"):
+        return "A Coruña"
+
+    return first_part
+
+
 def extract_job_metadata(
     title: str = "",
     description: str = "",
@@ -1271,8 +1339,21 @@ class Database:
 
         if location and location.strip() and not any(k in location.lower() for k in ("todos", "all", "cualquiera")):
             loc_val = location.strip()
-            where_clauses.append("(LOWER(j.location) LIKE ? OR j.is_remote = 1 OR LOWER(j.location) LIKE '%remot%' OR LOWER(j.location) LIKE '%teletrabaj%')")
-            params.append(f"%{loc_val.lower()}%")
+            loc_clean = loc_val.lower()
+            loc_conditions = ["LOWER(j.location) LIKE ?"]
+            params.append(f"%{loc_clean}%")
+            if "sevilla" in loc_clean:
+                loc_conditions.append("LOWER(j.location) LIKE ?")
+                params.append("%seville%")
+            elif "seville" in loc_clean:
+                loc_conditions.append("LOWER(j.location) LIKE ?")
+                params.append("%sevilla%")
+            elif "coruña" in loc_clean or "coruna" in loc_clean:
+                loc_conditions.append("LOWER(j.location) LIKE ?")
+                params.append("%coruña%")
+                loc_conditions.append("LOWER(j.location) LIKE ?")
+                params.append("%coruna%")
+            where_clauses.append(f"({' OR '.join(loc_conditions)} OR j.is_remote = 1 OR LOWER(j.location) LIKE '%remot%' OR LOWER(j.location) LIKE '%teletrabaj%')")
 
         if time_range and str(time_range).strip().lower() not in ("all", "todas", "todos", "cualquiera", ""):
             tr = str(time_range).strip().lower()
@@ -1855,25 +1936,58 @@ class Database:
             ).fetchall()
             contract_types = [{"id": r["contract_type"], "label": r["contract_type"], "count": r["c"]} for r in contract_rows]
 
-            # 8. Rangos salariales
+            # 8. Top ubicaciones reales extraídas y normalizadas
+            loc_rows = conn.execute(
+                f"SELECT j.location FROM {base_from} WHERE {base_where} AND j.location IS NOT NULL AND TRIM(j.location) != ''"
+            ).fetchall()
+            loc_counter: collections.Counter = collections.Counter()
+            for r in loc_rows:
+                city = extract_location_city(r["location"])
+                if city:
+                    loc_counter[city] += 1
+            top_locations = [{"name": name, "count": count} for name, count in loc_counter.most_common(20)]
+
+            # 9. Rangos y estadísticas salariales reales
             salary_row = conn.execute(
                 f"""
                 SELECT
                     MIN(CASE WHEN j.salary_min <= 100 THEN j.salary_min * 1800 WHEN j.salary_min < 6000 THEN j.salary_min * 12 ELSE j.salary_min END) as min_val,
-                    MAX(CASE WHEN j.salary_max <= 100 THEN j.salary_max * 1800 WHEN j.salary_max < 6000 THEN j.salary_max * 12 ELSE j.salary_max END) as max_val
+                    MAX(CASE WHEN j.salary_max <= 100 THEN j.salary_max * 1800 WHEN j.salary_max < 6000 THEN j.salary_max * 12 ELSE j.salary_max END) as max_val,
+                    COUNT(*) as total_with_sal
                 FROM {base_from}
                 WHERE {base_where} AND (j.salary_min > 0 OR j.salary_max > 0)
                 """
             ).fetchone()
             salary_min = float(salary_row["min_val"] or 15000.0)
             salary_max = float(salary_row["max_val"] or 100000.0)
+            total_with_sal = int(salary_row["total_with_sal"] or 0)
 
-            # 9. Puntuaciones mínimas y máximas
+            curr_row = conn.execute(
+                f"SELECT j.salary_currency FROM {base_from} WHERE {base_where} AND j.salary_currency IS NOT NULL AND TRIM(j.salary_currency) != '' LIMIT 1"
+            ).fetchone()
+            raw_curr = curr_row["salary_currency"] if curr_row and curr_row["salary_currency"] else "EUR"
+            curr_symbol = "€" if raw_curr == "EUR" else ("$" if raw_curr == "USD" else raw_curr)
+
+            salary_stats = {
+                "min": salary_min,
+                "max": salary_max,
+                "currency": curr_symbol,
+                "total_with_salary": total_with_sal,
+            }
+
+            # 10. Puntuaciones mínimas, máximas y media de la IA
             score_row = conn.execute(
-                f"SELECT MIN(e.score) as min_score, MAX(e.score) as max_score FROM {base_from} WHERE {base_where} AND e.score IS NOT NULL"
+                f"SELECT MIN(e.score) as min_score, MAX(e.score) as max_score, AVG(e.score) as avg_score FROM {base_from} WHERE {base_where} AND e.score IS NOT NULL"
             ).fetchone()
             min_score = int(score_row["min_score"] or 0)
             max_score = int(score_row["max_score"] or 100)
+            avg_score = round(float(score_row["avg_score"] or 0.0), 1)
+
+            score_stats = {
+                "min": min_score,
+                "max": max_score,
+                "avg": avg_score,
+            }
 
             total_jobs = conn.execute(f"SELECT COUNT(*) FROM {base_from} WHERE {base_where}").fetchone()[0]
 
@@ -1887,7 +2001,10 @@ class Database:
                 "schedules": schedules,
                 "contract_types": contract_types,
                 "salary_range": {"min": salary_min, "max": salary_max},
+                "salary_stats": salary_stats,
                 "score_range": {"min": min_score, "max": max_score},
+                "score_stats": score_stats,
+                "top_locations": top_locations,
                 "skills": [{"id": name, "label": name, "count": count} for name, count in skill_counter.most_common(20)],
                 "missing_skills": [{"id": name, "label": name, "count": count} for name, count in missing_counter.most_common(20)],
                 "strengths": [{"id": name, "label": name, "count": count} for name, count in strength_counter.most_common(20)],

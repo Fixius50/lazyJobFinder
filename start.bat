@@ -199,18 +199,15 @@ if %ERRORLEVEL% equ 0 (
 )
 
 :: 3. Comprobar si Docker dispone de aceleracion GPU NVIDIA (nvidia-container-toolkit)
-if not defined DOCKER_COMPOSE_ARGS (
-    where nvidia-smi >nul 2>&1
-    if !ERRORLEVEL! equ 0 (
-        docker run --rm --gpus all hello-world >nul 2>&1
-        if !ERRORLEVEL! equ 0 (
-            if exist "docker-compose.gpu.yml" (
-                echo   [OK] Aceleracion GPU NVIDIA detectada y activa para Docker.
-                set "DOCKER_COMPOSE_ARGS=-f docker-compose.yml -f docker-compose.gpu.yml"
-            )
-        )
-    )
-)
+if defined DOCKER_COMPOSE_ARGS goto :SKIP_NVIDIA
+where nvidia-smi >nul 2>&1
+if errorlevel 1 goto :SKIP_NVIDIA
+docker run --rm --gpus all hello-world >nul 2>&1
+if errorlevel 1 goto :SKIP_NVIDIA
+if not exist "docker-compose.gpu.yml" goto :SKIP_NVIDIA
+echo   [OK] Aceleracion GPU NVIDIA detectada y activa para Docker.
+set "DOCKER_COMPOSE_ARGS=-f docker-compose.yml -f docker-compose.gpu.yml"
+:SKIP_NVIDIA
 
 :: 4. Comprobar GPU AMD en Windows (WSL2 con ROCDXG /dev/dxg para tarjetas RDNA 3 o forzadas en .env)
 if not defined DOCKER_COMPOSE_ARGS (
@@ -219,7 +216,6 @@ if not defined DOCKER_COMPOSE_ARGS (
     if defined DETECTED_GPU (
         echo !DETECTED_GPU! | findstr /i "Radeon AMD" >nul 2>&1
         if !ERRORLEVEL! equ 0 (
-            :: Deteccion de arquitectura para HSA_OVERRIDE_GFX_VERSION si no esta fijada
             if not defined HSA_OVERRIDE_GFX_VERSION (
                 echo !DETECTED_GPU! | findstr /i "7900 7800 7700 7600 W7900 W7800" >nul 2>&1
                 if !ERRORLEVEL! equ 0 set "HSA_OVERRIDE_GFX_VERSION=11.0.0"
@@ -361,7 +357,7 @@ pause
 goto :MENU
 
 :: -----------------------------------------------------------------------------
-:: Detener Servicios y Salir Automáticamente
+:: Detener Servicios y Salir Automaticamente
 :: -----------------------------------------------------------------------------
 :STOP_AND_EXIT
 cd /d "%~dp0"

@@ -44,6 +44,7 @@ export function JobCard({ job, onOpenDetail, onUpdateStatus, onUpdateJob, onDele
   const [hasCv, setHasCv] = useState<boolean>(!!job.has_cv);
   const [hasLetter, setHasLetter] = useState<boolean>(!!job.has_letter);
   const [isGenerating, setIsGenerating] = useState<boolean>(job.status === "generating_docs");
+  const [isDiscarding, setIsDiscarding] = useState<boolean>(false);
 
   const isEvaluated = Boolean(
     (job.score !== null && job.score !== undefined && job.status !== "discovered" && job.status !== "evaluating") ||
@@ -53,10 +54,15 @@ export function JobCard({ job, onOpenDetail, onUpdateStatus, onUpdateJob, onDele
 
   const handleToggleDiscard = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!onUpdateStatus) return;
+    if (!onUpdateStatus || isDiscarding) return;
+    setIsDiscarding(true);
     const newStatus = isDiscarded ? "evaluated" : "discarded";
     onUpdateStatus(job.id, newStatus);
   };
+
+  useEffect(() => {
+    setIsDiscarding(false);
+  }, [job.status]);
 
   useEffect(() => {
     setHasCv(!!job.has_cv);
@@ -98,7 +104,7 @@ export function JobCard({ job, onOpenDetail, onUpdateStatus, onUpdateJob, onDele
     <Card
       className={`group flex flex-col justify-between hover:border-primary/50 hover:shadow-md transition-all duration-200 bg-card/80 backdrop-blur-sm border rounded-xl overflow-hidden h-full ${
         isDiscarded ? "opacity-75 hover:opacity-100 border-dashed border-border/80" : ""
-      }`}
+      } ${isDiscarding ? "pointer-events-none opacity-40 select-none scale-[0.98]" : ""}`}
     >
       <CardContent className="p-3 sm:p-3.5 flex flex-col h-full justify-between space-y-3">
         {/* Cabecera de la Tarjeta: tags | sitio | modalidad | ojo */}
@@ -220,6 +226,7 @@ export function JobCard({ job, onOpenDetail, onUpdateStatus, onUpdateJob, onDele
               <Button
                 size="sm"
                 variant="ghost"
+                disabled={isDiscarding}
                 onClick={handleToggleDiscard}
                 className={`h-7 w-7 p-0 rounded-md shrink-0 transition-colors flex items-center justify-center ${
                   isDiscarded

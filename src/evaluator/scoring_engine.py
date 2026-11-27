@@ -4,13 +4,13 @@ import html
 import json
 import logging
 import re
-from typing import Any, Dict, List, Literal, Optional, Tuple
+from typing import Any, Callable, Dict, List, Literal, Optional, Tuple
 from pydantic import BaseModel, Field, ValidationError
 import yaml
 
 from ..database import Database
 from ..tailoring.verifier import ProfileVerifier
-from .ollama_client import OllamaClient
+from .ollama_client import EvaluationCancelledException, OllamaClient
 
 logger = logging.getLogger("lazyJobFinder.evaluator.scoring")
 
@@ -211,7 +211,11 @@ class ScoringEngine:
 
         return True, "Apta para evaluación completa.", analysis_meta
 
-    def evaluate(self, job: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def evaluate(
+        self,
+        job: Dict[str, Any],
+        cancel_check: Optional[Callable[[], bool]] = None,
+    ) -> Optional[Dict[str, Any]]:
         """
         Evalúa la oferta utilizando Ollama con el CV activo.
         Soporta cualquier perfil profesional o tipo de CV.
@@ -226,6 +230,16 @@ class ScoringEngine:
         # Estados terminales fijados por el usuario que no deben alterarse automáticamente
         _PROTECTED_STATUSES = ("rejected", "interview", "discarded")
         current_status = job.get("status", "")
+
+        # Si el usuario ya la descartó o canceló, no evaluar
+        if cancel_check and cancel_check():
+            logger.info("Oferta ID %d cancelada antes de iniciar evaluación.", job["id"])
+            return None
+
+        current_db_status = self.db.get_job_status(job["id"])
+        if current_db_status in _PROTECTED_STATUSES:
+            logger.info("Oferta ID %d ya en estado protegido '%s'; omitiendo evaluación.", job["id"], current_db_status)
+            return None
 
         if not cv_meta.get("has_cv") or not cv_text.strip() or verifier is None:
             logger.info("Oferta ID %d sin evaluar: no hay CV activo configurado", job["id"])
@@ -317,9 +331,12 @@ class ScoringEngine:
                     format_json=True,
                     temperature=0.1,
                     num_predict=400,
+                    cancel_check=cancel_check,
                 )
                 validated = JobEvaluationSchema.model_validate_json(raw_response)
             except (ValidationError, Exception) as json_err:
+                if isinstance(json_err, EvaluationCancelledException) or (cancel_check and cancel_check()):
+                    raise EvaluationCancelledException("Inferencia abortada por cancelación de usuario.")
                 logger.debug("Inferencia JSON requirió fallback con esquema formal GBNF: %s", json_err)
                 schema_json = JobEvaluationSchema.model_json_schema()
                 raw_response = self.ollama.generate(
@@ -328,6 +345,7 @@ class ScoringEngine:
                     format_schema=schema_json,
                     temperature=0.1,
                     num_predict=400,
+                    cancel_check=cancel_check,
                 )
                 validated = JobEvaluationSchema.model_validate_json(raw_response)
 
@@ -415,11 +433,18 @@ class ScoringEngine:
             }
             print(f"[IA / Ollama] -> Calificación del modelo: {score}/100 ({fit_level}) | Postularse: {should_apply}", flush=True)
             
+            if (cancel_check and cancel_check()) or self.db.get_job_status(job["id"]) in _PROTECTED_STATUSES:
+                logger.info("Oferta ID %d descartada/cancelada durante inferencia; no se actualiza estado.", job["id"])
+                return None
+
             self.db.save_evaluation(eval_result)
             new_status = "evaluated" if eval_result["should_apply"] else "discarded"
             self.db.update_job_status(job["id"], new_status)
             return eval_result
 
+        except EvaluationCancelledException:
+            logger.info("Evaluación de oferta ID %d abortada por descarte de usuario.", job["id"])
+            return None
         except Exception as e:
             logger.warning(
                 "Fallo en inferencia de Ollama para oferta ID %d (%s): %s. Se mantiene en espera de evaluación.",
@@ -429,7 +454,8 @@ class ScoringEngine:
             )
             # Mantener en discovered para ser evaluada por Ollama cuando esté operativo,
             # pero NO revertir estados terminales fijados por el usuario
-            if job.get("status") not in ("rejected", "interview", "discarded"):
+            current_db_status = self.db.get_job_status(job["id"])
+            if current_db_status not in _PROTECTED_STATUSES and not (cancel_check and cancel_check()):
                 self.db.update_job_status(job["id"], "discovered")
             return None
 

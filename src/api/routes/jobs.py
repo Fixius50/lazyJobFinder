@@ -162,6 +162,15 @@ def update_job_status(job_id: int, req: UpdateJobStatusRequest) -> Dict[str, Any
 
     db.update_job_status(job_id, new_status)
     db.log_event("INFO", "jobs", f"Estado de oferta ID {job_id} actualizado a '{new_status}'")
+
+    if new_status in ("discarded", "rejected"):
+        try:
+            from ..deps import get_runner
+            runner = get_runner()
+            runner.cancel_job_evaluation(job_id)
+        except Exception as e:
+            logger.debug("No se pudo notificar cancelación al runner para ID %d: %s", job_id, e)
+
     return {"success": True, "job_id": job_id, "status": new_status}
 
 
@@ -188,6 +197,13 @@ def delete_job(job_id: int) -> Dict[str, Any]:
     deleted = db.delete_job(job_id)
     if not deleted:
         raise HTTPException(status_code=404, detail=f"Oferta con ID {job_id} no encontrada.")
+
+    try:
+        from ..deps import get_runner
+        runner = get_runner()
+        runner.cancel_job_evaluation(job_id)
+    except Exception as e:
+        logger.debug("No se pudo notificar cancelación al runner para ID %d: %s", job_id, e)
 
     db.log_event("INFO", "jobs", f"Oferta ID {job_id} eliminada permanentemente de SQLite y evaluaciones.")
     return {

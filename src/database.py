@@ -1032,6 +1032,12 @@ class Database:
                 (status, job_id),
             )
 
+    def get_job_status(self, job_id: int) -> Optional[str]:
+        """Consulta directamente el estado actual de una vacante en SQLite."""
+        with self._get_connection() as conn:
+            row = conn.execute("SELECT status FROM jobs WHERE id = ?", (job_id,)).fetchone()
+            return row["status"] if row else None
+
     def update_job_metadata(
         self,
         job_id: int,

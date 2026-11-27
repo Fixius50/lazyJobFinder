@@ -324,6 +324,7 @@ export function ApplicationsView() {
   const [searching, setSearching] = useState<boolean>(false);
   const [toggleLoading, setToggleLoading] = useState<boolean>(false);
   const userPausedRef = useRef<boolean>(false);
+  const recentlyDiscardedRef = useRef<Map<number, number>>(new Map());
 
   const loadFacets = async () => {
     try {
@@ -395,7 +396,25 @@ export function ApplicationsView() {
         sort_by: "created_at",
         sort_order: "desc",
       });
-      setRawJobs(res.items || []);
+
+      const now = Date.now();
+      // Limpiar registros descartados con más de 30 segundos
+      recentlyDiscardedRef.current.forEach((ts, id) => {
+        if (now - ts > 30000) {
+          recentlyDiscardedRef.current.delete(id);
+        }
+      });
+
+      // Escudo anti-polling: conservar el estado "discarded" localmente para evitar
+      // que una respuesta desfasada o en vuelo vuelva a mostrar una oferta ya descartada
+      const mergedItems = (res.items || []).map((item) => {
+        if (recentlyDiscardedRef.current.has(item.id)) {
+          return { ...item, status: "discarded" };
+        }
+        return item;
+      });
+
+      setRawJobs(mergedItems);
       setApiError(null);
       if (res.has_cv !== undefined) {
         setHasActiveCv(res.has_cv);
@@ -509,17 +528,26 @@ export function ApplicationsView() {
   };
 
   const handleUpdateStatus = async (jobId: number, newStatus: string) => {
-    try {
-      const prevJob = rawJobs.find((j) => j.id === jobId);
-      const prevStatus = prevJob?.status || "evaluated";
+    const prevJob = rawJobs.find((j) => j.id === jobId);
+    const prevStatus = prevJob?.status || "evaluated";
 
+    // 1. Mutación optimista inmediata: ocultar de activas o pasar a descartadas al instante
+    if (newStatus === "discarded") {
+      recentlyDiscardedRef.current.set(jobId, Date.now());
+    } else {
+      recentlyDiscardedRef.current.delete(jobId);
+    }
+
+    setRawJobs((prev) =>
+      prev.map((j) => (j.id === jobId ? { ...j, status: newStatus } : j))
+    );
+    if (selectedJobDetail && selectedJobDetail.id === jobId) {
+      setSelectedJobDetail({ ...selectedJobDetail, status: newStatus });
+    }
+
+    // 2. Persistir en la API y notificar al backend/runner
+    try {
       await api.updateJobStatus(jobId, newStatus);
-      if (selectedJobDetail && selectedJobDetail.id === jobId) {
-        setSelectedJobDetail({ ...selectedJobDetail, status: newStatus });
-      }
-      setRawJobs((prev) =>
-        prev.map((j) => (j.id === jobId ? { ...j, status: newStatus } : j))
-      );
 
       if (newStatus === "discarded") {
         toast.info("Oferta descartada", {
@@ -533,6 +561,18 @@ export function ApplicationsView() {
         toast.success("Oferta restaurada a activas");
       }
     } catch (err: any) {
+      // Revertir mutación optimista si falla la llamada
+      if (newStatus === "discarded") {
+        recentlyDiscardedRef.current.delete(jobId);
+      } else {
+        recentlyDiscardedRef.current.set(jobId, Date.now());
+      }
+      setRawJobs((prev) =>
+        prev.map((j) => (j.id === jobId ? { ...j, status: prevStatus } : j))
+      );
+      if (selectedJobDetail && selectedJobDetail.id === jobId) {
+        setSelectedJobDetail({ ...selectedJobDetail, status: prevStatus });
+      }
       toast.error(`Error al actualizar estado: ${err.message || err}`);
     }
   };

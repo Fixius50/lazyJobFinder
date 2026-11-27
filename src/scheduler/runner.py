@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import threading
 import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
@@ -124,6 +125,18 @@ class JobPipelineRunner:
         self._eval_running: bool = False
         self._discovery_task: Optional[asyncio.Task] = None
         self._active_tasks: List[asyncio.Task] = []
+        self._active_eval_jobs: Dict[int, threading.Event] = {}
+        self._discarded_job_ids: set[int] = set()
+
+    def cancel_job_evaluation(self, job_id: int) -> bool:
+        """Cancela la evaluación en curso de una oferta específica y la marca como descartada."""
+        self._discarded_job_ids.add(job_id)
+        evt = self._active_eval_jobs.get(job_id)
+        if evt:
+            evt.set()
+            logger.info("Oferta ID %d marcada para interrupción inmediata de evaluación con IA.", job_id)
+            return True
+        return False
 
     def _load_yaml(self, path: str) -> Dict[str, Any]:
         try:
@@ -365,33 +378,66 @@ class JobPipelineRunner:
                             if job is None or self._stop_requested:
                                 eval_queue.task_done()
                                 break
+
+                            j_id = job.get("id")
+                            if not j_id:
+                                eval_queue.task_done()
+                                continue
+
+                            # 1. Comprobar si ya fue descartada previamente
+                            if j_id in self._discarded_job_ids or self.db.get_job_status(j_id) in ("discarded", "rejected"):
+                                logger.info("Oferta ID %d omitida de evaluación (ya descartada por el usuario).", j_id)
+                                eval_queue.task_done()
+                                continue
+
+                            cancel_event = threading.Event()
+                            self._active_eval_jobs[j_id] = cancel_event
+
                             try:
-                                self.db.update_job_status(job["id"], "evaluating")
-                                eval_res = await asyncio.to_thread(self.scoring_engine.evaluate, job)
+                                self.db.update_job_status(j_id, "evaluating")
+                                eval_res = await asyncio.to_thread(
+                                    self.scoring_engine.evaluate,
+                                    job,
+                                    cancel_check=lambda: cancel_event.is_set() or j_id in self._discarded_job_ids
+                                )
+
                                 if self._stop_requested:
-                                    self.db.update_job_status(job["id"], "discovered")
+                                    if self.db.get_job_status(j_id) not in ("discarded", "rejected"):
+                                        self.db.update_job_status(j_id, "discovered")
                                     break
+
+                                # Si se canceló durante la evaluación, pasar a la siguiente
+                                if cancel_event.is_set() or j_id in self._discarded_job_ids or self.db.get_job_status(j_id) in ("discarded", "rejected"):
+                                    logger.info("Evaluación de oferta ID %d abortada por descarte. Continuando con las demás ofertas.", j_id)
+                                    continue
+
                                 if not eval_res or eval_res.get("score") is None:
-                                    self.db.update_job_status(job["id"], "discovered")
+                                    if self.db.get_job_status(j_id) not in ("discarded", "rejected"):
+                                        self.db.update_job_status(j_id, "discovered")
                                 else:
                                     score = eval_res.get("score", 0)
                                     if score >= min_score and eval_res.get("should_apply"):
-                                        self.db.update_job_status(job["id"], "evaluated")
-                                        logger.info("Oferta ID %d ('%s') puntuada: %d/100 -> APTO.", job["id"], job.get("title", "")[:30], score)
-                                        qualified_candidates.append((job, eval_res))
-                                        if can_generate_docs and job["id"] not in queued_doc_job_ids:
-                                            queued_doc_job_ids.add(job["id"])
-                                            docs_queue.put_nowait((job, eval_res))
+                                        if self.db.get_job_status(j_id) not in ("discarded", "rejected"):
+                                            self.db.update_job_status(j_id, "evaluated")
+                                            logger.info("Oferta ID %d ('%s') puntuada: %d/100 -> APTO.", j_id, job.get("title", "")[:30], score)
+                                            qualified_candidates.append((job, eval_res))
+                                            if can_generate_docs and j_id not in queued_doc_job_ids:
+                                                queued_doc_job_ids.add(j_id)
+                                                docs_queue.put_nowait((job, eval_res))
                                     else:
-                                        self.db.update_job_status(job["id"], "discarded")
-                                        logger.info("Oferta ID %d ('%s') puntuada: %d/100 -> Descartada (< %d).", job["id"], job.get("title", "")[:30], score, min_score)
+                                        if self.db.get_job_status(j_id) not in ("discarded", "rejected"):
+                                            self.db.update_job_status(j_id, "discarded")
+                                            logger.info("Oferta ID %d ('%s') puntuada: %d/100 -> Descartada (< %d).", j_id, job.get("title", "")[:30], score, min_score)
                             except asyncio.CancelledError:
-                                self.db.update_job_status(job.get("id"), "discovered")
+                                if self.db.get_job_status(j_id) not in ("discarded", "rejected"):
+                                    self.db.update_job_status(j_id, "discovered")
                                 break
                             except Exception as eval_err:
-                                logger.error("Error evaluando oferta ID %d: %s", job.get("id"), eval_err)
-                                self.db.update_job_status(job.get("id"), "discovered")
+                                logger.error("Error evaluando oferta ID %d: %s", j_id, eval_err)
+                                if self.db.get_job_status(j_id) not in ("discarded", "rejected"):
+                                    self.db.update_job_status(j_id, "discovered")
                             finally:
+                                self._active_eval_jobs.pop(j_id, None)
                                 eval_queue.task_done()
                     finally:
                         if eval_queue.empty():
@@ -588,42 +634,69 @@ class JobPipelineRunner:
                     break
 
                 j_id = job.get("id")
+                if not j_id:
+                    eval_queue.task_done()
+                    continue
+
+                # Si ya fue descartada, omitir
+                if j_id in self._discarded_job_ids or self.db.get_job_status(j_id) in ("discarded", "rejected"):
+                    logger.info("Oferta pendiente ID %d omitida (ya descartada por usuario).", j_id)
+                    eval_queue.task_done()
+                    continue
+
+                cancel_event = threading.Event()
+                self._active_eval_jobs[j_id] = cancel_event
+
                 try:
                     self.db.update_job_status(j_id, "evaluating")
-                    eval_res = await asyncio.to_thread(self.scoring_engine.evaluate, job)
+                    eval_res = await asyncio.to_thread(
+                        self.scoring_engine.evaluate,
+                        job,
+                        cancel_check=lambda: cancel_event.is_set() or j_id in self._discarded_job_ids
+                    )
+
+                    if cancel_event.is_set() or j_id in self._discarded_job_ids or self.db.get_job_status(j_id) in ("discarded", "rejected"):
+                        logger.info("Evaluación de oferta pendiente ID %d abortada por descarte. Evaluando siguientes ofertas.", j_id)
+                        continue
+
                     if not eval_res or eval_res.get("score") is None:
-                        self.db.update_job_status(j_id, "discovered")
+                        if self.db.get_job_status(j_id) not in ("discarded", "rejected"):
+                            self.db.update_job_status(j_id, "discovered")
                     else:
                         score = eval_res.get("score", 0)
                         evaluated_count += 1
                         if score >= min_score and eval_res.get("should_apply"):
-                            self.db.update_job_status(j_id, "evaluated")
-                            apto_count += 1
-                            telegram_status = 0
-                            if telegram_enabled:
-                                try:
-                                    await asyncio.to_thread(self.telegram_bot.send_job_alert, job, eval_res)
-                                    telegram_status = 1
-                                except Exception as tg_err:
-                                    logger.error("Error notificación Telegram para ID %d: %s", j_id, tg_err)
-                                    telegram_status = -1
-                            ui_saved_val = 1 if save_ui_pref else 0
-                            self.db.update_job_channel_status(
-                                job_id=j_id,
-                                telegram_notified=telegram_status,
-                                ui_saved=ui_saved_val,
-                            )
+                            if self.db.get_job_status(j_id) not in ("discarded", "rejected"):
+                                self.db.update_job_status(j_id, "evaluated")
+                                apto_count += 1
+                                telegram_status = 0
+                                if telegram_enabled:
+                                    try:
+                                        await asyncio.to_thread(self.telegram_bot.send_job_alert, job, eval_res)
+                                        telegram_status = 1
+                                    except Exception as tg_err:
+                                        logger.error("Error notificación Telegram para ID %d: %s", j_id, tg_err)
+                                        telegram_status = -1
+                                ui_saved_val = 1 if save_ui_pref else 0
+                                self.db.update_job_channel_status(
+                                    job_id=j_id,
+                                    telegram_notified=telegram_status,
+                                    ui_saved=ui_saved_val,
+                                )
                         else:
-                            self.db.update_job_status(j_id, "discarded")
-                            self.db.update_job_channel_status(
-                                job_id=j_id,
-                                telegram_notified=0,
-                                ui_saved=1 if save_ui_pref else 0,
-                            )
+                            if self.db.get_job_status(j_id) not in ("discarded", "rejected"):
+                                self.db.update_job_status(j_id, "discarded")
+                                self.db.update_job_channel_status(
+                                    job_id=j_id,
+                                    telegram_notified=0,
+                                    ui_saved=1 if save_ui_pref else 0,
+                                )
                 except Exception as eval_err:
                     logger.error("Error evaluando oferta ID %s: %s", j_id, eval_err)
-                    self.db.update_job_status(j_id, "discovered")
+                    if self.db.get_job_status(j_id) not in ("discarded", "rejected"):
+                        self.db.update_job_status(j_id, "discovered")
                 finally:
+                    self._active_eval_jobs.pop(j_id, None)
                     eval_queue.task_done()
 
         try:

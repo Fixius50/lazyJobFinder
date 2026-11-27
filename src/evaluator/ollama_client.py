@@ -5,7 +5,7 @@ import logging
 import os
 import threading
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 try:
     import requests
     from requests.adapters import HTTPAdapter
@@ -19,6 +19,11 @@ except ImportError:
     ollama = None
 
 logger = logging.getLogger("lazyJobFinder.evaluator.ollama")
+
+
+class EvaluationCancelledException(Exception):
+    """Excepción lanzada cuando una evaluación es cancelada o interrumpida por el usuario."""
+    pass
 
 
 class OllamaClient:
@@ -211,6 +216,7 @@ class OllamaClient:
         timeout: int = 300,
         num_predict: Optional[int] = None,
         num_ctx: Optional[int] = None,
+        cancel_check: Optional[Callable[[], bool]] = None,
     ) -> str:
         """
         Envía un prompt a Ollama y retorna la respuesta generada de forma sincronizada y thread-safe.
@@ -284,8 +290,12 @@ class OllamaClient:
         lock_ctx = OllamaClient._generation_lock if self.max_concurrency <= 1 else self._semaphore
 
         for attempt in range(1, max_retries + 1):
+            if cancel_check and cancel_check():
+                raise EvaluationCancelledException("Inferencia cancelada antes de iniciar.")
             try:
                 with lock_ctx:
+                    if cancel_check and cancel_check():
+                        raise EvaluationCancelledException("Inferencia cancelada mientras esperaba turno.")
                     logger.debug(
                         "Llamando a LLM (%s, intento %d/%d, slot concurrente) con modelo '%s' (timeout=%ss, num_predict=%d, threads=%d)...",
                         self._backend_type,
@@ -298,7 +308,7 @@ class OllamaClient:
                     )
                     start_time = time.time()
 
-                    if not is_openai and self._ollama_sdk:
+                    if not is_openai and self._ollama_sdk and not cancel_check:
                         try:
                             options = {
                                 "temperature": temperature,
@@ -325,18 +335,50 @@ class OllamaClient:
                             logger.debug("Ollama SDK generate falló (%s), intentando fallback HTTP...", sdk_gen_err)
 
                     http_client = self._session or requests
-                    resp = http_client.post(endpoint, json=payload, timeout=timeout)
-                    elapsed = time.time() - start_time
+                    # Si hay callback de cancelación, usamos streaming para permitir desconexión inmediata y abortar en GPU
+                    if cancel_check:
+                        stream_payload = dict(payload)
+                        stream_payload["stream"] = True
+                        resp = http_client.post(endpoint, json=stream_payload, stream=True, timeout=timeout)
+                        try:
+                            if resp.status_code == 200:
+                                chunks = []
+                                for line in resp.iter_lines():
+                                    if cancel_check():
+                                        resp.close()
+                                        raise EvaluationCancelledException("Inferencia abortada por descarte de usuario.")
+                                    if line:
+                                        try:
+                                            chunk_data = json.loads(line)
+                                            if is_openai:
+                                                choices = chunk_data.get("choices", [])
+                                                c_text = choices[0].get("delta", {}).get("content", "") if choices else ""
+                                                if c_text:
+                                                    chunks.append(c_text)
+                                            else:
+                                                c_text = chunk_data.get("response", "")
+                                                if c_text:
+                                                    chunks.append(c_text)
+                                                if chunk_data.get("done", False):
+                                                    break
+                                        except json.JSONDecodeError:
+                                            pass
+                                return "".join(chunks).strip()
+                        finally:
+                            resp.close()
+                    else:
+                        resp = http_client.post(endpoint, json=payload, timeout=timeout)
+                        elapsed = time.time() - start_time
 
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        if is_openai:
-                            choices = data.get("choices", [])
-                            response_text = choices[0].get("message", {}).get("content", "").strip() if choices else ""
-                        else:
-                            response_text = data.get("response", "").strip()
-                        logger.debug("Motor LLM (%s) respondió en %.2f segundos (%d chars).", self._backend_type, elapsed, len(response_text))
-                        return response_text
+                        if resp.status_code == 200:
+                            data = resp.json()
+                            if is_openai:
+                                choices = data.get("choices", [])
+                                response_text = choices[0].get("message", {}).get("content", "").strip() if choices else ""
+                            else:
+                                response_text = data.get("response", "").strip()
+                            logger.debug("Motor LLM (%s) respondió en %.2f segundos (%d chars).", self._backend_type, elapsed, len(response_text))
+                            return response_text
 
                     # Si el modelo no está instalado, abortar inmediatamente sin reintentos inútiles
                     if resp.status_code == 404:
